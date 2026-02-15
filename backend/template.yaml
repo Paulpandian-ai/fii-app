@@ -55,7 +55,6 @@ Globals:
         CLAUDE_API_KEY_ARN: !Ref ClaudeApiKeyArn
         FRED_API_KEY_ARN: !Ref FredApiKeyArn
     Layers:
-      - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16
       - !Ref SharedLayer
 
 Resources:
@@ -243,8 +242,8 @@ Resources:
     Properties:
       LayerName: !Sub fii-shared-${Stage}
       Description: >-
-        Shared utilities (anthropic, fredapi, yfinance, edgartools, pydantic)
-        and Python modules. numpy/pandas provided by AWSSDKPandas layer.
+        Shared dependencies (anthropic, fredapi, yfinance, edgartools, pydantic,
+        numpy, pandas) and Python modules. pyarrow stripped to stay under 262MB.
       ContentUri: shared_layer/
       CompatibleRuntimes:
         - python3.12

@@ -6,7 +6,7 @@ Usage: python build.py <ARTIFACTS_DIR>
 Steps:
   1. pip install Linux-compatible (manylinux) wheels into ARTIFACTS_DIR/python/
   2. Fallback pass for pure-Python packages that lack pre-built wheels
-  3. Delete packages already provided by the AWSSDKPandas layer or Lambda runtime
+  3. Delete bloated transitive deps (pyarrow) and Lambda runtime built-ins
   4. Copy shared Python modules into the layer
 """
 
@@ -20,11 +20,8 @@ from pathlib import Path
 PLATFORM = "manylinux2014_x86_64"
 PYTHON_VERSION = "3.12"
 
-# Packages provided by the AWSSDKPandas Lambda layer
-AWSSDK_PANDAS_PACKAGES = [
-    "numpy",
-    "numpy.libs",
-    "pandas",
+# Heavy transitive dependencies to strip (pyarrow is 142MB, pulled by edgartools)
+BLOATED_TRANSITIVE_PACKAGES = [
     "pyarrow",
 ]
 
@@ -38,7 +35,7 @@ LAMBDA_RUNTIME_PACKAGES = [
     "dateutil",
 ]
 
-EXCLUDE_PACKAGES = AWSSDK_PANDAS_PACKAGES + LAMBDA_RUNTIME_PACKAGES
+EXCLUDE_PACKAGES = BLOATED_TRANSITIVE_PACKAGES + LAMBDA_RUNTIME_PACKAGES
 
 
 def pip_install_linux_wheels(requirements: str, target: str) -> list[str]:
@@ -92,7 +89,7 @@ def pip_install_pure_python(packages: list[str], target: str) -> None:
 
 
 def remove_excluded_packages(python_dir: Path) -> None:
-    """Delete packages already provided by AWSSDKPandas layer or Lambda runtime."""
+    """Delete bloated transitive deps (pyarrow) and Lambda runtime built-ins."""
     for pkg in EXCLUDE_PACKAGES:
         pkg_path = python_dir / pkg
         if pkg_path.exists():
@@ -136,8 +133,8 @@ def main() -> None:
     if failed:
         pip_install_pure_python(failed, str(python_dir))
 
-    # 3. Delete duplicate packages
-    print("Removing duplicate packages...")
+    # 3. Strip bloated transitive deps and Lambda runtime built-ins
+    print("Removing excluded packages...")
     remove_excluded_packages(python_dir)
 
     # 4. Copy shared Python modules into the layer
