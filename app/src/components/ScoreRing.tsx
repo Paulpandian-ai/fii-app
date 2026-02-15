@@ -26,25 +26,25 @@ export const ScoreRing: React.FC<ScoreRingProps> = ({ score, size = 120 }) => {
       <Svg width={size} height={size}>
         {/* Background circle */}
         <Circle
-          cx={center}
-          cy={center}
-          r={radius}
+          cx={String(center)}
+          cy={String(center)}
+          r={String(radius)}
           stroke="rgba(255,255,255,0.1)"
-          strokeWidth={strokeWidth}
+          strokeWidth={String(strokeWidth)}
           fill="none"
         />
         {/* Progress circle */}
         <Circle
-          cx={center}
-          cy={center}
-          r={radius}
+          cx={String(center)}
+          cy={String(center)}
+          r={String(radius)}
           stroke={color}
-          strokeWidth={strokeWidth}
+          strokeWidth={String(strokeWidth)}
           fill="none"
           strokeDasharray={`${progress} ${circumference - progress}`}
-          strokeDashoffset={circumference / 4}
+          strokeDashoffset={String(circumference / 4)}
           strokeLinecap="round"
-          rotation="-90"
+          rotation={-90}
           origin={`${center}, ${center}`}
         />
       </Svg>
