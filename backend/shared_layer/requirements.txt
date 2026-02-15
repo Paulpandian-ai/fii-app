@@ -2,7 +2,6 @@ anthropic>=0.40.0
 fredapi>=0.5.2
 yfinance>=0.2.36
 edgartools>=3.0.0
-boto3>=1.34.0
 pydantic>=2.5.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0

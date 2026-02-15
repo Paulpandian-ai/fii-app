@@ -249,7 +249,7 @@ Resources:
       CompatibleRuntimes:
         - python3.12
     Metadata:
-      BuildMethod: python3.12
+      BuildMethod: makefile
       BuildArchitecture: x86_64
 
   # ─── Lambda Functions ───
