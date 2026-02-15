@@ -179,7 +179,7 @@ export const FeedScreen: React.FC = () => {
         data={displayItems}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
-        pagingEnabled
+        pagingEnabled={true}
         snapToInterval={SCREEN_HEIGHT}
         snapToAlignment="start"
         decelerationRate="fast"
@@ -190,7 +190,7 @@ export const FeedScreen: React.FC = () => {
         windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={2}
-        removeClippedSubviews
+        removeClippedSubviews={true}
       />
     </View>
   );
