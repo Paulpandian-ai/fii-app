@@ -16,8 +16,9 @@ import json
 import sys
 import traceback
 
-# Add Lambda layer to Python path
-sys.path.insert(0, "/opt")
+# Lambda adds /opt/python to sys.path for layers automatically.
+# This explicit insert ensures it works in all execution contexts.
+sys.path.insert(0, "/opt/python")
 
 import db
 import s3

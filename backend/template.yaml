@@ -241,12 +241,13 @@ Resources:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: !Sub fii-shared-${Stage}
-      Description: Shared utilities for FII Lambda functions
-      ContentUri: shared/
+      Description: Shared utilities and dependencies for FII Lambda functions
+      ContentUri: shared_layer/
       CompatibleRuntimes:
         - python3.12
     Metadata:
       BuildMethod: python3.12
+      BuildArchitecture: x86_64
 
   # ─── Lambda Functions ───
 
