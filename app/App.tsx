@@ -5,12 +5,29 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { StrategyScreen } from './src/screens/StrategyScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { SignalDetailScreen } from './src/screens/SignalDetailScreen';
 import type { RootTabParamList, RootStackParamList } from './src/types';
+
+const WrappedFeed = () => (
+  <ErrorBoundary screenName="FeedScreen"><FeedScreen /></ErrorBoundary>
+);
+const WrappedPortfolio = () => (
+  <ErrorBoundary screenName="PortfolioScreen"><PortfolioScreen /></ErrorBoundary>
+);
+const WrappedStrategy = () => (
+  <ErrorBoundary screenName="StrategyScreen"><StrategyScreen /></ErrorBoundary>
+);
+const WrappedCoach = () => (
+  <ErrorBoundary screenName="CoachScreen"><CoachScreen /></ErrorBoundary>
+);
+const WrappedSignalDetail = (props: any) => (
+  <ErrorBoundary screenName="SignalDetailScreen"><SignalDetailScreen {...props} /></ErrorBoundary>
+);
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -48,10 +65,10 @@ function MainTabs() {
         },
       })}
     >
-      <Tab.Screen name="Feed" component={FeedScreen} />
-      <Tab.Screen name="Portfolio" component={PortfolioScreen} />
-      <Tab.Screen name="Strategy" component={StrategyScreen} />
-      <Tab.Screen name="Coach" component={CoachScreen} />
+      <Tab.Screen name="Feed" component={WrappedFeed} />
+      <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
+      <Tab.Screen name="Strategy" component={WrappedStrategy} />
+      <Tab.Screen name="Coach" component={WrappedCoach} />
     </Tab.Navigator>
   );
 }
@@ -64,7 +81,7 @@ export default function App() {
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen
           name="SignalDetail"
-          component={SignalDetailScreen}
+          component={WrappedSignalDetail}
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
