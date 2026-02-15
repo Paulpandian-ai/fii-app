@@ -33,6 +33,14 @@ Parameters:
     Description: Apple Sign-In Private Key
     NoEcho: true
     Default: ''
+  ExistingTableName:
+    Type: String
+    Default: 'fii-table'
+    Description: Name of existing DynamoDB table (leave empty to create new)
+  ExistingBucketName:
+    Type: String
+    Default: 'fii-data-dev'
+    Description: Name of existing S3 bucket (leave empty to create new)
 
 Globals:
   Function:
@@ -42,8 +50,8 @@ Globals:
     Environment:
       Variables:
         STAGE: !Ref Stage
-        TABLE_NAME: !Ref FiiTable
-        BUCKET_NAME: !Ref FiiDataBucket
+        TABLE_NAME: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        BUCKET_NAME: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
         CLAUDE_API_KEY_ARN: !Ref ClaudeApiKeyArn
         FRED_API_KEY_ARN: !Ref FredApiKeyArn
     Layers:
@@ -180,6 +188,7 @@ Resources:
 
   FiiTable:
     Type: AWS::DynamoDB::Table
+    Condition: CreateTable
     Properties:
       TableName: !Sub fii-table-${Stage}
       BillingMode: PAY_PER_REQUEST
@@ -211,6 +220,7 @@ Resources:
 
   FiiDataBucket:
     Type: AWS::S3::Bucket
+    Condition: CreateBucket
     Properties:
       BucketName: !Sub fii-data-${Stage}
       VersioningConfiguration:
@@ -256,9 +266,9 @@ Resources:
             Method: ANY
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref FiiTable
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
         - S3CrudPolicy:
-            BucketName: !Ref FiiDataBucket
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref ClaudeApiKeyArn
 
@@ -280,9 +290,9 @@ Resources:
             Enabled: true
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref FiiTable
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
         - S3CrudPolicy:
-            BucketName: !Ref FiiDataBucket
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref ClaudeApiKeyArn
         - AWSSecretsManagerGetSecretValuePolicy:
@@ -304,9 +314,9 @@ Resources:
             Enabled: true
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref FiiTable
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
         - S3CrudPolicy:
-            BucketName: !Ref FiiDataBucket
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
 
   StrategyEngineFunction:
     Type: AWS::Serverless::Function
@@ -326,12 +336,14 @@ Resources:
             Method: POST
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref FiiTable
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
         - S3CrudPolicy:
-            BucketName: !Ref FiiDataBucket
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
 
 Conditions:
   HasAppleConfig: !Not [!Equals [!Ref AppleTeamId, '']]
+  CreateTable: !Equals [!Ref ExistingTableName, '']
+  CreateBucket: !Equals [!Ref ExistingBucketName, '']
 
 Outputs:
   ApiUrl:
@@ -345,7 +357,7 @@ Outputs:
     Value: !Ref CognitoUserPoolClient
   TableName:
     Description: DynamoDB Table Name
-    Value: !Ref FiiTable
+    Value: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
   BucketName:
     Description: S3 Data Bucket Name
-    Value: !Ref FiiDataBucket
+    Value: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]

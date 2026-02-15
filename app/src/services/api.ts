@@ -35,6 +35,23 @@ export const getSignalDetail = async (ticker: string) => {
   return data;
 };
 
+export const generateSignal = async (ticker: string) => {
+  const { data } = await api.post(`/signals/generate/${ticker}`);
+  return data;
+};
+
+export const batchSignals = async (tickers: string[]) => {
+  const { data } = await api.get('/signals/batch', {
+    params: { tickers: tickers.join(',') },
+  });
+  return data;
+};
+
+export const refreshAllSignals = async () => {
+  const { data } = await api.post('/signals/refresh-all');
+  return data;
+};
+
 // ─── Portfolio ───
 
 export const getPortfolio = async () => {
