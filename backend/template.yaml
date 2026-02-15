@@ -261,6 +261,48 @@ Resources:
       CodeUri: functions/api_handler/
       Description: Main API router for FII
       Events:
+        # Public read-only endpoints (no auth required)
+        GetFeed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /feed
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetSignal:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /signals/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetSignalsBatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /signals/batch
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetPrice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /price/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetSearch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /search
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        # Authenticated endpoints (catch-all for POST/PUT/DELETE)
         CatchAll:
           Type: HttpApi
           Properties:

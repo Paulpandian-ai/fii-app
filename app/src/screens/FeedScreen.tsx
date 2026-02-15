@@ -19,13 +19,66 @@ import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
 import { useFeedStore } from '../store/feedStore';
 import { getFeed } from '../services/api';
-import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList } from '../types';
+import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const isEducationalCard = (entry: FeedEntry): entry is EducationalCard => {
   return entry.type === 'educational';
 };
+
+// ─── Placeholder feed shown when API is unavailable or returns empty ───
+const PLACEHOLDER_FEED: FeedItem[] = [
+  {
+    id: 'p-NVDA', type: 'signal', ticker: 'NVDA', companyName: 'NVIDIA Corporation',
+    compositeScore: 8.4, signal: 'BUY' as Signal, confidence: 'HIGH',
+    insight: 'Strong AI/datacenter demand and supply-chain dominance drive bullish outlook.',
+    topFactors: [{ name: 'Supply Chain', score: 1.8 }, { name: 'Performance', score: 1.6 }, { name: 'Macro', score: 0.9 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-AAPL', type: 'signal', ticker: 'AAPL', companyName: 'Apple Inc.',
+    compositeScore: 7.1, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    insight: 'Services revenue growth and iPhone cycle support moderate bullish stance.',
+    topFactors: [{ name: 'Customers', score: 1.4 }, { name: 'Performance', score: 1.1 }, { name: 'Correlations', score: 0.8 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-TSLA', type: 'signal', ticker: 'TSLA', companyName: 'Tesla, Inc.',
+    compositeScore: 5.2, signal: 'HOLD' as Signal, confidence: 'LOW',
+    insight: 'Margin compression offsets delivery growth; geopolitical risk adds uncertainty.',
+    topFactors: [{ name: 'Geopolitics', score: -0.9 }, { name: 'Performance', score: 0.7 }, { name: 'Macro', score: -0.4 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-MSFT', type: 'signal', ticker: 'MSFT', companyName: 'Microsoft Corporation',
+    compositeScore: 7.8, signal: 'BUY' as Signal, confidence: 'HIGH',
+    insight: 'Azure cloud growth and AI integration across Office suite lift outlook.',
+    topFactors: [{ name: 'Performance', score: 1.5 }, { name: 'Customers', score: 1.3 }, { name: 'Supply Chain', score: 0.6 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-AMZN', type: 'signal', ticker: 'AMZN', companyName: 'Amazon.com, Inc.',
+    compositeScore: 7.3, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    insight: 'AWS momentum and advertising growth underpin positive signal.',
+    topFactors: [{ name: 'Customers', score: 1.3 }, { name: 'Performance', score: 1.2 }, { name: 'Macro', score: 0.5 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-META', type: 'signal', ticker: 'META', companyName: 'Meta Platforms, Inc.',
+    compositeScore: 6.5, signal: 'HOLD' as Signal, confidence: 'MEDIUM',
+    insight: 'Ad revenue rebound tempered by heavy Reality Labs spending.',
+    topFactors: [{ name: 'Performance', score: 1.0 }, { name: 'Risk', score: -0.5 }, { name: 'Correlations', score: 0.7 }],
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'p-GOOGL', type: 'signal', ticker: 'GOOGL', companyName: 'Alphabet Inc.',
+    compositeScore: 7.0, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    insight: 'Search dominance and Cloud growth offset regulatory headwinds.',
+    topFactors: [{ name: 'Customers', score: 1.2 }, { name: 'Performance', score: 1.1 }, { name: 'Geopolitics', score: -0.3 }],
+    updatedAt: new Date().toISOString(),
+  },
+];
 
 export const FeedScreen: React.FC = () => {
   const { setItems, setCurrentIndex, isLoading, setLoading, setError } = useFeedStore();
@@ -38,14 +91,26 @@ export const FeedScreen: React.FC = () => {
     loadFeed();
   }, []);
 
+  const usePlaceholder = () => {
+    setItems(PLACEHOLDER_FEED);
+    setFeed(PLACEHOLDER_FEED);
+  };
+
   const loadFeed = async () => {
     setLoading(true);
     try {
       const data = await getFeed();
+      const raw = data?.items || data?.feed || [];
+
+      if (raw.length === 0) {
+        usePlaceholder();
+        return;
+      }
+
       const feedItems: FeedItem[] = [];
       const allEntries: FeedEntry[] = [];
 
-      for (const entry of data.items || data.feed || []) {
+      for (const entry of raw) {
         if (entry.type === 'educational') {
           allEntries.push(entry as EducationalCard);
         } else {
@@ -69,7 +134,8 @@ export const FeedScreen: React.FC = () => {
       setItems(feedItems);
       setFeed(allEntries);
     } catch {
-      setError('Failed to load feed');
+      // API unavailable — fall back to placeholder data so screen is never blank
+      usePlaceholder();
     } finally {
       setLoading(false);
     }

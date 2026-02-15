@@ -11,11 +11,17 @@ const api = axios.create({
   },
 });
 
-// Attach auth token to every request
+// Attach auth token to requests when available (non-blocking — read-only
+// endpoints work without auth, so we must not reject if session is missing)
 api.interceptors.request.use(async (config) => {
-  const session = await getCurrentSession();
-  if (session) {
-    config.headers.Authorization = `Bearer ${session.idToken}`;
+  try {
+    const session = await getCurrentSession();
+    if (session?.idToken) {
+      config.headers.Authorization = `Bearer ${session.idToken}`;
+    }
+  } catch {
+    // No auth session — continue without Authorization header.
+    // Public endpoints (feed, signals, price, search) work without it.
   }
   return config;
 });
