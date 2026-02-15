@@ -102,7 +102,13 @@ export interface Holding {
   shares: number;
   avgCost: number;
   currentPrice?: number;
+  change?: number;
+  changePercent?: number;
+  totalValue?: number;
+  gainLoss?: number;
+  gainLossPercent?: number;
   weight?: number;          // portfolio weight 0–1
+  dateAdded?: string;
 }
 
 export interface Portfolio {
@@ -110,8 +116,32 @@ export interface Portfolio {
   name: string;
   holdings: Holding[];
   totalValue: number;
+  totalCost: number;
+  totalGainLoss: number;
+  totalGainLossPercent: number;
+  dailyChange: number;
+  dailyChangePercent: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PortfolioSummary {
+  totalValue: number;
+  totalGainLoss: number;
+  totalGainLossPercent: number;
+  dailyChange: number;
+  dailyChangePercent: number;
+  biggestWinner: { ticker: string; gainLossPercent: number } | null;
+  biggestRisk: { ticker: string; signal: Signal; score: number } | null;
+  sellCount: number;
+  holdingsCount: number;
+}
+
+export interface CSVPreviewRow {
+  ticker: string;
+  companyName: string;
+  shares: number;
+  avgCost: number;
 }
 
 // ─── Strategy Types ───

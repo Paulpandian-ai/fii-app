@@ -1,64 +1,153 @@
 import { create } from 'zustand';
-import type { Portfolio, Holding } from '../types';
+import type { Holding, PortfolioSummary } from '../types';
+import { getPortfolio, savePortfolio, getPortfolioSummary } from '../services/api';
 
 interface PortfolioStore {
-  portfolio: Portfolio | null;
+  holdings: Holding[];
+  totalValue: number;
+  totalCost: number;
+  totalGainLoss: number;
+  totalGainLossPercent: number;
+  dailyChange: number;
+  dailyChangePercent: number;
+  summary: PortfolioSummary | null;
   isLoading: boolean;
   error: string | null;
-  setPortfolio: (portfolio: Portfolio) => void;
-  addHolding: (holding: Holding) => void;
-  removeHolding: (holdingId: string) => void;
-  updateHolding: (holdingId: string, updates: Partial<Holding>) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
+
+  loadPortfolio: () => Promise<void>;
+  loadSummary: () => Promise<void>;
+  addHolding: (holding: Omit<Holding, 'id'>) => Promise<void>;
+  removeHolding: (holdingId: string) => Promise<void>;
+  updateHolding: (holdingId: string, updates: Partial<Holding>) => Promise<void>;
+  importHoldings: (newHoldings: Omit<Holding, 'id'>[]) => Promise<void>;
+  getPortfolioTickers: () => string[];
+  getSharesForTicker: (ticker: string) => number;
 }
 
-export const usePortfolioStore = create<PortfolioStore>((set) => ({
-  portfolio: null,
+export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
+  holdings: [],
+  totalValue: 0,
+  totalCost: 0,
+  totalGainLoss: 0,
+  totalGainLossPercent: 0,
+  dailyChange: 0,
+  dailyChangePercent: 0,
+  summary: null,
   isLoading: false,
   error: null,
 
-  setPortfolio: (portfolio) => set({ portfolio, error: null }),
+  loadPortfolio: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const data = await getPortfolio();
+      set({
+        holdings: data.holdings || [],
+        totalValue: data.totalValue || 0,
+        totalCost: data.totalCost || 0,
+        totalGainLoss: data.totalGainLoss || 0,
+        totalGainLossPercent: data.totalGainLossPercent || 0,
+        dailyChange: data.dailyChange || 0,
+        dailyChangePercent: data.dailyChangePercent || 0,
+        isLoading: false,
+      });
+    } catch {
+      set({ isLoading: false, error: 'Failed to load portfolio' });
+    }
+  },
 
-  addHolding: (holding) =>
-    set((state) => {
-      if (!state.portfolio) return state;
-      return {
-        portfolio: {
-          ...state.portfolio,
-          holdings: [...state.portfolio.holdings, holding],
-          updatedAt: new Date().toISOString(),
-        },
+  loadSummary: async () => {
+    try {
+      const data = await getPortfolioSummary();
+      set({ summary: data });
+    } catch {
+      // Silent fail — summary is optional
+    }
+  },
+
+  addHolding: async (holding) => {
+    const { holdings } = get();
+    const existing = holdings.find((h) => h.ticker === holding.ticker);
+    let updated: Holding[];
+
+    if (existing) {
+      const totalShares = existing.shares + holding.shares;
+      const weightedCost =
+        (existing.shares * existing.avgCost + holding.shares * holding.avgCost) / totalShares;
+      updated = holdings.map((h) =>
+        h.ticker === holding.ticker
+          ? { ...h, shares: totalShares, avgCost: Math.round(weightedCost * 100) / 100 }
+          : h
+      );
+    } else {
+      const newHolding: Holding = {
+        ...holding,
+        id: holding.ticker,
+        dateAdded: new Date().toISOString(),
       };
-    }),
+      updated = [...holdings, newHolding];
+    }
 
-  removeHolding: (holdingId) =>
-    set((state) => {
-      if (!state.portfolio) return state;
-      return {
-        portfolio: {
-          ...state.portfolio,
-          holdings: state.portfolio.holdings.filter((h) => h.id !== holdingId),
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }),
+    set({ holdings: updated });
+    try {
+      await savePortfolio(updated);
+      await get().loadPortfolio();
+    } catch {
+      set({ error: 'Failed to save portfolio' });
+    }
+  },
 
-  updateHolding: (holdingId, updates) =>
-    set((state) => {
-      if (!state.portfolio) return state;
-      return {
-        portfolio: {
-          ...state.portfolio,
-          holdings: state.portfolio.holdings.map((h) =>
-            h.id === holdingId ? { ...h, ...updates } : h
-          ),
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }),
+  removeHolding: async (holdingId) => {
+    const { holdings } = get();
+    const updated = holdings.filter((h) => h.id !== holdingId);
+    set({ holdings: updated });
+    try {
+      await savePortfolio(updated);
+      await get().loadPortfolio();
+    } catch {
+      set({ error: 'Failed to save portfolio' });
+    }
+  },
 
-  setLoading: (isLoading) => set({ isLoading }),
+  updateHolding: async (holdingId, updates) => {
+    const { holdings } = get();
+    const updated = holdings.map((h) => (h.id === holdingId ? { ...h, ...updates } : h));
+    set({ holdings: updated });
+    try {
+      await savePortfolio(updated);
+      await get().loadPortfolio();
+    } catch {
+      set({ error: 'Failed to save portfolio' });
+    }
+  },
 
-  setError: (error) => set({ error, isLoading: false }),
+  importHoldings: async (newHoldings) => {
+    const { holdings } = get();
+    const merged = [...holdings];
+    for (const nh of newHoldings) {
+      const idx = merged.findIndex((h) => h.ticker === nh.ticker);
+      if (idx >= 0) {
+        const existing = merged[idx];
+        const totalShares = existing.shares + nh.shares;
+        const weightedCost =
+          (existing.shares * existing.avgCost + nh.shares * nh.avgCost) / totalShares;
+        merged[idx] = { ...existing, shares: totalShares, avgCost: Math.round(weightedCost * 100) / 100 };
+      } else {
+        merged.push({ ...nh, id: nh.ticker, dateAdded: new Date().toISOString() });
+      }
+    }
+    set({ holdings: merged });
+    try {
+      await savePortfolio(merged);
+      await get().loadPortfolio();
+    } catch {
+      set({ error: 'Failed to save portfolio' });
+    }
+  },
+
+  getPortfolioTickers: () => get().holdings.map((h) => h.ticker),
+
+  getSharesForTicker: (ticker) => {
+    const holding = get().holdings.find((h) => h.ticker === ticker);
+    return holding?.shares || 0;
+  },
 }));

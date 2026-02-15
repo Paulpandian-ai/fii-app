@@ -18,6 +18,7 @@ import { FeedCard } from '../components/FeedCard';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
 import { useFeedStore } from '../store/feedStore';
+import { usePortfolioStore } from '../store/portfolioStore';
 import { getFeed } from '../services/api';
 import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
@@ -82,6 +83,7 @@ const PLACEHOLDER_FEED: FeedItem[] = [
 
 export const FeedScreen: React.FC = () => {
   const { setItems, setCurrentIndex, isLoading, setLoading, setError } = useFeedStore();
+  const portfolioTickers = usePortfolioStore((s) => s.getPortfolioTickers)();
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -94,6 +96,22 @@ export const FeedScreen: React.FC = () => {
   const usePlaceholder = () => {
     setItems(PLACEHOLDER_FEED);
     setFeed(PLACEHOLDER_FEED);
+  };
+
+  // Sort portfolio stocks to the top of the feed
+  const prioritizePortfolioStocks = (entries: FeedEntry[]): FeedEntry[] => {
+    if (portfolioTickers.length === 0) return entries;
+    const ptSet = new Set(portfolioTickers);
+    const owned: FeedEntry[] = [];
+    const rest: FeedEntry[] = [];
+    for (const e of entries) {
+      if (!isEducationalCard(e) && ptSet.has(e.ticker)) {
+        owned.push(e);
+      } else {
+        rest.push(e);
+      }
+    }
+    return [...owned, ...rest];
   };
 
   const loadFeed = async () => {
@@ -131,8 +149,9 @@ export const FeedScreen: React.FC = () => {
         }
       }
 
+      const sorted = prioritizePortfolioStocks(allEntries);
       setItems(feedItems);
-      setFeed(allEntries);
+      setFeed(sorted);
     } catch {
       // API unavailable — fall back to placeholder data so screen is never blank
       usePlaceholder();

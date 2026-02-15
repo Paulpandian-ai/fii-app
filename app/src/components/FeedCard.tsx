@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { getPrice } from '../services/api';
+import { usePortfolioStore } from '../store/portfolioStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -32,6 +34,7 @@ const formatTimeAgo = (isoDate: string): string => {
 
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const topFactors = item.topFactors.slice(0, 3);
+  const ownedShares = usePortfolioStore((s) => s.getSharesForTicker)(item.ticker);
   const [priceData, setPriceData] = useState<{
     price: number;
     change: number;
@@ -75,6 +78,14 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         {/* Ticker & Company */}
         <Text style={styles.ticker}>{item.ticker}</Text>
         <Text style={styles.companyName}>{item.companyName}</Text>
+
+        {/* Portfolio ownership badge */}
+        {ownedShares > 0 && (
+          <View style={styles.ownedBadge}>
+            <Ionicons name="briefcase" size={12} color="#60A5FA" />
+            <Text style={styles.ownedText}>You own {ownedShares} shares</Text>
+          </View>
+        )}
 
         {/* Price */}
         {priceData && (
@@ -176,6 +187,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '400',
     marginTop: 4,
+  },
+  ownedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 8,
+    gap: 5,
+  },
+  ownedText: {
+    color: '#60A5FA',
+    fontSize: 12,
+    fontWeight: '700',
   },
   priceRow: {
     flexDirection: 'row',

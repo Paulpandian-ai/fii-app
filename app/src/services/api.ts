@@ -79,13 +79,18 @@ export const getPortfolio = async () => {
   return data;
 };
 
-export const updatePortfolio = async (holdings: any[]) => {
-  const { data } = await api.put('/portfolio', { holdings });
+export const savePortfolio = async (holdings: any[]) => {
+  const { data } = await api.post('/portfolio', { holdings });
   return data;
 };
 
-export const uploadPortfolioCsv = async (csvContent: string) => {
-  const { data } = await api.post('/portfolio/csv', { csv: csvContent });
+export const parsePortfolioCsv = async (csvContent: string) => {
+  const { data } = await api.post('/portfolio/parse-csv', { csv: csvContent });
+  return data;
+};
+
+export const getPortfolioSummary = async () => {
+  const { data } = await api.get('/portfolio/summary');
   return data;
 };
 
