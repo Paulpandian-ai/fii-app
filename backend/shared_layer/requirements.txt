@@ -1,7 +1,6 @@
 anthropic>=0.40.0
 fredapi>=0.5.2
 yfinance>=0.2.36
-edgartools>=3.0.0
 pydantic>=2.5.0
 numpy>=1.26.0
 pandas>=2.2.0

@@ -20,9 +20,19 @@ from pathlib import Path
 PLATFORM = "manylinux2014_x86_64"
 PYTHON_VERSION = "3.12"
 
-# Heavy transitive dependencies to strip (pyarrow is 142MB, pulled by edgartools)
+# Heavy transitive dependencies to strip
 BLOATED_TRANSITIVE_PACKAGES = [
     "pyarrow",
+    "curl_cffi",
+    "lxml",
+    "rapidfuzz",
+    "pygments",
+    "rich",
+    "playhouse",
+    "peewee",
+    "edgar",
+    "edgartools",
+    "google",
 ]
 
 # Packages built into the Lambda Python 3.12 runtime

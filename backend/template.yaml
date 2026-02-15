@@ -242,8 +242,8 @@ Resources:
     Properties:
       LayerName: !Sub fii-shared-${Stage}
       Description: >-
-        Shared dependencies (anthropic, fredapi, yfinance, edgartools, pydantic,
-        numpy, pandas) and Python modules. pyarrow stripped to stay under 262MB.
+        Shared dependencies (anthropic, fredapi, yfinance, pydantic, numpy,
+        pandas) and Python modules. edgartools replaced with direct SEC API calls.
       ContentUri: shared_layer/
       CompatibleRuntimes:
         - python3.12
