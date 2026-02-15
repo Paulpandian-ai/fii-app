@@ -8,6 +8,10 @@ import logging
 import os
 from typing import Optional
 
+# Disable yfinance's curl_cffi backend — it's not in the Lambda layer.
+# Must be set before importing yfinance.
+os.environ["YF_USE_CURL"] = "0"
+
 import numpy as np
 
 logger = logging.getLogger(__name__)

@@ -31,39 +31,34 @@ STOCK_UNIVERSE = [
 
 
 def seed_via_lambda(stage="dev"):
-    """Invoke the SignalEngine Lambda directly."""
+    """Invoke the SignalEngine Lambda — one async invocation per stock."""
     import boto3
 
     client = boto3.client("lambda")
     function_name = f"fii-signal-engine-{stage}"
 
-    print(f"Invoking {function_name} for {len(STOCK_UNIVERSE)} stocks...")
+    print(f"Dispatching {function_name} for {len(STOCK_UNIVERSE)} stocks (async, one per stock)...")
     print(f"Tickers: {', '.join(STOCK_UNIVERSE)}")
     print()
 
-    # Invoke with full universe
-    response = client.invoke(
-        FunctionName=function_name,
-        InvocationType="RequestResponse",
-        Payload=json.dumps({"tickers": STOCK_UNIVERSE}),
-    )
+    dispatched = 0
+    errors = 0
 
-    payload = json.loads(response["Payload"].read())
-    status_code = payload.get("statusCode", 0)
-    body = json.loads(payload.get("body", "{}"))
+    for ticker in STOCK_UNIVERSE:
+        try:
+            client.invoke(
+                FunctionName=function_name,
+                InvocationType="Event",
+                Payload=json.dumps({"ticker": ticker}),
+            )
+            print(f"  {ticker:6s}  dispatched")
+            dispatched += 1
+        except Exception as e:
+            print(f"  {ticker:6s}  FAILED: {e}")
+            errors += 1
 
-    print(f"Status: {status_code}")
-    print(f"Analyzed: {body.get('analyzed', 0)}")
-    print(f"Errors: {body.get('errors', 0)}")
-    print()
-
-    for result in body.get("results", []):
-        print(f"  {result['ticker']:6s}  score={result['score']:4.1f}  signal={result['signal']}")
-
-    if body.get("error_details"):
-        print("\nErrors:")
-        for err in body["error_details"]:
-            print(f"  {err['ticker']}: {err['error']}")
+    print(f"\nDispatched: {dispatched}, Errors: {errors}")
+    print("Signals will be generated asynchronously. Check DynamoDB/S3 for results.")
 
 
 def seed_via_api(api_url):

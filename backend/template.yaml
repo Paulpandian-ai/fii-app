@@ -282,7 +282,7 @@ Resources:
       Handler: handler.lambda_handler
       CodeUri: functions/signal_engine/
       Description: FII 6-factor signal analysis engine
-      Timeout: 300
+      Timeout: 900
       MemorySize: 2048
       Events:
         DailySignalRun:
@@ -300,6 +300,10 @@ Resources:
             SecretArn: !Ref ClaudeApiKeyArn
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref FredApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:fii-signal-engine-${Stage}
 
   FeedCompilerFunction:
     Type: AWS::Serverless::Function

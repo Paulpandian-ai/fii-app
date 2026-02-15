@@ -12,6 +12,7 @@ into 4 weighted categories:
 import json
 import logging
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 
@@ -42,50 +43,39 @@ logger.setLevel(logging.INFO)
 def lambda_handler(event, context):
     """Run the 6-factor signal analysis.
 
-    Handles two trigger types:
-    1. Scheduled (EventBridge cron): Analyze entire universe
-    2. On-demand (API invocation): Analyze specific ticker(s)
+    Handles three trigger modes:
+    1. Scheduled (EventBridge cron): Fan out — invoke self async per stock
+    2. Single ticker ({"ticker": "NVDA"}): Analyze one stock
+    3. Multiple tickers ({"tickers": [...]}): Fan out — invoke self async per stock
     """
     try:
         logger.info(f"[SignalEngine] Starting at {datetime.now(timezone.utc).isoformat()}")
 
-        # Check if this is an on-demand invocation with specific tickers
         tickers = _extract_tickers(event)
 
-        results = []
-        errors = []
+        # Single ticker — process it directly
+        if len(tickers) == 1:
+            ticker = tickers[0]
+            logger.info(f"[SignalEngine] Analyzing {ticker}...")
+            result = analyze_ticker(ticker)
+            logger.info(
+                f"[SignalEngine] {ticker}: score={result['compositeScore']}, "
+                f"signal={result['signal']}"
+            )
+            return {
+                "statusCode": 200,
+                "body": json.dumps({
+                    "analyzed": 1,
+                    "errors": 0,
+                    "results": [
+                        {"ticker": result["ticker"], "score": result["compositeScore"], "signal": result["signal"]}
+                    ],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }),
+            }
 
-        for ticker in tickers:
-            try:
-                logger.info(f"[SignalEngine] Analyzing {ticker}...")
-                result = analyze_ticker(ticker)
-                results.append(result)
-                logger.info(
-                    f"[SignalEngine] {ticker}: score={result['compositeScore']}, "
-                    f"signal={result['signal']}"
-                )
-            except Exception as e:
-                logger.error(f"[SignalEngine] Failed to analyze {ticker}: {e}")
-                traceback.print_exc()
-                errors.append({"ticker": ticker, "error": str(e)})
-
-        logger.info(
-            f"[SignalEngine] Completed: {len(results)} success, {len(errors)} errors"
-        )
-
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "analyzed": len(results),
-                "errors": len(errors),
-                "results": [
-                    {"ticker": r["ticker"], "score": r["compositeScore"], "signal": r["signal"]}
-                    for r in results
-                ],
-                "error_details": errors,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }),
-        }
+        # Multiple tickers — fan out as async invocations (one per stock)
+        return _fan_out(tickers, context)
 
     except Exception as e:
         traceback.print_exc()
@@ -93,6 +83,45 @@ def lambda_handler(event, context):
             "statusCode": 500,
             "body": json.dumps({"error": str(e)}),
         }
+
+
+def _fan_out(tickers: list[str], context) -> dict:
+    """Invoke self asynchronously for each ticker (fire-and-forget)."""
+    import boto3
+
+    lambda_client = boto3.client("lambda")
+    function_name = context.function_name
+    dispatched = []
+    errors = []
+
+    for ticker in tickers:
+        try:
+            lambda_client.invoke(
+                FunctionName=function_name,
+                InvocationType="Event",
+                Payload=json.dumps({"ticker": ticker}),
+            )
+            dispatched.append(ticker)
+            logger.info(f"[SignalEngine] Dispatched async invocation for {ticker}")
+        except Exception as e:
+            logger.error(f"[SignalEngine] Failed to dispatch {ticker}: {e}")
+            errors.append({"ticker": ticker, "error": str(e)})
+
+    logger.info(
+        f"[SignalEngine] Fan-out complete: {len(dispatched)} dispatched, {len(errors)} errors"
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "mode": "fan-out",
+            "dispatched": len(dispatched),
+            "errors": len(errors),
+            "tickers": dispatched,
+            "error_details": errors,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }),
+    }
 
 
 def _extract_tickers(event: dict) -> list[str]:
@@ -177,6 +206,9 @@ def analyze_ticker(ticker: str) -> dict:
     signal = determine_signal(composite_score)
     confidence = determine_confidence(scores_only)
 
+    # Delay between Claude API calls to avoid 429 rate limiting
+    time.sleep(2)
+
     # ── Step 6: Claude Reasoning ──
     logger.info(f"[{ticker}] Step 6: Generating reasoning")
     reasoning = claude_client.generate_reasoning(
@@ -189,6 +221,9 @@ def analyze_ticker(ticker: str) -> dict:
 
     # Create short insight (first sentence or first 200 chars)
     insight = reasoning.split(".")[0] + "." if "." in reasoning else reasoning[:200]
+
+    # Delay between Claude API calls to avoid 429 rate limiting
+    time.sleep(2)
 
     # ── Step 7: Alternatives ──
     logger.info(f"[{ticker}] Step 7: Generating alternatives")
