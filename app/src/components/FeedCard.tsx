@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { FeedItem } from '../types';
@@ -6,6 +6,7 @@ import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
+import { getPrice } from '../services/api';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -13,6 +14,12 @@ interface FeedCardProps {
   item: FeedItem;
   onPress?: () => void;
 }
+
+const CONFIDENCE_COLORS: Record<string, string> = {
+  HIGH: '#10B981',
+  MEDIUM: '#F59E0B',
+  LOW: '#EF4444',
+};
 
 const formatTimeAgo = (isoDate: string): string => {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -25,6 +32,25 @@ const formatTimeAgo = (isoDate: string): string => {
 
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const topFactors = item.topFactors.slice(0, 3);
+  const [priceData, setPriceData] = useState<{
+    price: number;
+    change: number;
+    changePercent: number;
+  } | null>(null);
+
+  useEffect(() => {
+    getPrice(item.ticker)
+      .then((data) => {
+        setPriceData({
+          price: data.price,
+          change: data.change,
+          changePercent: data.changePercent || data.change_percent || 0,
+        });
+      })
+      .catch(() => {});
+  }, [item.ticker]);
+
+  const confidence = item.confidence;
 
   return (
     <TouchableOpacity
@@ -50,9 +76,42 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         <Text style={styles.ticker}>{item.ticker}</Text>
         <Text style={styles.companyName}>{item.companyName}</Text>
 
-        {/* Signal Badge */}
-        <View style={styles.signalContainer}>
+        {/* Price */}
+        {priceData && (
+          <View style={styles.priceRow}>
+            <Text style={styles.price}>${priceData.price.toFixed(2)}</Text>
+            <Text
+              style={[
+                styles.priceChange,
+                { color: priceData.change >= 0 ? '#10B981' : '#EF4444' },
+              ]}
+            >
+              {priceData.change >= 0 ? '+' : ''}
+              {priceData.changePercent.toFixed(1)}%
+            </Text>
+          </View>
+        )}
+
+        {/* Signal Badge + Confidence */}
+        <View style={styles.signalRow}>
           <SignalBadge signal={item.signal} />
+          {confidence && (
+            <View
+              style={[
+                styles.confidencePill,
+                { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#F59E0B') + '30' },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.confidenceText,
+                  { color: CONFIDENCE_COLORS[confidence] || '#F59E0B' },
+                ]}
+              >
+                {confidence}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Insight */}
@@ -68,6 +127,11 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
               <FactorBar factor={f} compact />
             </React.Fragment>
           ))}
+        </View>
+
+        {/* Tap hint */}
+        <View style={styles.tapHint}>
+          <Text style={styles.tapHintText}>Tap for full analysis</Text>
         </View>
 
         {/* Swipe hint */}
@@ -113,9 +177,37 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     marginTop: 4,
   },
-  signalContainer: {
-    marginTop: 16,
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+    gap: 8,
+  },
+  price: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  priceChange: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  signalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
     marginBottom: 16,
+    gap: 10,
+  },
+  confidencePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  confidenceText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   insight: {
     color: '#FFFFFF',
@@ -137,6 +229,14 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.2)',
     fontSize: 14,
     marginHorizontal: 6,
+  },
+  tapHint: {
+    marginTop: 20,
+  },
+  tapHintText: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 12,
+    fontWeight: '500',
   },
   hintContainer: {
     position: 'absolute',

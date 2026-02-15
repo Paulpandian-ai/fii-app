@@ -28,6 +28,20 @@ export const getFeed = async (cursor?: string) => {
   return data;
 };
 
+// ─── Price ───
+
+export const getPrice = async (ticker: string) => {
+  const { data } = await api.get(`/price/${ticker}`);
+  return data;
+};
+
+// ─── Search ───
+
+export const searchTickers = async (query: string) => {
+  const { data } = await api.get('/search', { params: { q: query } });
+  return data;
+};
+
 // ─── Signals ───
 
 export const getSignalDetail = async (ticker: string) => {

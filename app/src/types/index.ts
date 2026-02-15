@@ -1,33 +1,96 @@
 // ─── Core Domain Types ───
 
 export type Signal = 'BUY' | 'HOLD' | 'SELL';
+export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
+export type FeedItemType = 'signal' | 'educational';
 
 export interface FactorScore {
   name: string;       // e.g. "Supply Chain", "Macro", "Performance"
   score: number;      // -2.0 to +2.0
 }
 
+export interface SubFactor {
+  id: string;         // e.g. "A1"
+  name: string;       // e.g. "Operational Disruption"
+  score: number;      // -2.0 to +2.0
+  reason: string;
+}
+
+export interface FactorCategory {
+  id: string;         // e.g. "A"
+  name: string;
+  icon: string;       // Ionicons name
+  avgScore: number;
+  subFactors: SubFactor[];
+}
+
 export interface FeedItem {
   id: string;
+  type?: FeedItemType;
   ticker: string;
   companyName: string;
-  compositeScore: number;   // 1–10
+  compositeScore: number;   // 1-10
   signal: Signal;
+  confidence?: Confidence;
   insight: string;          // Claude-generated one-liner
   topFactors: FactorScore[];
   updatedAt: string;        // ISO timestamp
 }
 
-export interface FullAnalysis {
+export interface EducationalCard {
   id: string;
+  type: 'educational';
+  title: string;
+  body: string;
+}
+
+export type FeedEntry = FeedItem | EducationalCard;
+
+export interface PriceData {
+  ticker: string;
+  price: number;
+  previousClose: number;
+  change: number;
+  changePercent: number;
+  marketCap: number;
+  fiftyTwoWeekLow: number;
+  fiftyTwoWeekHigh: number;
+  beta: number;
+  forwardPE: number;
+  trailingPE: number;
+  sector: string;
+  companyName: string;
+}
+
+export interface SearchResult {
+  ticker: string;
+  companyName: string;
+  exchange: string;
+  sector: string;
+}
+
+export interface Alternative {
+  ticker: string;
+  companyName: string;
+  score: number;
+  signal: Signal;
+  reason: string;
+  altType: string;
+}
+
+export interface FullAnalysis {
   ticker: string;
   companyName: string;
   compositeScore: number;
   signal: Signal;
+  confidence: Confidence;
   insight: string;
-  factors: FactorScore[];   // all 6 factors
-  summary: string;          // Claude long-form analysis
-  generatedAt: string;
+  reasoning: string;
+  topFactors: FactorScore[];
+  factorDetails: Record<string, { score: number; reason: string }>;
+  alternatives: Alternative[];
+  analyzedAt: string;
+  marketData?: Record<string, any>;
 }
 
 // ─── Portfolio Types ───

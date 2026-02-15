@@ -6,31 +6,68 @@ into an ordered feed for the mobile app.
 """
 
 import json
-import os
+import logging
+import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
+
+sys.path.insert(0, "/opt/python")
+
+import db
+import s3
+
+logger = logging.getLogger(__name__)
+
+EDUCATIONAL_CARDS = [
+    {
+        "title": "What is the Sharpe Ratio?",
+        "body": "The Sharpe Ratio measures risk-adjusted returns. A ratio above 1.0 means you're being compensated well for the risk you're taking. FII uses it to compare how efficiently different portfolios generate returns.",
+    },
+    {
+        "title": "How Supply Chains Affect Stock Prices",
+        "body": "When a key supplier faces disruption \u2014 chip shortages, factory fires, shipping delays \u2014 it can ripple through to company earnings within weeks. FII tracks upstream and downstream signals to catch these early.",
+    },
+    {
+        "title": "Why Diversification Works",
+        "body": "Holding uncorrelated assets means when one drops, others may hold steady or rise. FII's correlation engine (Factor E) measures exactly how your holdings move together, helping you spot hidden concentration risk.",
+    },
+    {
+        "title": "What the Fed Rate Means for You",
+        "body": "When the Fed raises rates, borrowing costs rise, slowing growth and often pressuring stock valuations. FII's monetary factors (D1-D3) track Fed decisions, inflation, and Treasury yields to score this macro impact.",
+    },
+    {
+        "title": "Reading Earnings Surprises",
+        "body": "When a company beats EPS estimates, the stock often jumps \u2014 but not always. FII's Factor F1 scores the magnitude and market reaction of earnings surprises to gauge whether the move is priced in.",
+    },
+    {
+        "title": "What Beta Tells You",
+        "body": "Beta measures how much a stock moves relative to the market. A beta of 1.5 means 50% more volatile than the S&P 500. FII's Factor F3 flags high-beta names so you know what you're signing up for.",
+    },
+]
 
 
 def lambda_handler(event, context):
     """Compile the daily feed from the latest signal results."""
     try:
-        print(f"[FeedCompiler] Starting feed compilation at {datetime.utcnow().isoformat()}")
-
-        # In production, this will:
-        # 1. Read all signal results from DynamoDB for today
-        # 2. Rank them by composite score (descending)
-        # 3. Write the compiled feed to DynamoDB + S3
-        # 4. Invalidate any cached feed data
+        logger.info(f"[FeedCompiler] Starting at {datetime.now(timezone.utc).isoformat()}")
 
         feed_items = _compile_feed()
 
-        print(f"[FeedCompiler] Compiled {len(feed_items)} feed items")
+        # Write compiled feed to S3
+        feed_data = {
+            "items": feed_items,
+            "compiledAt": datetime.now(timezone.utc).isoformat(),
+            "count": len(feed_items),
+        }
+        s3.write_json("feed/default.json", feed_data)
+
+        logger.info(f"[FeedCompiler] Compiled {len(feed_items)} items (wrote to S3)")
 
         return {
             "statusCode": 200,
             "body": json.dumps({
                 "compiled": len(feed_items),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }),
         }
 
@@ -42,9 +79,58 @@ def lambda_handler(event, context):
         }
 
 
-def _compile_feed():
-    """Read signal results and build ranked feed.
+def _compile_feed() -> list[dict]:
+    """Read all signals from DynamoDB and build ranked feed with educational cards."""
+    from models import STOCK_UNIVERSE
 
-    Placeholder implementation — will query DynamoDB in Prompt 2.
-    """
-    return []
+    # Batch-read all SIGNAL#* | LATEST items
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in STOCK_UNIVERSE]
+    items = db.batch_get(keys)
+
+    if not items:
+        logger.warning("[FeedCompiler] No signal items found in DynamoDB")
+        return []
+
+    # Parse each item into a feed-ready dict
+    signals = []
+    for item in items:
+        ticker = item.get("ticker", "")
+        if not ticker:
+            continue
+        top_factors = json.loads(item.get("topFactors", "[]"))
+        signals.append({
+            "id": f"signal-{ticker}",
+            "type": "signal",
+            "ticker": ticker,
+            "companyName": item.get("companyName", ticker),
+            "compositeScore": float(item.get("compositeScore", 5.0)),
+            "signal": item.get("signal", "HOLD"),
+            "confidence": item.get("confidence", "MEDIUM"),
+            "insight": item.get("insight", ""),
+            "topFactors": top_factors,
+            "updatedAt": item.get("lastUpdated", ""),
+        })
+
+    # Sort: highest confidence first, then most extreme scores
+    confidence_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    signals.sort(key=lambda x: (
+        confidence_order.get(x.get("confidence", "MEDIUM"), 1),
+        -abs(x.get("compositeScore", 5.0) - 5.5),
+    ))
+
+    # Interleave educational cards every 5 signal cards
+    feed = []
+    edu_idx = 0
+    for i, sig in enumerate(signals):
+        feed.append(sig)
+        if (i + 1) % 5 == 0 and edu_idx < len(EDUCATIONAL_CARDS):
+            edu_card = EDUCATIONAL_CARDS[edu_idx]
+            feed.append({
+                "id": f"edu-{edu_idx}",
+                "type": "educational",
+                "title": edu_card["title"],
+                "body": edu_card["body"],
+            })
+            edu_idx += 1
+
+    return feed

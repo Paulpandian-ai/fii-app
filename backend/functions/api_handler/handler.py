@@ -47,6 +47,11 @@ def lambda_handler(event, context):
 
         if path.startswith("/feed"):
             return _handle_feed(http_method, body, user_id)
+        elif path.startswith("/price/"):
+            ticker = path.split("/price/")[-1].strip("/").upper()
+            return _handle_price(http_method, ticker)
+        elif path.startswith("/search"):
+            return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
             return _handle_refresh_all(http_method, user_id)
         elif path.startswith("/signals/generate/"):
@@ -208,32 +213,141 @@ def _handle_refresh_all(method, user_id):
 # ─── Feed Endpoint ───
 
 def _handle_feed(method, body, user_id):
-    """GET /feed — Return the latest compiled feed."""
+    """GET /feed — Return the latest compiled feed from S3."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
-    # Query all signals from DynamoDB, sorted by score
-    items = db.query(
-        pk="SIGNALS",
-        index_name="GSI1",
-        scan_forward=False,
-    )
+    # Try S3 compiled feed first
+    compiled = s3.read_json("feed/default.json")
+    if compiled and compiled.get("items"):
+        return _response(200, {"items": compiled["items"], "cursor": None})
+
+    # Fallback: build feed from DynamoDB signal summaries
+    from models import STOCK_UNIVERSE
+
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in STOCK_UNIVERSE]
+    items = db.batch_get(keys)
 
     feed_items = []
     for item in items:
         top_factors = json.loads(item.get("topFactors", "[]"))
         feed_items.append({
             "id": f"signal-{item.get('ticker', '')}",
+            "type": "signal",
             "ticker": item.get("ticker", ""),
             "companyName": item.get("companyName", ""),
             "compositeScore": float(item.get("compositeScore", 5.0)),
             "signal": item.get("signal", "HOLD"),
+            "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,
             "updatedAt": item.get("lastUpdated", ""),
         })
 
     return _response(200, {"items": feed_items, "cursor": None})
+
+
+# ─── Price Endpoint ───
+
+def _handle_price(method, ticker):
+    """GET /price/<ticker> — Real-time price from Yahoo Finance."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    import os
+    os.environ["YF_USE_CURL"] = "0"
+
+    try:
+        import yfinance as yf
+        yf.set_tz_cache_location("/tmp")
+
+        stock = yf.Ticker(ticker)
+        info = stock.info or {}
+
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+        previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
+        change = current_price - previous_close if current_price and previous_close else 0
+        change_pct = (change / previous_close * 100) if previous_close else 0
+
+        return _response(200, {
+            "ticker": ticker,
+            "price": round(current_price or 0, 2),
+            "previousClose": round(previous_close or 0, 2),
+            "change": round(change, 2),
+            "changePercent": round(change_pct, 2),
+            "marketCap": info.get("marketCap", 0),
+            "fiftyTwoWeekLow": round(info.get("fiftyTwoWeekLow", 0) or 0, 2),
+            "fiftyTwoWeekHigh": round(info.get("fiftyTwoWeekHigh", 0) or 0, 2),
+            "beta": round(info.get("beta", 1.0) or 1.0, 2),
+            "forwardPE": round(info.get("forwardPE", 0) or 0, 2),
+            "trailingPE": round(info.get("trailingPE", 0) or 0, 2),
+            "sector": info.get("sector", ""),
+            "companyName": info.get("shortName") or info.get("longName", ticker),
+        })
+    except Exception as e:
+        return _response(500, {"error": f"Failed to fetch price for {ticker}: {str(e)}"})
+
+
+# ─── Search Endpoint ───
+
+def _handle_search(method, query_params):
+    """GET /search?q=<query> — Ticker search via yfinance."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    query = query_params.get("q", "").strip()
+    if not query or len(query) < 1:
+        return _response(400, {"error": "Missing 'q' query parameter"})
+
+    import os
+    os.environ["YF_USE_CURL"] = "0"
+
+    try:
+        import yfinance as yf
+        yf.set_tz_cache_location("/tmp")
+
+        # Try direct ticker lookup first
+        results = []
+        ticker_upper = query.upper()
+
+        # Try the exact ticker
+        try:
+            stock = yf.Ticker(ticker_upper)
+            info = stock.info or {}
+            name = info.get("shortName") or info.get("longName", "")
+            if name and info.get("regularMarketPrice"):
+                results.append({
+                    "ticker": ticker_upper,
+                    "companyName": name,
+                    "exchange": info.get("exchange", ""),
+                    "sector": info.get("sector", ""),
+                })
+        except Exception:
+            pass
+
+        # Also search using yfinance search if direct lookup yielded nothing
+        if not results:
+            try:
+                search_results = yf.Search(query)
+                for quote in getattr(search_results, "quotes", [])[:8]:
+                    symbol = quote.get("symbol", "")
+                    name = quote.get("shortname") or quote.get("longname", "")
+                    if symbol and name:
+                        results.append({
+                            "ticker": symbol,
+                            "companyName": name,
+                            "exchange": quote.get("exchange", ""),
+                            "sector": "",
+                        })
+            except Exception:
+                pass
+
+        return _response(200, {"results": results[:10], "query": query})
+    except Exception as e:
+        return _response(500, {"error": f"Search failed: {str(e)}"})
 
 
 # ─── Portfolio Endpoints ───
