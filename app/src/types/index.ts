@@ -144,6 +144,94 @@ export interface CSVPreviewRow {
   avgCost: number;
 }
 
+// ─── Basket Types ───
+
+export interface BasketStock {
+  ticker: string;
+  companyName: string;
+  weight: number;       // 0–1 allocation
+  score: number;        // FII composite score
+  signal: Signal;
+  reason: string;       // why this stock is in the basket
+}
+
+export interface Basket {
+  id: string;
+  name: string;          // e.g. "AI Dominators"
+  emoji: string;         // e.g. "🤖"
+  description: string;
+  stocks: BasketStock[];
+  returnYTD: number;     // percentage
+  riskLevel: 'Low' | 'Medium' | 'High';
+  updatedAt: string;
+}
+
+// ─── Watchlist Types ───
+
+export interface WatchlistItem {
+  ticker: string;
+  companyName: string;
+  addedAt: string;
+  score?: number;
+  signal?: Signal;
+  price?: number;
+  changePercent?: number;
+}
+
+export interface Watchlist {
+  id: string;
+  name: string;
+  items: WatchlistItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Health Score Types ───
+
+export interface HealthSubScore {
+  label: string;
+  score: number;        // 0–100
+  description: string;
+}
+
+export interface PortfolioHealth {
+  overallScore: number;  // 0–100
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  diversification: HealthSubScore;
+  riskBalance: HealthSubScore;
+  signalAlignment: HealthSubScore;
+  concentration: HealthSubScore;
+  suggestions: string[];
+  updatedAt: string;
+}
+
+// ─── Trending Types ───
+
+export interface TrendingItem {
+  ticker: string;
+  companyName: string;
+  score: number;
+  signal: Signal;
+  reason: string;         // why it's trending
+  changePercent: number;
+  volume: string;         // e.g. "12.3M"
+  rank: number;
+}
+
+// ─── Discovery Types ───
+
+export interface DiscoveryCard {
+  ticker: string;
+  companyName: string;
+  score: number;
+  signal: Signal;
+  insight: string;
+  sector: string;
+  price: number;
+  changePercent: number;
+  topFactors: FactorScore[];
+}
+
 // ─── Strategy Types ───
 
 export interface OptimizationResult {

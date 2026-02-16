@@ -16,6 +16,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { AddHoldingSheet } from '../components/AddHoldingSheet';
 import { CSVUploadSheet } from '../components/CSVUploadSheet';
+import { BasketCarousel } from '../components/BasketCarousel';
+import { WatchlistTabs } from '../components/WatchlistTabs';
+import { PortfolioHealthGauge } from '../components/PortfolioHealthGauge';
+import { StockDiscovery } from '../components/StockDiscovery';
+import { TrendingSection } from '../components/TrendingSection';
+import { SearchOverlay } from '../components/SearchOverlay';
 import type { Holding, RootStackParamList } from '../types';
 
 const formatMoney = (n: number): string => {
@@ -106,7 +112,6 @@ export const PortfolioScreen: React.FC = () => {
     totalGainLossPercent,
     dailyChange,
     dailyChangePercent,
-    summary,
     isLoading,
     loadPortfolio,
     loadSummary,
@@ -115,6 +120,8 @@ export const PortfolioScreen: React.FC = () => {
 
   const [addVisible, setAddVisible] = useState(false);
   const [csvVisible, setCsvVisible] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchMode, setSearchMode] = useState<'navigate' | 'watchlist'>('navigate');
   const [editHolding, setEditHolding] = useState<Holding | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -142,43 +149,23 @@ export const PortfolioScreen: React.FC = () => {
     loadSummary();
   }, [loadPortfolio, loadSummary]);
 
-  const isEmpty = holdings.length === 0 && !isLoading;
+  const handleSearchSelect = useCallback((ticker: string) => {
+    setSearchVisible(false);
+    navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
+  }, [navigation]);
 
-  // ─── Empty State ───
-  if (isEmpty) {
-    return (
-      <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-        <View style={styles.emptyContainer}>
-          <View style={styles.emptyIcon}>
-            <Ionicons name="briefcase-outline" size={64} color="rgba(96,165,250,0.4)" />
-          </View>
-          <Text style={styles.emptyTitle}>Your Portfolio</Text>
-          <Text style={styles.emptySubtitle}>
-            Add your holdings to unlock portfolio optimization, tax strategy, and diversification analysis.
-          </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={() => setAddVisible(true)}>
-            <Ionicons name="add" size={20} color="#FFF" />
-            <Text style={styles.primaryBtnText}>Add Manually</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => setCsvVisible(true)}>
-            <Ionicons name="cloud-upload-outline" size={20} color="#60A5FA" />
-            <Text style={styles.secondaryBtnText}>Upload CSV</Text>
-          </TouchableOpacity>
-        </View>
+  const openWatchlistSearch = useCallback(() => {
+    setSearchMode('watchlist');
+    setSearchVisible(true);
+  }, []);
 
-        <AddHoldingSheet visible={addVisible} onClose={handleAddClose} />
-        <CSVUploadSheet visible={csvVisible} onClose={handleCsvClose} />
-      </LinearGradient>
-    );
-  }
+  const openNavigateSearch = useCallback(() => {
+    setSearchMode('navigate');
+    setSearchVisible(true);
+  }, []);
 
-  // ─── Dashboard ───
-  const isPositiveTotal = totalGainLoss >= 0;
+  const hasHoldings = holdings.length > 0;
   const isPositiveDaily = dailyChange >= 0;
-
-  const biggestWinner = summary?.biggestWinner;
-  const biggestRisk = summary?.biggestRisk;
-  const sellCount = summary?.sellCount || 0;
 
   const renderHolding = ({ item }: { item: Holding }) => {
     const isPositive = (item.gainLoss || 0) >= 0;
@@ -216,7 +203,7 @@ export const PortfolioScreen: React.FC = () => {
               {formatMoney(item.totalValue || 0)}
             </Text>
             <Text style={[styles.holdingGainLoss, { color: isPositive ? '#10B981' : '#EF4444' }]}>
-              {isPositive ? '+' : ''}{formatMoney(item.gainLoss || 0)} ({formatPct(item.gainLossPercent || 0)})
+              {isPositive ? '+' : ''}{formatMoney(item.gainLoss || 0)}
             </Text>
           </View>
         </TouchableOpacity>
@@ -224,93 +211,135 @@ export const PortfolioScreen: React.FC = () => {
     );
   };
 
-  const ListHeader = () => (
-    <View>
-      {/* Total Value Card */}
-      <View style={styles.totalCard}>
-        <Text style={styles.totalLabel}>Portfolio Value</Text>
-        <Text style={styles.totalValue}>{formatMoney(totalValue)}</Text>
-        <View style={styles.totalChangeRow}>
-          <View style={styles.changePill}>
-            <Ionicons
-              name={isPositiveDaily ? 'trending-up' : 'trending-down'}
-              size={14}
-              color={isPositiveDaily ? '#10B981' : '#EF4444'}
-            />
-            <Text style={[styles.changeText, { color: isPositiveDaily ? '#10B981' : '#EF4444' }]}>
-              {isPositiveDaily ? '+' : ''}{formatMoney(dailyChange)} ({formatPct(dailyChangePercent)}) today
-            </Text>
+  // Sections rendered as data items for FlatList
+  type SectionItem =
+    | { type: 'header' }
+    | { type: 'baskets' }
+    | { type: 'watchlists' }
+    | { type: 'health' }
+    | { type: 'holdings_header' }
+    | { type: 'holding'; data: Holding }
+    | { type: 'add_buttons' }
+    | { type: 'discovery' }
+    | { type: 'trending' }
+    | { type: 'spacer' };
+
+  const sections: SectionItem[] = [];
+
+  // 1. Portfolio value header (if has holdings)
+  if (hasHoldings) {
+    sections.push({ type: 'header' });
+  }
+
+  // 2. AI Baskets carousel (always)
+  sections.push({ type: 'baskets' });
+
+  // 3. Watchlists
+  sections.push({ type: 'watchlists' });
+
+  // 4. Portfolio Health gauge
+  sections.push({ type: 'health' });
+
+  // 5. Holdings list (if any)
+  if (hasHoldings) {
+    sections.push({ type: 'holdings_header' });
+    for (const h of holdings) {
+      sections.push({ type: 'holding', data: h });
+    }
+  }
+
+  // 6. Add / CSV buttons
+  sections.push({ type: 'add_buttons' });
+
+  // 7. Tinder-style Discovery
+  sections.push({ type: 'discovery' });
+
+  // 8. Trending
+  sections.push({ type: 'trending' });
+
+  // Bottom spacer
+  sections.push({ type: 'spacer' });
+
+  const renderSection = ({ item }: { item: SectionItem }) => {
+    switch (item.type) {
+      case 'header':
+        return (
+          <View style={styles.totalCard}>
+            <Text style={styles.totalLabel}>PORTFOLIO VALUE</Text>
+            <Text style={styles.totalValue}>{formatMoney(totalValue)}</Text>
+            <View style={styles.totalChangeRow}>
+              <Ionicons
+                name={isPositiveDaily ? 'trending-up' : 'trending-down'}
+                size={14}
+                color={isPositiveDaily ? '#10B981' : '#EF4444'}
+              />
+              <Text style={[styles.changeText, { color: isPositiveDaily ? '#10B981' : '#EF4444' }]}>
+                {isPositiveDaily ? '+' : ''}{formatMoney(dailyChange)} ({formatPct(dailyChangePercent)}) today
+              </Text>
+            </View>
+            {totalGainLoss !== 0 && (
+              <Text style={[styles.totalGainLoss, { color: totalGainLoss >= 0 ? '#10B981' : '#EF4444' }]}>
+                Total: {totalGainLoss >= 0 ? '+' : ''}{formatMoney(totalGainLoss)} ({formatPct(totalGainLossPercent)})
+              </Text>
+            )}
           </View>
-        </View>
-      </View>
+        );
 
-      {/* Summary Cards */}
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Total Gain/Loss</Text>
-          <Text style={[styles.summaryValue, { color: isPositiveTotal ? '#10B981' : '#EF4444' }]}>
-            {isPositiveTotal ? '+' : ''}{formatMoney(totalGainLoss)}
-          </Text>
-          <Text style={[styles.summaryPct, { color: isPositiveTotal ? '#10B981' : '#EF4444' }]}>
-            {formatPct(totalGainLossPercent)}
-          </Text>
-        </View>
+      case 'baskets':
+        return <BasketCarousel />;
 
-        {biggestWinner && (
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Biggest Winner</Text>
-            <Text style={styles.summaryTicker}>{biggestWinner.ticker}</Text>
-            <Text style={[styles.summaryPct, { color: '#10B981' }]}>
-              {formatPct(biggestWinner.gainLossPercent)}
-            </Text>
+      case 'watchlists':
+        return <WatchlistTabs onOpenSearch={openWatchlistSearch} />;
+
+      case 'health':
+        return <PortfolioHealthGauge hasHoldings={hasHoldings} />;
+
+      case 'holdings_header':
+        return (
+          <View style={styles.holdingsHeader}>
+            <Text style={styles.holdingsTitle}>Holdings ({holdings.length})</Text>
+            <Text style={styles.holdingsHint}>Long press to edit/delete</Text>
           </View>
-        )}
-      </View>
+        );
 
-      <View style={styles.summaryRow}>
-        {biggestRisk && (
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Biggest Risk</Text>
-            <Text style={styles.summaryTicker}>{biggestRisk.ticker}</Text>
-            <Text style={[styles.summaryPct, { color: '#EF4444' }]}>
-              FII: {biggestRisk.score.toFixed(1)} ({biggestRisk.signal})
-            </Text>
+      case 'holding':
+        return renderHolding({ item: item.data });
+
+      case 'add_buttons':
+        return (
+          <View style={styles.addSection}>
+            <Text style={styles.addTitle}>{hasHoldings ? 'Manage Holdings' : 'Add Your Holdings'}</Text>
+            {!hasHoldings && (
+              <Text style={styles.addSubtitle}>
+                Unlock health scores, optimization, and personalized signals
+              </Text>
+            )}
+            <View style={styles.addRow}>
+              <TouchableOpacity style={styles.addBtn} onPress={() => setAddVisible(true)}>
+                <Ionicons name="add" size={18} color="#FFF" />
+                <Text style={styles.addBtnText}>Add Manually</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.csvBtn} onPress={() => setCsvVisible(true)}>
+                <Ionicons name="cloud-upload-outline" size={18} color="#60A5FA" />
+                <Text style={styles.csvBtnText}>Upload CSV</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
+        );
 
-        {sellCount > 0 && (
-          <View style={[styles.summaryCard, styles.warnCard]}>
-            <Text style={styles.summaryLabel}>FII Says</Text>
-            <Text style={styles.warnText}>
-              {sellCount} of {holdings.length} holdings rated SELL
-            </Text>
-            <Text style={styles.warnHint}>Tap for details</Text>
-          </View>
-        )}
-      </View>
+      case 'discovery':
+        return <StockDiscovery />;
 
-      {/* Holdings Header */}
-      <View style={styles.holdingsHeader}>
-        <Text style={styles.holdingsTitle}>Holdings ({holdings.length})</Text>
-        <Text style={styles.holdingsHint}>Long press to edit/delete</Text>
-      </View>
-    </View>
-  );
+      case 'trending':
+        return <TrendingSection />;
 
-  const ListFooter = () => (
-    <View style={styles.footer}>
-      <View style={styles.footerActions}>
-        <TouchableOpacity style={styles.footerBtn} onPress={() => setAddVisible(true)}>
-          <Ionicons name="add-circle-outline" size={20} color="#60A5FA" />
-          <Text style={styles.footerBtnText}>Add Holding</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.footerBtn} onPress={() => setCsvVisible(true)}>
-          <Ionicons name="cloud-upload-outline" size={20} color="#60A5FA" />
-          <Text style={styles.footerBtnText}>Upload CSV</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+      case 'spacer':
+        return <View style={styles.bottomSpacer} />;
+
+      default:
+        return null;
+    }
+  };
 
   if (isLoading && holdings.length === 0) {
     return (
@@ -325,13 +354,18 @@ export const PortfolioScreen: React.FC = () => {
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <Text style={styles.topTitle}>Portfolio</Text>
+        <TouchableOpacity style={styles.searchBtn} onPress={openNavigateSearch}>
+          <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
+        </TouchableOpacity>
+      </View>
+
       <FlatList
-        data={holdings}
-        renderItem={renderHolding}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={ListHeader}
-        ListFooterComponent={ListFooter}
-        contentContainerStyle={styles.listContent}
+        data={sections}
+        renderItem={renderSection}
+        keyExtractor={(_, index) => `section-${index}`}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -344,6 +378,12 @@ export const PortfolioScreen: React.FC = () => {
 
       <AddHoldingSheet visible={addVisible} onClose={handleAddClose} />
       <CSVUploadSheet visible={csvVisible} onClose={handleCsvClose} />
+      <SearchOverlay
+        visible={searchVisible}
+        onClose={() => setSearchVisible(false)}
+        onSelectTicker={handleSearchSelect}
+        mode={searchMode}
+      />
     </LinearGradient>
   );
 };
@@ -352,76 +392,40 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: 'rgba(255,255,255,0.6)', fontSize: 16, marginTop: 16 },
-  listContent: { paddingTop: 60, paddingBottom: 24 },
 
-  // Empty state
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
-  emptyIcon: { marginBottom: 24 },
-  emptyTitle: { color: '#FFF', fontSize: 28, fontWeight: '800', marginBottom: 12 },
-  emptySubtitle: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 32,
-  },
-  primaryBtn: {
+  // Top bar
+  topBar: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#60A5FA',
-    borderRadius: 14,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    gap: 8,
-    width: '100%',
-    justifyContent: 'center',
-    marginBottom: 12,
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 12,
   },
-  primaryBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  secondaryBtn: {
-    flexDirection: 'row',
+  topTitle: { color: '#FFF', fontSize: 28, fontWeight: '800' },
+  searchBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.4)',
-    borderRadius: 14,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    gap: 8,
-    width: '100%',
-    justifyContent: 'center',
   },
-  secondaryBtnText: { color: '#60A5FA', fontSize: 16, fontWeight: '700' },
 
   // Total card
   totalCard: {
     marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 24,
+    marginBottom: 8,
+    padding: 20,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
     alignItems: 'center',
   },
-  totalLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '600', letterSpacing: 1 },
-  totalValue: { color: '#FFF', fontSize: 36, fontWeight: '800', marginTop: 8 },
-  totalChangeRow: { marginTop: 12 },
-  changePill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  changeText: { fontSize: 14, fontWeight: '600' },
-
-  // Summary cards
-  summaryRow: { flexDirection: 'row', marginHorizontal: 20, gap: 10, marginBottom: 10 },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    padding: 14,
-  },
-  summaryLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
-  summaryValue: { fontSize: 18, fontWeight: '800', marginTop: 6 },
-  summaryTicker: { color: '#FFF', fontSize: 18, fontWeight: '800', marginTop: 6 },
-  summaryPct: { fontSize: 13, fontWeight: '600', marginTop: 2 },
-  warnCard: { borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
-  warnText: { color: '#EF4444', fontSize: 13, fontWeight: '700', marginTop: 6 },
-  warnHint: { color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 4 },
+  totalLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600', letterSpacing: 1.5 },
+  totalValue: { color: '#FFF', fontSize: 34, fontWeight: '800', marginTop: 6 },
+  totalChangeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+  changeText: { fontSize: 13, fontWeight: '600' },
+  totalGainLoss: { fontSize: 12, fontWeight: '600', marginTop: 4 },
 
   // Holdings list
   holdingsHeader: {
@@ -429,7 +433,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
     marginHorizontal: 20,
-    marginTop: 16,
+    marginTop: 20,
     marginBottom: 8,
   },
   holdingsTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
@@ -440,7 +444,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: '#0D1B3E',
+    backgroundColor: 'rgba(255,255,255,0.02)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
@@ -454,19 +458,44 @@ const styles = StyleSheet.create({
   holdingValue: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   holdingGainLoss: { fontSize: 11, fontWeight: '600', marginTop: 2 },
 
-  // Footer
-  footer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 },
-  footerActions: { flexDirection: 'row', gap: 12 },
-  footerBtn: {
+  // Add holdings section
+  addSection: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    padding: 20,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+  },
+  addTitle: { color: '#FFF', fontSize: 17, fontWeight: '700' },
+  addSubtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 19 },
+  addRow: { flexDirection: 'row', gap: 10, marginTop: 16, width: '100%' },
+  addBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#60A5FA',
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  addBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  csvBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.3)',
+    borderColor: 'rgba(96,165,250,0.4)',
     borderRadius: 12,
     paddingVertical: 14,
     gap: 6,
   },
-  footerBtnText: { color: '#60A5FA', fontSize: 14, fontWeight: '600' },
+  csvBtnText: { color: '#60A5FA', fontSize: 14, fontWeight: '700' },
+
+  // Bottom spacer
+  bottomSpacer: { height: 32 },
 });

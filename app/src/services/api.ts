@@ -94,6 +94,66 @@ export const getPortfolioSummary = async () => {
   return data;
 };
 
+// ─── Baskets ───
+
+export const getBaskets = async () => {
+  const { data } = await api.get('/baskets');
+  return data;
+};
+
+export const getBasketDetail = async (id: string) => {
+  const { data } = await api.get(`/baskets/${id}`);
+  return data;
+};
+
+// ─── Trending ───
+
+export const getTrending = async () => {
+  const { data } = await api.get('/trending');
+  return data;
+};
+
+// ─── Discovery ───
+
+export const getDiscoveryCards = async () => {
+  const { data } = await api.get('/discovery');
+  return data;
+};
+
+// ─── Watchlist ───
+
+export const getWatchlists = async () => {
+  const { data } = await api.get('/watchlist');
+  return data;
+};
+
+export const saveWatchlist = async (watchlist: { id?: string; name: string; items: any[] }) => {
+  const { data } = await api.post('/watchlist', watchlist);
+  return data;
+};
+
+export const addToWatchlist = async (watchlistId: string, ticker: string, companyName: string) => {
+  const { data } = await api.post('/watchlist/add', { watchlistId, ticker, companyName });
+  return data;
+};
+
+export const removeFromWatchlist = async (watchlistId: string, ticker: string) => {
+  const { data } = await api.post('/watchlist/remove', { watchlistId, ticker });
+  return data;
+};
+
+export const deleteWatchlist = async (name: string) => {
+  const { data } = await api.delete(`/watchlist/${name}`);
+  return data;
+};
+
+// ─── Portfolio Health ───
+
+export const getPortfolioHealth = async () => {
+  const { data } = await api.get('/portfolio/health');
+  return data;
+};
+
 // ─── Strategy ───
 
 export const runOptimization = async (portfolioId: string) => {

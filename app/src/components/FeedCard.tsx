@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { getPrice } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
+import { useWatchlistStore } from '../store/watchlistStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -35,6 +36,19 @@ const formatTimeAgo = (isoDate: string): string => {
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const topFactors = item.topFactors.slice(0, 3);
   const ownedShares = usePortfolioStore((s) => s.getSharesForTicker)(item.ticker);
+  const isBookmarked = useWatchlistStore((s) => s.isInAnyWatchlist)(item.ticker);
+  const addTicker = useWatchlistStore((s) => s.addTicker);
+  const removeTicker = useWatchlistStore((s) => s.removeTicker);
+  const activeWatchlistId = useWatchlistStore((s) => s.activeWatchlistId);
+
+  const toggleBookmark = useCallback(() => {
+    if (isBookmarked) {
+      removeTicker(activeWatchlistId, item.ticker);
+    } else {
+      addTicker(activeWatchlistId, item.ticker, item.companyName);
+    }
+  }, [isBookmarked, item.ticker, item.companyName, activeWatchlistId, addTicker, removeTicker]);
+
   const [priceData, setPriceData] = useState<{
     price: number;
     change: number;
@@ -69,6 +83,15 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       >
         {/* Timestamp */}
         <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
+
+        {/* Bookmark button */}
+        <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark}>
+          <Ionicons
+            name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+            size={22}
+            color={isBookmarked ? '#60A5FA' : 'rgba(255,255,255,0.4)'}
+          />
+        </TouchableOpacity>
 
         {/* Score Ring */}
         <View style={styles.scoreContainer}>
@@ -172,6 +195,17 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     fontSize: 12,
     fontWeight: '500',
+  },
+  bookmarkBtn: {
+    position: 'absolute',
+    top: 56,
+    left: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scoreContainer: {
     marginBottom: 24,

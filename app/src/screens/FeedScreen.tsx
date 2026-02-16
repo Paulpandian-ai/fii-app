@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   searchBtn: {
     position: 'absolute',
     top: 54,
-    left: 20,
+    right: 60,
     zIndex: 10,
     width: 40,
     height: 40,

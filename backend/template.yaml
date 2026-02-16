@@ -302,6 +302,38 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetBaskets:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /baskets
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetBasketDetail:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /baskets/{id}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetTrending:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /trending
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetDiscovery:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /discovery
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Authenticated endpoints (catch-all for POST/PUT/DELETE)
         CatchAll:
           Type: HttpApi
