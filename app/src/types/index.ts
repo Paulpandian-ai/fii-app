@@ -482,4 +482,8 @@ export type RootStackParamList = {
   MainTabs: undefined;
   SignalDetail: { ticker: string; feedItemId: string };
   Profile: undefined;
+  WealthSimulator: undefined;
+  TaxStrategy: undefined;
+  PortfolioXRay: undefined;
+  AIAdvisor: undefined;
 };

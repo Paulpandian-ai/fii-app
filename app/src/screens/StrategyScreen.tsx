@@ -1,68 +1,46 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
+  Share,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList } from '../types';
+import { Ionicons } from '@expo/vector-icons';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../types';
 
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useStrategyStore } from '../store/strategyStore';
 
-import { WealthSimulatorHero } from '../components/WealthSimulatorHero';
-import { ScenarioBattles } from '../components/ScenarioBattles';
-import { RiskRewardMap } from '../components/RiskRewardMap';
-import { BestPortfolio } from '../components/BestPortfolio';
-import { RebalancingMoves } from '../components/RebalancingMoves';
-import { TimeMachine } from '../components/TimeMachine';
-import { BuildPortfolio } from '../components/BuildPortfolio';
-import { ShareResults } from '../components/ShareResults';
-import { PortfolioXRay } from '../components/PortfolioXRay';
-import { TaxDoctor } from '../components/TaxDoctor';
-import { DiversificationCoach } from '../components/DiversificationCoach';
-import { StrategyDashboard } from '../components/StrategyDashboard';
+const GRADE_COLORS: Record<string, string> = {
+  'A+': '#10B981',
+  A: '#10B981',
+  'A-': '#34D399',
+  'B+': '#34D399',
+  B: '#60A5FA',
+  'B-': '#60A5FA',
+  'C+': '#FBBF24',
+  C: '#FBBF24',
+  'C-': '#F59E0B',
+  D: '#EF4444',
+  F: '#EF4444',
+};
 
-type SectionId =
-  | 'hero'
-  | 'scenarios'
-  | 'risk_map'
-  | 'best_portfolio'
-  | 'rebalancing'
-  | 'time_machine'
-  | 'xray'
-  | 'tax_doctor'
-  | 'coach_advice'
-  | 'report_card'
-  | 'build'
-  | 'share';
-
-interface SectionItem {
-  id: SectionId;
-}
-
-const SECTIONS: SectionItem[] = [
-  { id: 'hero' },
-  { id: 'scenarios' },
-  { id: 'risk_map' },
-  { id: 'best_portfolio' },
-  { id: 'rebalancing' },
-  { id: 'time_machine' },
-  { id: 'xray' },
-  { id: 'tax_doctor' },
-  { id: 'coach_advice' },
-  { id: 'report_card' },
-  { id: 'build' },
-  { id: 'share' },
-];
+const formatMoney = (v: unknown): string => {
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  if (Math.abs(n) >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+};
 
 export const StrategyScreen: React.FC = () => {
-  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
-  const listRef = useRef<FlatList>(null);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const holdings = usePortfolioStore((s) => s.holdings);
   const totalValue = usePortfolioStore((s) => s.totalValue);
@@ -71,247 +49,233 @@ export const StrategyScreen: React.FC = () => {
   const {
     optimization,
     isOptimizing,
-    projection,
-    isProjecting,
-    scenarios,
-    isScenariosLoading,
-    moves,
-    isRebalancing,
     diversification,
     isDiversifying,
     taxHarvest,
     isTaxLoading,
-    taxBracket,
     advice,
     isAdviceLoading,
     reportCard,
     isReportCardLoading,
     hasRun,
     runFullSimulation,
-    loadProjection,
-    loadTaxHarvest,
-    setTaxBracket,
-    loadReportCard,
   } = useStrategyStore();
 
   const isAnyLoading =
-    isOptimizing ||
-    isScenariosLoading ||
-    isRebalancing ||
-    isProjecting ||
-    isDiversifying ||
-    isTaxLoading ||
-    isAdviceLoading;
+    isOptimizing || isDiversifying || isTaxLoading || isAdviceLoading || isReportCardLoading;
 
-  const handleStartSimulation = useCallback(() => {
+  const handleRunSimulation = useCallback(() => {
     const value = totalValue > 0 ? totalValue : 50000;
     runFullSimulation(value);
   }, [totalValue, runFullSimulation]);
 
-  const handleGoToPortfolio = useCallback(() => {
-    navigation.navigate('Portfolio');
-  }, [navigation]);
+  // Compute card summaries
+  const sharpe = (optimization?.optimized?.sharpeRatio ?? 0).toFixed(2);
+  const targetSharpe = '0.75';
+  const simGrade = reportCard?.grades?.find((g) => g.category === 'Optimization')?.grade ?? '--';
 
-  const handleYearsChange = useCallback(
-    (years: number) => {
-      const value = totalValue > 0 ? totalValue : 50000;
-      loadProjection(years, value);
-    },
-    [totalValue, loadProjection]
-  );
+  const taxSavings = formatMoney(taxHarvest?.totalTaxSavings ?? 0);
+  const taxGrade = reportCard?.grades?.find((g) => g.category === 'Tax Efficiency')?.grade ?? '--';
 
-  const scrollToOptimal = useCallback(() => {
-    listRef.current?.scrollToIndex({ index: 3, animated: true });
-  }, []);
+  const divScore = Math.round(diversification?.diversificationScore ?? 0);
+  const divGrade = diversification?.grade ?? reportCard?.grades?.find((g) => g.category === 'Diversification')?.grade ?? '--';
 
-  const handleBracketChange = useCallback(
-    (bracket: number) => {
-      setTaxBracket(bracket);
-    },
-    [setTaxBracket]
-  );
+  const adviceCount = advice.length;
 
-  const handleTaxRefresh = useCallback(
-    (bracket: number) => {
-      loadTaxHarvest(bracket);
-    },
-    [loadTaxHarvest]
-  );
+  const overall = reportCard?.overall ?? '--';
+  const overallColor = GRADE_COLORS[overall] ?? '#60A5FA';
+  const overallScore = reportCard?.overallScore ?? 0;
 
-  const handleReportCardRefresh = useCallback(() => {
-    loadReportCard();
-  }, [loadReportCard]);
+  // Compute improvement summary
+  const sharpeImprovement = optimization
+    ? ((optimization.optimized?.sharpeRatio ?? 0) - (optimization.currentPortfolio?.sharpeRatio ?? 0)).toFixed(2)
+    : '0.00';
+  const savingsText = formatMoney(taxHarvest?.totalTaxSavings ?? 0);
 
-  const renderSection = useCallback(
-    ({ item }: { item: SectionItem }) => {
-      switch (item.id) {
-        case 'hero':
-          return (
-            <WealthSimulatorHero
-              hasPortfolio={hasPortfolio}
-              isRunning={isAnyLoading}
-              onStartSimulation={handleStartSimulation}
-              onGoToPortfolio={handleGoToPortfolio}
-            />
-          );
-
-        case 'scenarios':
-          if (!hasRun && !isScenariosLoading) return <View />;
-          return (
-            <ScenarioBattles
-              scenarios={scenarios}
-              isLoading={isScenariosLoading}
-            />
-          );
-
-        case 'risk_map':
-          if (!optimization) return <View />;
-          return (
-            <RiskRewardMap
-              frontier={optimization.efficientFrontier}
-              currentPortfolio={optimization.currentPortfolio}
-              optimized={optimization.optimized}
-              benchmarks={optimization.benchmarks}
-              onTapOptimal={scrollToOptimal}
-            />
-          );
-
-        case 'best_portfolio':
-          if (!optimization) return <View />;
-          return (
-            <BestPortfolio
-              optimized={optimization.optimized}
-              currentPortfolio={optimization.currentPortfolio}
-              allocation={optimization.allocation}
-              moneyLeftOnTable={optimization.moneyLeftOnTable}
-              portfolioValue={optimization.portfolioValue}
-            />
-          );
-
-        case 'rebalancing':
-          if (!hasRun && !isRebalancing) return <View />;
-          return (
-            <RebalancingMoves
-              moves={moves}
-              isLoading={isRebalancing}
-            />
-          );
-
-        case 'time_machine':
-          if (!hasRun && !isProjecting) return <View />;
-          return (
-            <TimeMachine
-              projection={projection}
-              isLoading={isProjecting}
-              onYearsChange={handleYearsChange}
-            />
-          );
-
-        case 'xray':
-          if (!hasRun && !isDiversifying) return <View />;
-          return (
-            <PortfolioXRay
-              diversification={diversification}
-              isLoading={isDiversifying}
-            />
-          );
-
-        case 'tax_doctor':
-          if (!hasRun && !isTaxLoading) return <View />;
-          return (
-            <TaxDoctor
-              taxHarvest={taxHarvest}
-              isLoading={isTaxLoading}
-              selectedBracket={taxBracket}
-              onBracketChange={handleBracketChange}
-              onRefresh={handleTaxRefresh}
-            />
-          );
-
-        case 'coach_advice':
-          if (!hasRun && !isAdviceLoading) return <View />;
-          return (
-            <DiversificationCoach
-              prescriptions={advice}
-              isLoading={isAdviceLoading}
-            />
-          );
-
-        case 'report_card':
-          if (!hasRun && !isReportCardLoading) return <View />;
-          return (
-            <StrategyDashboard
-              reportCard={reportCard}
-              isLoading={isReportCardLoading}
-              onRefresh={handleReportCardRefresh}
-            />
-          );
-
-        case 'build':
-          return <BuildPortfolio />;
-
-        case 'share':
-          return (
-            <ShareResults
-              optimization={optimization}
-              projection={projection}
-            />
-          );
-
-        default:
-          return <View />;
+  const handleShare = useCallback(async () => {
+    if (!reportCard) return;
+    try {
+      let message = 'My FII Strategy Report Card\n\n';
+      message += `Overall Grade: ${reportCard.overall} (${reportCard.overallScore}/100)\n\n`;
+      for (const g of reportCard.grades) {
+        message += `${g.category}: ${g.grade} — ${g.comment}\n`;
       }
+      message += '\nRun your own analysis at factorimpact.app';
+      await Share.share({ message, title: 'FII Report Card' });
+    } catch (error: any) {
+      if (error?.message !== 'User did not share') {
+        Alert.alert('Share failed', 'Could not share your report card');
+      }
+    }
+  }, [reportCard]);
+
+  interface CardConfig {
+    id: string;
+    title: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    iconColor: string;
+    subtitle: string;
+    grade: string;
+    screen: keyof RootStackParamList;
+  }
+
+  const cards: CardConfig[] = [
+    {
+      id: 'simulator',
+      title: 'Wealth Simulator',
+      icon: 'rocket',
+      iconColor: '#60A5FA',
+      subtitle: `Sharpe: ${sharpe} | Target: ${targetSharpe}`,
+      grade: simGrade,
+      screen: 'WealthSimulator',
     },
-    [
-      hasPortfolio,
-      isAnyLoading,
-      handleStartSimulation,
-      handleGoToPortfolio,
-      hasRun,
-      scenarios,
-      isScenariosLoading,
-      optimization,
-      moves,
-      isRebalancing,
-      projection,
-      isProjecting,
-      handleYearsChange,
-      scrollToOptimal,
-      diversification,
-      isDiversifying,
-      taxHarvest,
-      isTaxLoading,
-      taxBracket,
-      handleBracketChange,
-      handleTaxRefresh,
-      advice,
-      isAdviceLoading,
-      reportCard,
-      isReportCardLoading,
-      handleReportCardRefresh,
-    ]
-  );
+    {
+      id: 'tax',
+      title: 'Tax Strategy',
+      icon: 'receipt',
+      iconColor: '#10B981',
+      subtitle: `Savings: ${taxSavings} available`,
+      grade: taxGrade,
+      screen: 'TaxStrategy',
+    },
+    {
+      id: 'xray',
+      title: 'Portfolio X-Ray',
+      icon: 'scan',
+      iconColor: '#8B5CF6',
+      subtitle: `Diversification: ${divScore}/100`,
+      grade: divGrade,
+      screen: 'PortfolioXRay',
+    },
+    {
+      id: 'advisor',
+      title: 'AI Advisor',
+      icon: 'sparkles',
+      iconColor: '#FBBF24',
+      subtitle: `${adviceCount} recommendation${adviceCount !== 1 ? 's' : ''} ready`,
+      grade: adviceCount > 0 ? '' : '--',
+      screen: 'AIAdvisor',
+    },
+  ];
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>Strategy</Text>
-        {isAnyLoading && (
-          <ActivityIndicator color="#60A5FA" size="small" />
-        )}
+        {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
       </View>
 
-      <FlatList
-        ref={listRef}
-        data={SECTIONS}
-        keyExtractor={(item) => item.id}
-        renderItem={renderSection}
+      <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
-        initialNumToRender={3}
-        maxToRenderPerBatch={2}
-        windowSize={5}
-      />
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Run Simulation CTA if not run yet */}
+        {!hasRun && !isAnyLoading && (
+          <View style={styles.ctaContainer}>
+            {hasPortfolio ? (
+              <TouchableOpacity
+                style={styles.ctaButton}
+                onPress={handleRunSimulation}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#3B82F6', '#8B5CF6']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.ctaGradient}
+                >
+                  <Ionicons name="flash" size={20} color="#FFFFFF" />
+                  <Text style={styles.ctaText}>Run Full Analysis</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.ctaEmptyCard}>
+                <Ionicons name="briefcase-outline" size={32} color="rgba(255,255,255,0.3)" />
+                <Text style={styles.ctaEmptyTitle}>Add 3+ holdings first</Text>
+                <Text style={styles.ctaEmptySubtitle}>
+                  Go to Portfolio tab to add holdings, then come back to run analysis.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* 2x2 Card Grid */}
+        <View style={styles.cardGrid}>
+          {cards.map((card) => {
+            const gradeColor = GRADE_COLORS[card.grade] ?? 'rgba(255,255,255,0.3)';
+            return (
+              <TouchableOpacity
+                key={card.id}
+                style={styles.card}
+                onPress={() => navigation.navigate(card.screen)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.cardHeader}>
+                  <View style={[styles.cardIcon, { backgroundColor: `${card.iconColor}15` }]}>
+                    <Ionicons name={card.icon} size={22} color={card.iconColor} />
+                  </View>
+                  {card.grade ? (
+                    <View style={[styles.gradeBadge, { borderColor: gradeColor }]}>
+                      <Text style={[styles.gradeText, { color: gradeColor }]}>
+                        {card.grade}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                  )}
+                </View>
+                <Text style={styles.cardTitle}>{card.title}</Text>
+                <Text style={styles.cardSubtitle} numberOfLines={1}>
+                  {card.subtitle}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Overall Grade Hero */}
+        {(hasRun || reportCard) && (
+          <View style={styles.overallContainer}>
+            <LinearGradient
+              colors={['#1A1A2E', '#16213E', '#0F3460']}
+              style={styles.overallCard}
+            >
+              <Text style={styles.overallLabel}>OVERALL STRATEGY GRADE</Text>
+              <Text style={[styles.overallGrade, { color: overallColor }]}>
+                {overall}
+              </Text>
+              <Text style={styles.overallScore}>{overallScore}/100</Text>
+
+              {(optimization || taxHarvest) && (
+                <Text style={styles.improvementText}>
+                  Implementing all suggestions: +{sharpeImprovement} Sharpe, {savingsText} tax savings
+                </Text>
+              )}
+
+              <TouchableOpacity
+                style={styles.shareButton}
+                onPress={handleShare}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="share-social" size={16} color="#FFFFFF" />
+                <Text style={styles.shareText}>Share Report Card</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        )}
+
+        {/* Loading state when simulation is running */}
+        {isAnyLoading && !hasRun && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#60A5FA" size="large" />
+            <Text style={styles.loadingText}>Running full analysis...</Text>
+            <Text style={styles.loadingSubtext}>
+              Optimizing portfolio, scanning taxes, analyzing diversification
+            </Text>
+          </View>
+        )}
+      </ScrollView>
     </LinearGradient>
   );
 };
@@ -333,7 +297,169 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
   },
-  listContent: {
+  scrollContent: {
     paddingBottom: 40,
+  },
+  ctaContainer: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  ctaButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  ctaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 16,
+  },
+  ctaText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  ctaEmptyCard: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  ctaEmptyTitle: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  ctaEmptySubtitle: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  cardGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  card: {
+    width: '47.5%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    flexGrow: 1,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradeBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradeText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  overallContainer: {
+    marginHorizontal: 16,
+    marginTop: 20,
+  },
+  overallCard: {
+    alignItems: 'center',
+    borderRadius: 20,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.15)',
+  },
+  overallLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  overallGrade: {
+    fontSize: 72,
+    fontWeight: '900',
+  },
+  overallScore: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  improvementText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 18,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 16,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  shareText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    color: '#60A5FA',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 16,
+  },
+  loadingSubtext: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+    marginHorizontal: 40,
+    lineHeight: 18,
   },
 });

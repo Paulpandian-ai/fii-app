@@ -11,6 +11,10 @@ import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { StrategyScreen } from './src/screens/StrategyScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { SignalDetailScreen } from './src/screens/SignalDetailScreen';
+import { WealthSimulatorScreen } from './src/screens/WealthSimulatorScreen';
+import { TaxStrategyScreen } from './src/screens/TaxStrategyScreen';
+import { PortfolioXRayScreen } from './src/screens/PortfolioXRayScreen';
+import { AIAdvisorScreen } from './src/screens/AIAdvisorScreen';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
 const WrappedFeed = () => (
@@ -27,6 +31,18 @@ const WrappedCoach = () => (
 );
 const WrappedSignalDetail = (props: any) => (
   <ErrorBoundary screenName="SignalDetailScreen"><SignalDetailScreen {...props} /></ErrorBoundary>
+);
+const WrappedWealthSimulator = () => (
+  <ErrorBoundary screenName="WealthSimulatorScreen"><WealthSimulatorScreen /></ErrorBoundary>
+);
+const WrappedTaxStrategy = () => (
+  <ErrorBoundary screenName="TaxStrategyScreen"><TaxStrategyScreen /></ErrorBoundary>
+);
+const WrappedPortfolioXRay = () => (
+  <ErrorBoundary screenName="PortfolioXRayScreen"><PortfolioXRayScreen /></ErrorBoundary>
+);
+const WrappedAIAdvisor = () => (
+  <ErrorBoundary screenName="AIAdvisorScreen"><AIAdvisorScreen /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -86,6 +102,26 @@ export default function App() {
             presentation: 'modal',
             animation: 'slide_from_bottom',
           }}
+        />
+        <Stack.Screen
+          name="WealthSimulator"
+          component={WrappedWealthSimulator}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="TaxStrategy"
+          component={WrappedTaxStrategy}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="PortfolioXRay"
+          component={WrappedPortfolioXRay}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="AIAdvisor"
+          component={WrappedAIAdvisor}
+          options={{ animation: 'slide_from_right' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
