@@ -364,6 +364,94 @@ export interface StrategyResult {
   };
 }
 
+// ─── Diversification / X-Ray Types ───
+
+export interface SectorExposure {
+  sector: string;
+  weight: number;
+  color: string;
+  warning: boolean;
+}
+
+export interface GeographicSplit {
+  region: string;
+  weight: number;
+}
+
+export interface CorrelationPair {
+  ticker1: string;
+  ticker2: string;
+  correlation: number;
+}
+
+export interface RiskRadarAxis {
+  axis: string;
+  value: number;
+}
+
+export interface DiversificationResult {
+  sectors: SectorExposure[];
+  geographic: GeographicSplit[];
+  correlations: CorrelationPair[];
+  riskRadar: RiskRadarAxis[];
+  diversificationScore: number;
+  grade: string;
+  updatedAt: string;
+}
+
+// ─── Tax Doctor Types ───
+
+export interface TaxLoss {
+  ticker: string;
+  companyName: string;
+  shares: number;
+  costBasis: number;
+  currentValue: number;
+  unrealizedLoss: number;
+  taxSavings: number;
+  replacements: Array<{
+    ticker: string;
+    companyName: string;
+    sector: string;
+  }>;
+}
+
+export interface TaxHarvestResult {
+  losses: TaxLoss[];
+  totalUnrealizedLoss: number;
+  totalTaxSavings: number;
+  bracket: number;
+  updatedAt: string;
+}
+
+// ─── AI Advice Types ───
+
+export interface Prescription {
+  id: string;
+  title: string;
+  diagnosis: string;
+  prescription: string;
+  impact: string;
+  icon: string;
+  severity: 'low' | 'medium' | 'high';
+}
+
+// ─── Report Card Types ───
+
+export interface ReportCardGrade {
+  category: string;
+  grade: string;
+  score: number;
+  comment: string;
+}
+
+export interface ReportCard {
+  overall: string;
+  overallScore: number;
+  grades: ReportCardGrade[];
+  updatedAt: string;
+}
+
 // ─── Auth Types ───
 
 export interface User {

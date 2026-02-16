@@ -474,6 +474,46 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        PostStrategyTaxHarvest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/tax-harvest
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostStrategyDiversification:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/diversification
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetStrategyCorrelation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/correlation
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostStrategyAdvice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/advice
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetStrategyReportCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/report-card
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi

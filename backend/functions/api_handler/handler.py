@@ -1329,7 +1329,7 @@ def _handle_watchlist_delete(wl_name, user_id):
 # ─── Strategy Endpoints ───
 
 def _handle_strategy(method, path, body, user_id):
-    """Strategy sub-router: optimize, project, scenarios, rebalance, achievements."""
+    """Strategy sub-router."""
     if "/optimize" in path and method == "POST":
         return _handle_strategy_optimize(body, user_id)
     elif "/project" in path and method == "POST":
@@ -1338,6 +1338,16 @@ def _handle_strategy(method, path, body, user_id):
         return _handle_strategy_scenarios(body, user_id)
     elif "/rebalance" in path and method == "POST":
         return _handle_strategy_rebalance(body, user_id)
+    elif "/tax-harvest" in path and method == "POST":
+        return _handle_strategy_tax_harvest(body, user_id)
+    elif "/diversification" in path and method == "POST":
+        return _handle_strategy_diversification(body, user_id)
+    elif "/correlation" in path:
+        return _handle_strategy_correlation(body, user_id)
+    elif "/advice" in path and method == "POST":
+        return _handle_strategy_advice(body, user_id)
+    elif "/report-card" in path:
+        return _handle_strategy_report_card(user_id)
     elif "/achievements" in path and method == "GET":
         return _handle_strategy_achievements(user_id)
     else:
@@ -1866,6 +1876,407 @@ def _handle_strategy_achievements(user_id):
 
     achievements = json.loads(record["achievements"]) if isinstance(record["achievements"], str) else record["achievements"]
     return _response(200, {"achievements": achievements})
+
+
+# ─── Prompt 6: Tax, Diversification, Advice, Report Card ───
+
+# Sector color mapping for X-Ray
+SECTOR_COLORS = {
+    "Technology": "#60A5FA", "Financial Services": "#FBBF24",
+    "Healthcare": "#10B981", "Energy": "#F97316",
+    "Consumer Cyclical": "#F472B6", "Consumer Defensive": "#A78BFA",
+    "Industrials": "#06B6D4", "Real Estate": "#84CC16",
+    "Utilities": "#E879F9", "Communication Services": "#FB923C",
+    "Basic Materials": "#2DD4BF",
+}
+
+# Geographic estimates by sector (simplified)
+GEO_ESTIMATES = {
+    "Technology": {"US": 0.75, "International": 0.20, "Emerging": 0.05},
+    "Financial Services": {"US": 0.80, "International": 0.15, "Emerging": 0.05},
+    "Healthcare": {"US": 0.70, "International": 0.25, "Emerging": 0.05},
+    "Energy": {"US": 0.50, "International": 0.30, "Emerging": 0.20},
+    "Consumer Cyclical": {"US": 0.65, "International": 0.25, "Emerging": 0.10},
+    "Consumer Defensive": {"US": 0.60, "International": 0.30, "Emerging": 0.10},
+    "Industrials": {"US": 0.70, "International": 0.25, "Emerging": 0.05},
+    "Real Estate": {"US": 0.85, "International": 0.12, "Emerging": 0.03},
+    "Utilities": {"US": 0.90, "International": 0.08, "Emerging": 0.02},
+    "Communication Services": {"US": 0.70, "International": 0.20, "Emerging": 0.10},
+    "Basic Materials": {"US": 0.55, "International": 0.30, "Emerging": 0.15},
+}
+
+
+def _handle_strategy_diversification(body, user_id):
+    """POST /strategy/diversification — Full X-Ray breakdown + diversification score."""
+    import numpy as np
+    from datetime import datetime
+
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+    if not tickers:
+        return _response(200, {"error": "No portfolio holdings found"})
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+    n = len(tickers)
+
+    # --- Panel A: Sector Exposure ---
+    sector_weights = {}
+    ticker_sectors = {}
+    for t in tickers:
+        sector = _get_ticker_sector(t)
+        ticker_sectors[t] = sector
+        sector_weights[sector] = sector_weights.get(sector, 0) + weights.get(t, 0)
+
+    sectors = []
+    warnings = []
+    for sec, w in sorted(sector_weights.items(), key=lambda x: -x[1]):
+        pct = round(w * 100, 1)
+        is_warning = pct > 30
+        sectors.append({
+            "name": sec,
+            "weight": pct,
+            "color": SECTOR_COLORS.get(sec, "#6B7280"),
+            "warning": is_warning,
+        })
+        if is_warning:
+            warnings.append(f"{sec} concentration ({pct}%) exceeds 30% threshold")
+
+    # --- Panel B: Geographic Split ---
+    geo = {"US": 0.0, "International": 0.0, "Emerging": 0.0}
+    for t in tickers:
+        w = weights.get(t, 0)
+        sec = ticker_sectors.get(t, "Technology")
+        est = GEO_ESTIMATES.get(sec, {"US": 0.7, "International": 0.2, "Emerging": 0.1})
+        for region, fraction in est.items():
+            geo[region] = geo.get(region, 0) + w * fraction
+
+    geographic = [
+        {"region": r, "weight": round(v * 100, 1)}
+        for r, v in geo.items() if v > 0.001
+    ]
+
+    # --- Panel C: Correlation Matrix ---
+    _, cov_matrix = _estimate_returns_and_cov(tickers, signals_map)
+    vols = np.sqrt(np.diag(cov_matrix))
+    vols_safe = np.where(vols < 1e-8, 1e-8, vols)
+    corr_matrix = cov_matrix / np.outer(vols_safe, vols_safe)
+
+    correlations = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            c = float(corr_matrix[i][j])
+            correlations.append({
+                "ticker1": tickers[i],
+                "ticker2": tickers[j],
+                "correlation": round(c, 3),
+                "strength": "high" if c > 0.7 else "medium" if c > 0.4 else "low",
+            })
+
+    avg_corr = float(np.mean([c["correlation"] for c in correlations])) if correlations else 0.0
+
+    # --- Panel D: Risk Radar ---
+    # Compute 5 risk dimensions (0-100 scale, lower = less risk = better)
+    unique_sectors = len(set(ticker_sectors.values()))
+    concentration_risk = min(100, max(0, max(sector_weights.values()) * 100 * 1.5))
+    sector_risk = min(100, max(0, 100 - unique_sectors * 15))
+    port_vol = float(np.sqrt(np.array(list(weights.values())) @ cov_matrix @ np.array(list(weights.values())))) if n > 0 else 0.2
+    volatility_risk = min(100, max(0, port_vol * 100 * 4))
+    correlation_risk = min(100, max(0, avg_corr * 130))
+    sell_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "SELL")
+    signal_risk = min(100, max(0, (sell_count / max(n, 1)) * 200))
+
+    risk_radar = [
+        {"axis": "Concentration", "value": round(concentration_risk), "ideal": 25},
+        {"axis": "Sector", "value": round(sector_risk), "ideal": 20},
+        {"axis": "Volatility", "value": round(volatility_risk), "ideal": 30},
+        {"axis": "Correlation", "value": round(correlation_risk), "ideal": 25},
+        {"axis": "Signal", "value": round(signal_risk), "ideal": 15},
+    ]
+
+    # --- Diversification Score (0-100) ---
+    # Higher = better diversified
+    raw_score = 100 - (concentration_risk * 0.3 + sector_risk * 0.2 +
+                       volatility_risk * 0.15 + correlation_risk * 0.2 + signal_risk * 0.15)
+    div_score = max(0, min(100, round(raw_score)))
+
+    if div_score >= 71:
+        grade = "Healthy"
+        grade_letter = "A"
+    elif div_score >= 41:
+        grade = "Fair"
+        grade_letter = "B"
+    else:
+        grade = "Critical"
+        grade_letter = "D"
+
+    result = {
+        "diversificationScore": div_score,
+        "grade": grade,
+        "gradeLetter": grade_letter,
+        "sectors": sectors,
+        "sectorWarnings": warnings,
+        "geographic": geographic,
+        "correlations": correlations,
+        "avgCorrelation": round(avg_corr, 3),
+        "riskRadar": risk_radar,
+        "tickerCount": n,
+        "sectorCount": unique_sectors,
+        "updatedAt": datetime.utcnow().isoformat(),
+    }
+
+    try:
+        s3.write_json(f"strategy/{user_id}_diversification.json", result)
+    except Exception:
+        pass
+
+    return _response(200, result)
+
+
+def _handle_strategy_correlation(body, user_id):
+    """GET /strategy/correlation — Pairwise correlation matrix."""
+    tickers, _ = _get_portfolio_tickers_and_weights(user_id)
+    if len(tickers) < 2:
+        return _response(200, {"matrix": [], "tickers": tickers})
+
+    import numpy as np
+    signals_map = _get_signal_data_for_tickers(tickers)
+    _, cov_matrix = _estimate_returns_and_cov(tickers, signals_map)
+    vols = np.sqrt(np.diag(cov_matrix))
+    vols_safe = np.where(vols < 1e-8, 1e-8, vols)
+    corr_matrix = cov_matrix / np.outer(vols_safe, vols_safe)
+
+    matrix = []
+    for i in range(len(tickers)):
+        row = [round(float(corr_matrix[i][j]), 3) for j in range(len(tickers))]
+        matrix.append(row)
+
+    return _response(200, {"matrix": matrix, "tickers": tickers})
+
+
+def _handle_strategy_tax_harvest(body, user_id):
+    """POST /strategy/tax-harvest — Identify losing positions + wash-sale replacements."""
+    from datetime import datetime
+
+    tax_rate = float(body.get("taxRate", 0.24))
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+    if not tickers:
+        return _response(200, {"losses": [], "totalHarvestable": 0, "estimatedSavings": 0})
+
+    # Load holdings for cost basis
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    holdings_raw = json.loads(record["holdings"]) if isinstance(record.get("holdings", ""), str) else record.get("holdings", [])
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+    losses = []
+    total_harvestable = 0.0
+
+    for h in holdings_raw:
+        ticker = h.get("ticker", "")
+        shares = float(h.get("shares", 0))
+        avg_cost = float(h.get("avgCost", 0))
+        current_price = float(h.get("currentPrice", avg_cost))
+
+        # Try to get current price from signal data
+        sig = signals_map.get(ticker, {})
+        unrealized = (current_price - avg_cost) * shares
+
+        if unrealized >= 0:
+            continue  # Skip winners
+
+        loss_amt = abs(unrealized)
+        savings = loss_amt * tax_rate
+        total_harvestable += loss_amt
+        sector = _get_ticker_sector(ticker)
+
+        # Find wash-sale replacement: same sector, different ticker, higher score
+        replacements = []
+        for entry in _FALLBACK_TICKERS:
+            if entry["ticker"] == ticker:
+                continue
+            if entry.get("sector") == sector:
+                # Check if we have signal data for replacement
+                rep_signal = signals_map.get(entry["ticker"])
+                rep_score = rep_signal.get("compositeScore", 5.0) if rep_signal else 5.0
+                orig_score = sig.get("compositeScore", 5.0)
+                if rep_score >= orig_score - 1:
+                    replacements.append({
+                        "ticker": entry["ticker"],
+                        "companyName": entry.get("name", entry["ticker"]),
+                        "sector": sector,
+                        "score": rep_score,
+                        "reason": f"Same sector ({sector}), FII score {rep_score:.1f}",
+                    })
+                if len(replacements) >= 2:
+                    break
+
+        losses.append({
+            "ticker": ticker,
+            "companyName": sig.get("companyName", ticker),
+            "shares": shares,
+            "avgCost": round(avg_cost, 2),
+            "currentPrice": round(current_price, 2),
+            "unrealizedLoss": round(loss_amt, 2),
+            "taxSavings": round(savings, 2),
+            "sector": sector,
+            "signal": sig.get("signal", "HOLD"),
+            "score": sig.get("compositeScore", 5.0),
+            "replacements": replacements,
+        })
+
+    losses.sort(key=lambda x: x["unrealizedLoss"], reverse=True)
+    total_savings = round(total_harvestable * tax_rate, 2)
+
+    return _response(200, {
+        "losses": losses,
+        "totalHarvestable": round(total_harvestable, 2),
+        "estimatedSavings": total_savings,
+        "taxRate": tax_rate,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_strategy_advice(body, user_id):
+    """POST /strategy/advice — AI diversification prescriptions (hardcoded for dev)."""
+    from datetime import datetime
+
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+    signals_map = _get_signal_data_for_tickers(tickers)
+    sectors = {}
+    for t in tickers:
+        s = _get_ticker_sector(t)
+        sectors[s] = sectors.get(s, 0) + 1
+
+    top_sector = max(sectors, key=sectors.get) if sectors else "Technology"
+    n = len(tickers)
+
+    # Generate contextual prescriptions (hardcoded for dev, Claude in prod)
+    prescriptions = [
+        {
+            "id": "rx-1",
+            "title": "Prescription #1: Reduce Sector Concentration",
+            "advice": f"Your portfolio is heavily concentrated in {top_sector} ({sectors.get(top_sector, 0)} of {n} holdings). "
+                      f"Consider adding VGT or XLK alternatives from underrepresented sectors like Healthcare (XLV) or Industrials (XLI) to reduce single-sector risk.",
+            "action": "Add XLV (Vanguard Health Care ETF)",
+            "actionTicker": "XLV",
+            "actionType": "add",
+        },
+        {
+            "id": "rx-2",
+            "title": "Prescription #2: International Exposure Treatment",
+            "advice": "Your portfolio likely has over 80% US exposure. Adding international diversification through VXUS (Total International) or EFA (Developed Markets) can reduce country-specific risk and capture global growth opportunities.",
+            "action": "Add VXUS (International ETF)",
+            "actionTicker": "VXUS",
+            "actionType": "add",
+        },
+        {
+            "id": "rx-3",
+            "title": "Prescription #3: Correlation Therapy",
+            "advice": "Several of your holdings are highly correlated, meaning they tend to move together. Adding uncorrelated assets like GLD (Gold), TLT (Long-Term Treasuries), or VNQ (Real Estate) acts as portfolio insurance during market stress.",
+            "action": "Add GLD (Gold ETF)",
+            "actionTicker": "GLD",
+            "actionType": "add",
+        },
+    ]
+
+    return _response(200, {
+        "prescriptions": prescriptions,
+        "portfolioContext": {
+            "tickerCount": n,
+            "topSector": top_sector,
+            "sectorCount": len(sectors),
+        },
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_strategy_report_card(user_id):
+    """GET /strategy/report-card — Combined strategy grades."""
+    from datetime import datetime
+
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+    if not tickers:
+        return _response(200, {"error": "No portfolio"})
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+
+    # Try to load cached results
+    opt_data = None
+    div_data = None
+    tax_data = None
+
+    try:
+        opt_data = s3.read_json(f"strategy/{user_id}_optimization.json")
+    except Exception:
+        pass
+    try:
+        div_data = s3.read_json(f"strategy/{user_id}_diversification.json")
+    except Exception:
+        pass
+
+    # Optimization grade
+    sharpe = opt_data.get("optimized", {}).get("sharpeRatio", 0) if opt_data else 0
+    if sharpe >= 0.75:
+        opt_grade, opt_letter = "Excellent", "A"
+    elif sharpe >= 0.5:
+        opt_grade, opt_letter = "Good", "B+"
+    elif sharpe >= 0.3:
+        opt_grade, opt_letter = "Fair", "B"
+    else:
+        opt_grade, opt_letter = "Needs work", "C"
+
+    # Diversification grade
+    div_score = div_data.get("diversificationScore", 50) if div_data else 50
+    if div_score >= 71:
+        div_grade, div_letter = "Healthy", "A"
+    elif div_score >= 55:
+        div_grade, div_letter = "Fair", "B"
+    elif div_score >= 41:
+        div_grade, div_letter = "Needs attention", "C"
+    else:
+        div_grade, div_letter = "Critical", "D"
+
+    # Tax efficiency grade (placeholder — would need actual tax harvest data)
+    tax_grade, tax_letter = "Available", "B+"
+
+    # Overall grade
+    grade_values = {"A": 4.0, "B+": 3.5, "B": 3.0, "C": 2.0, "D": 1.0}
+    avg = (grade_values.get(opt_letter, 2.5) + grade_values.get(div_letter, 2.5) + grade_values.get(tax_letter, 3.0)) / 3
+    if avg >= 3.5:
+        overall_letter = "A"
+    elif avg >= 3.0:
+        overall_letter = "B+"
+    elif avg >= 2.5:
+        overall_letter = "B"
+    elif avg >= 2.0:
+        overall_letter = "C"
+    else:
+        overall_letter = "D"
+
+    return _response(200, {
+        "grades": [
+            {
+                "category": "Optimization",
+                "grade": opt_letter,
+                "detail": f"Sharpe {sharpe:.2f}, target 0.75",
+                "description": opt_grade,
+            },
+            {
+                "category": "Tax Efficiency",
+                "grade": tax_letter,
+                "detail": "Tax harvesting available",
+                "description": tax_grade,
+            },
+            {
+                "category": "Diversification",
+                "grade": div_letter,
+                "detail": f"Score {div_score}/100, need 70+",
+                "description": div_grade,
+            },
+        ],
+        "overallGrade": overall_letter,
+        "sharpe": round(sharpe, 2),
+        "divScore": div_score,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
 
 
 # ─── Coach Endpoint ───

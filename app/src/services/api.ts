@@ -184,6 +184,33 @@ export const getAchievements = async () => {
   return data;
 };
 
+// ─── Strategy: Diversification / Tax / Advice / Report Card ───
+
+export const runDiversification = async () => {
+  const { data } = await api.post('/strategy/diversification', {});
+  return data;
+};
+
+export const runTaxHarvest = async (bracket: number) => {
+  const { data } = await api.post('/strategy/tax-harvest', { bracket });
+  return data;
+};
+
+export const getCorrelation = async () => {
+  const { data } = await api.get('/strategy/correlation');
+  return data;
+};
+
+export const getAdvice = async () => {
+  const { data } = await api.post('/strategy/advice', {});
+  return data;
+};
+
+export const getReportCard = async () => {
+  const { data } = await api.get('/strategy/report-card');
+  return data;
+};
+
 // ─── Coach ───
 
 export const getCoachInsights = async () => {
