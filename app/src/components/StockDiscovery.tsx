@@ -210,7 +210,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
                   <Text style={styles.cardSector}>{card.sector}</Text>
                 </View>
                 <View style={styles.cardScoreWrap}>
-                  <Text style={styles.cardScoreNum}>{card.score.toFixed(1)}</Text>
+                  <Text style={styles.cardScoreNum}>{(card.score ?? 0).toFixed(1)}</Text>
                   <View style={[styles.signalPill, { backgroundColor: SIGNAL_COLORS[card.signal] + '20' }]}>
                     <Text style={[styles.signalText, { color: SIGNAL_COLORS[card.signal] }]}>
                       {card.signal}
@@ -224,12 +224,12 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
               <View style={styles.cardStats}>
                 <View style={styles.stat}>
                   <Text style={styles.statLabel}>Price</Text>
-                  <Text style={styles.statValue}>${card.price.toFixed(2)}</Text>
+                  <Text style={styles.statValue}>${(card.price ?? 0).toFixed(2)}</Text>
                 </View>
                 <View style={styles.stat}>
                   <Text style={styles.statLabel}>Change</Text>
                   <Text style={[styles.statValue, { color: card.changePercent >= 0 ? '#10B981' : '#EF4444' }]}>
-                    {card.changePercent >= 0 ? '+' : ''}{card.changePercent.toFixed(1)}%
+                    {(card.changePercent ?? 0) >= 0 ? '+' : ''}{(card.changePercent ?? 0).toFixed(1)}%
                   </Text>
                 </View>
               </View>
@@ -239,7 +239,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
                   {card.topFactors.map((f) => (
                     <View key={f.name} style={styles.factorPill}>
                       <Text style={[styles.factorText, { color: f.score >= 0 ? '#10B981' : '#EF4444' }]}>
-                        {f.name} {f.score >= 0 ? '+' : ''}{f.score.toFixed(1)}
+                        {f.name} {(f.score ?? 0) >= 0 ? '+' : ''}{(f.score ?? 0).toFixed(1)}
                       </Text>
                     </View>
                   ))}

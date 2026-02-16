@@ -15,17 +15,18 @@ const getBarColor = (score: number): string => {
 };
 
 export const FactorBar: React.FC<FactorBarProps> = ({ factor, compact = false }) => {
-  const color = getBarColor(factor.score);
+  const score = factor.score ?? 0;
+  const color = getBarColor(score);
   // Map -2..+2 to 0..1 for bar width
-  const normalizedPosition = (factor.score + 2) / 4;
-  const sign = factor.score >= 0 ? '+' : '';
+  const normalizedPosition = (score + 2) / 4;
+  const sign = score >= 0 ? '+' : '';
 
   if (compact) {
     return (
       <View style={styles.compactContainer}>
         <Text style={styles.compactName}>{factor.name}</Text>
         <Text style={[styles.compactScore, { color }]}>
-          {sign}{factor.score.toFixed(1)}
+          {sign}{score.toFixed(1)}
         </Text>
       </View>
     );
@@ -36,7 +37,7 @@ export const FactorBar: React.FC<FactorBarProps> = ({ factor, compact = false })
       <View style={styles.header}>
         <Text style={styles.name}>{factor.name}</Text>
         <Text style={[styles.score, { color }]}>
-          {sign}{factor.score.toFixed(1)}
+          {sign}{score.toFixed(1)}
         </Text>
       </View>
       <View style={styles.track}>

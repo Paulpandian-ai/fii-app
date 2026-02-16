@@ -186,19 +186,19 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Sharpe</Text>
             <Text style={[styles.metricValue, { color: '#FBBF24' }]}>
-              {liveMetrics.sharpe.toFixed(2)}
+              {(liveMetrics.sharpe ?? 0).toFixed(2)}
             </Text>
           </View>
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Return</Text>
             <Text style={[styles.metricValue, { color: '#10B981' }]}>
-              {liveMetrics.expectedReturn.toFixed(1)}%
+              {(liveMetrics.expectedReturn ?? 0).toFixed(1)}%
             </Text>
           </View>
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Risk</Text>
             <Text style={[styles.metricValue, { color: '#EF4444' }]}>
-              {liveMetrics.volatility.toFixed(1)}%
+              {(liveMetrics.volatility ?? 0).toFixed(1)}%
             </Text>
           </View>
         </View>
@@ -246,7 +246,7 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
             <View key={s.ticker} style={styles.stockRow}>
               <Text style={styles.stockTicker}>{s.ticker}</Text>
               <Text style={styles.stockWeight}>
-                {(s.weight * 100).toFixed(1)}%
+                {((s.weight ?? 0) * 100).toFixed(1)}%
               </Text>
               <TouchableOpacity
                 onPress={() => removeStock(s.ticker)}

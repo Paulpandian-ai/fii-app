@@ -94,7 +94,7 @@ export const RebalancingMoves: React.FC<Props> = ({
               <View style={styles.weightBlock}>
                 <Text style={styles.weightLabel}>Current</Text>
                 <Text style={styles.weightValue}>
-                  {move.currentWeight.toFixed(1)}%
+                  {(move.currentWeight ?? 0).toFixed(1)}%
                 </Text>
               </View>
               <Ionicons
@@ -113,7 +113,7 @@ export const RebalancingMoves: React.FC<Props> = ({
                     },
                   ]}
                 >
-                  {move.optimalWeight.toFixed(1)}%
+                  {(move.optimalWeight ?? 0).toFixed(1)}%
                 </Text>
               </View>
             </View>
@@ -130,7 +130,7 @@ export const RebalancingMoves: React.FC<Props> = ({
                 } else {
                   Alert.alert(
                     'Apply Move',
-                    `${move.direction === 'increase' ? 'Increase' : 'Decrease'} ${move.ticker} from ${move.currentWeight.toFixed(1)}% to ${move.optimalWeight.toFixed(1)}%?`,
+                    `${move.direction === 'increase' ? 'Increase' : 'Decrease'} ${move.ticker} from ${(move.currentWeight ?? 0).toFixed(1)}% to ${(move.optimalWeight ?? 0).toFixed(1)}%?`,
                     [{ text: 'Cancel' }, { text: 'Apply', style: 'default' }]
                   );
                 }

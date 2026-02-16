@@ -26,9 +26,9 @@ export const ShareResults: React.FC<Props> = ({ optimization, projection }) => {
       const stats = projection?.finalStats;
 
       let message = `My FII Wealth Simulation\n\n`;
-      message += `Portfolio Sharpe Ratio: ${opt.sharpeRatio.toFixed(2)}\n`;
-      message += `Expected Return: ${opt.expectedReturn.toFixed(1)}%\n`;
-      message += `Risk: ${opt.expectedVolatility.toFixed(1)}%\n`;
+      message += `Portfolio Sharpe Ratio: ${(opt.sharpeRatio ?? 0).toFixed(2)}\n`;
+      message += `Expected Return: ${(opt.expectedReturn ?? 0).toFixed(1)}%\n`;
+      message += `Risk: ${(opt.expectedVolatility ?? 0).toFixed(1)}%\n`;
 
       if (stats) {
         message += `\nMonte Carlo (${projection!.years}yr):\n`;
@@ -67,19 +67,19 @@ export const ShareResults: React.FC<Props> = ({ optimization, projection }) => {
             <View style={styles.statBlock}>
               <Text style={styles.statLabel}>Sharpe</Text>
               <Text style={[styles.statValue, { color: '#FBBF24' }]}>
-                {opt.sharpeRatio.toFixed(2)}
+                {(opt.sharpeRatio ?? 0).toFixed(2)}
               </Text>
             </View>
             <View style={styles.statBlock}>
               <Text style={styles.statLabel}>Return</Text>
               <Text style={[styles.statValue, { color: '#10B981' }]}>
-                {opt.expectedReturn.toFixed(1)}%
+                {(opt.expectedReturn ?? 0).toFixed(1)}%
               </Text>
             </View>
             <View style={styles.statBlock}>
               <Text style={styles.statLabel}>Risk</Text>
               <Text style={[styles.statValue, { color: '#60A5FA' }]}>
-                {opt.expectedVolatility.toFixed(1)}%
+                {(opt.expectedVolatility ?? 0).toFixed(1)}%
               </Text>
             </View>
           </View>

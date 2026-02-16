@@ -46,11 +46,19 @@ const CONFIDENCE_COLORS: Record<Confidence, string> = {
   LOW: '#EF4444',
 };
 
-const formatLargeNumber = (n: number): string => {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toLocaleString()}`;
+/** Safe number: coerce anything to a finite number or 0. */
+const safeNum = (v: unknown): number => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatLargeNumber = (n: unknown): string => {
+  const v = safeNum(n);
+  if (v >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
+  return `$${v.toLocaleString()}`;
 };
 
 interface SignalDetailScreenProps {
@@ -123,13 +131,15 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   }
 
   const categories = buildCategories();
-  const priceChange = priceData?.change ?? 0;
-  const priceChangePct = priceData?.changePercent ?? 0;
+  const priceChange = safeNum(priceData?.change);
+  const priceChangePct = safeNum(priceData?.changePercent);
+  const priceValue = safeNum(priceData?.price);
+  const hasPriceToShow = priceData != null && typeof priceData.price === 'number' && Number.isFinite(priceData.price);
   const isPositive = priceChange >= 0;
   const confidence = analysis.confidence || 'MEDIUM';
   const showAlternatives =
     analysis.alternatives?.length > 0 &&
-    (analysis.signal === 'SELL' || (analysis.signal === 'HOLD' && analysis.compositeScore <= 4));
+    (analysis.signal === 'SELL' || (analysis.signal === 'HOLD' && safeNum(analysis.compositeScore) <= 4));
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
@@ -140,12 +150,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Section 1: Header */}
         <View style={styles.header}>
-          <ScoreRing score={analysis.compositeScore} size={100} />
+          <ScoreRing score={safeNum(analysis.compositeScore)} size={100} />
           <Text style={styles.ticker}>{analysis.ticker}</Text>
           <Text style={styles.companyName}>{analysis.companyName}</Text>
-          {priceData && (
+          {hasPriceToShow && (
             <View style={styles.priceRow}>
-              <Text style={styles.price}>${priceData.price.toFixed(2)}</Text>
+              <Text style={styles.price}>${priceValue.toFixed(2)}</Text>
               <Text style={[styles.priceChange, { color: isPositive ? '#10B981' : '#EF4444' }]}>
                 {isPositive ? '+' : ''}${priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePct.toFixed(1)}%)
               </Text>
@@ -201,15 +211,16 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   {expandedCategory === cat.id && (
                     <View style={styles.subFactors}>
                       {cat.subFactors.map((sf) => {
-                        const sfColor = sf.score >= 0 ? '#10B981' : '#EF4444';
-                        const sign = sf.score >= 0 ? '+' : '';
+                        const sfScore = safeNum(sf.score);
+                        const sfColor = sfScore >= 0 ? '#10B981' : '#EF4444';
+                        const sign = sfScore >= 0 ? '+' : '';
                         return (
                           <View key={sf.id} style={styles.subFactorRow}>
                             <View style={styles.subFactorHeader}>
                               <Text style={styles.subFactorId}>{sf.id}</Text>
                               <Text style={styles.subFactorName}>{sf.name}</Text>
                               <Text style={[styles.subFactorScore, { color: sfColor }]}>
-                                {sign}{sf.score.toFixed(1)}
+                                {sign}{sfScore.toFixed(1)}
                               </Text>
                             </View>
                             <Text style={styles.subFactorReason}>{sf.reason}</Text>
@@ -252,11 +263,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             <View style={styles.dataTable}>
               {[
                 { label: 'Market Cap', value: formatLargeNumber(priceData.marketCap) },
-                { label: 'Forward PE', value: priceData.forwardPE ? priceData.forwardPE.toFixed(1) : 'N/A' },
-                { label: 'Trailing PE', value: priceData.trailingPE ? priceData.trailingPE.toFixed(1) : 'N/A' },
-                { label: 'Beta', value: priceData.beta.toFixed(2) },
-                { label: '52W Low', value: `$${priceData.fiftyTwoWeekLow.toFixed(2)}` },
-                { label: '52W High', value: `$${priceData.fiftyTwoWeekHigh.toFixed(2)}` },
+                { label: 'Forward PE', value: priceData.forwardPE ? safeNum(priceData.forwardPE).toFixed(1) : 'N/A' },
+                { label: 'Trailing PE', value: priceData.trailingPE ? safeNum(priceData.trailingPE).toFixed(1) : 'N/A' },
+                { label: 'Beta', value: priceData.beta != null ? safeNum(priceData.beta).toFixed(2) : 'N/A' },
+                { label: '52W Low', value: priceData.fiftyTwoWeekLow != null ? `$${safeNum(priceData.fiftyTwoWeekLow).toFixed(2)}` : 'N/A' },
+                { label: '52W High', value: priceData.fiftyTwoWeekHigh != null ? `$${safeNum(priceData.fiftyTwoWeekHigh).toFixed(2)}` : 'N/A' },
                 { label: 'Sector', value: priceData.sector || 'N/A' },
               ].map((row) => (
                 <View key={row.label} style={styles.dataRow}>

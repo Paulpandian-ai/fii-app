@@ -147,7 +147,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
                     <Text style={[styles.td, styles.tdTicker]}>{item.ticker}</Text>
                     <Text style={[styles.td, styles.tdShares]}>{item.shares}</Text>
                     <Text style={[styles.td, styles.tdCost]}>
-                      {item.avgCost > 0 ? `$${item.avgCost.toFixed(2)}` : '--'}
+                      {(item.avgCost ?? 0) > 0 ? `$${(item.avgCost ?? 0).toFixed(2)}` : '--'}
                     </Text>
                   </View>
                 )}

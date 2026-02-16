@@ -80,9 +80,9 @@ export const WatchlistTabs: React.FC<WatchlistTabsProps> = ({ onOpenSearch }) =>
             </Text>
           </View>
         )}
-        {item.changePercent !== undefined && (
-          <Text style={[styles.itemChange, { color: item.changePercent >= 0 ? '#10B981' : '#EF4444' }]}>
-            {item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(1)}%
+        {item.changePercent != null && (
+          <Text style={[styles.itemChange, { color: (item.changePercent ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+            {(item.changePercent ?? 0) >= 0 ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
           </Text>
         )}
         <TouchableOpacity

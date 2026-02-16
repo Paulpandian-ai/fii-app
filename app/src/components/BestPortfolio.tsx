@@ -101,11 +101,11 @@ export const BestPortfolio: React.FC<Props> = ({
       <View style={styles.heroCard}>
         <View style={styles.heroRow}>
           <Text style={styles.heroLabel}>Maximum Sharpe Ratio</Text>
-          <Text style={styles.heroValue}>{optimized.sharpeRatio.toFixed(2)}</Text>
+          <Text style={styles.heroValue}>{(optimized.sharpeRatio ?? 0).toFixed(2)}</Text>
         </View>
         <Text style={styles.heroSubline}>
-          Expected Return: {optimized.expectedReturn.toFixed(1)}% | Risk:{' '}
-          {optimized.expectedVolatility.toFixed(1)}%
+          Expected Return: {(optimized.expectedReturn ?? 0).toFixed(1)}% | Risk:{' '}
+          {(optimized.expectedVolatility ?? 0).toFixed(1)}%
         </Text>
       </View>
 
@@ -146,7 +146,7 @@ export const BestPortfolio: React.FC<Props> = ({
         <View style={styles.donutCenter}>
           <Text style={styles.donutCenterTitle}>OPTIMAL</Text>
           <Text style={styles.donutCenterValue}>
-            {optimized.sharpeRatio.toFixed(2)}
+            {(optimized.sharpeRatio ?? 0).toFixed(2)}
           </Text>
         </View>
       </View>
@@ -163,7 +163,7 @@ export const BestPortfolio: React.FC<Props> = ({
             />
             <Text style={styles.allocTicker}>{a.ticker}</Text>
             <Text style={styles.allocWeight}>
-              {(a.weight * 100).toFixed(1)}%
+              {((a.weight ?? 0) * 100).toFixed(1)}%
             </Text>
             <View style={styles.allocScore}>
               <SignalBadge signal={a.signal} />
@@ -194,7 +194,7 @@ export const BestPortfolio: React.FC<Props> = ({
                   ]}
                 />
                 <Text style={styles.compBarValue}>
-                  {bar.yours.toFixed(bar.suffix === '%' ? 1 : 2)}
+                  {(bar.yours ?? 0).toFixed(bar.suffix === '%' ? 1 : 2)}
                   {bar.suffix}
                 </Text>
               </View>
@@ -207,7 +207,7 @@ export const BestPortfolio: React.FC<Props> = ({
                   ]}
                 />
                 <Text style={[styles.compBarValue, bar.better && styles.compBarBetter]}>
-                  {bar.optimal.toFixed(bar.suffix === '%' ? 1 : 2)}
+                  {(bar.optimal ?? 0).toFixed(bar.suffix === '%' ? 1 : 2)}
                   {bar.suffix}
                 </Text>
               </View>

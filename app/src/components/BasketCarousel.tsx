@@ -61,14 +61,14 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket }
       <Text style={styles.stockRank}>{index + 1}</Text>
       <View style={styles.stockInfo}>
         <Text style={styles.stockTicker}>{stock.ticker}</Text>
-        <Text style={styles.stockWeight}>{(stock.weight * 100).toFixed(0)}%</Text>
+        <Text style={styles.stockWeight}>{((stock.weight ?? 0) * 100).toFixed(0)}%</Text>
       </View>
       <View style={[styles.stockSignal, { backgroundColor: SIGNAL_COLORS[stock.signal] + '20' }]}>
         <Text style={[styles.stockSignalText, { color: SIGNAL_COLORS[stock.signal] }]}>
           {stock.signal}
         </Text>
       </View>
-      <Text style={styles.stockScore}>{stock.score.toFixed(1)}</Text>
+      <Text style={styles.stockScore}>{(stock.score ?? 0).toFixed(1)}</Text>
     </View>
   );
 
@@ -113,7 +113,7 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket }
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>YTD</Text>
                   <Text style={[styles.metaValue, { color: basket.returnYTD >= 0 ? '#10B981' : '#EF4444' }]}>
-                    {basket.returnYTD >= 0 ? '+' : ''}{basket.returnYTD.toFixed(1)}%
+                    {(basket.returnYTD ?? 0) >= 0 ? '+' : ''}{(basket.returnYTD ?? 0).toFixed(1)}%
                   </Text>
                 </View>
                 <View style={styles.metaItem}>

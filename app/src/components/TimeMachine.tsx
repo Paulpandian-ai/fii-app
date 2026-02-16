@@ -23,7 +23,8 @@ interface Props {
   onYearsChange: (years: number) => void;
 }
 
-const formatCurrency = (v: number) => {
+const formatCurrency = (raw: number) => {
+  const v = raw ?? 0;
   if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
   if (v >= 1000) return `$${(v / 1000).toFixed(0)}K`;
   return `$${v.toFixed(0)}`;
@@ -214,7 +215,7 @@ export const TimeMachine: React.FC<Props> = ({
                     },
                   ]}
                 >
-                  {stats.lossProbability.toFixed(1)}%
+                  {(stats.lossProbability ?? 0).toFixed(1)}%
                 </Text>
               </View>
             </View>

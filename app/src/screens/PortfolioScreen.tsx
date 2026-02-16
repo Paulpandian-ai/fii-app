@@ -24,14 +24,18 @@ import { TrendingSection } from '../components/TrendingSection';
 import { SearchOverlay } from '../components/SearchOverlay';
 import type { Holding, RootStackParamList } from '../types';
 
-const formatMoney = (n: number): string => {
-  const abs = Math.abs(n);
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  return `$${n.toFixed(2)}`;
+const formatMoney = (n: unknown): string => {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${v.toFixed(2)}`;
 };
 
-const formatPct = (n: number): string => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+const formatPct = (n: unknown): string => {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+};
 
 // ─── Swipeable Row ───
 
@@ -192,10 +196,10 @@ export const PortfolioScreen: React.FC = () => {
           </View>
           <View style={styles.holdingCenter}>
             <Text style={styles.holdingPrice}>
-              ${(item.currentPrice || 0).toFixed(2)}
+              ${(item.currentPrice ?? 0).toFixed(2)}
             </Text>
             <Text style={[styles.holdingDailyChange, { color: isDailyPositive ? '#10B981' : '#EF4444' }]}>
-              {isDailyPositive ? '+' : ''}{(item.changePercent || 0).toFixed(2)}%
+              {isDailyPositive ? '+' : ''}{(item.changePercent ?? 0).toFixed(2)}%
             </Text>
           </View>
           <View style={styles.holdingRight}>

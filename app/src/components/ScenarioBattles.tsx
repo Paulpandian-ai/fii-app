@@ -70,11 +70,11 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                 <Text
                   style={[
                     styles.impactValue,
-                    { color: sc.portfolioImpact >= 0 ? '#10B981' : '#EF4444' },
+                    { color: (sc.portfolioImpact ?? 0) >= 0 ? '#10B981' : '#EF4444' },
                   ]}
                 >
-                  {sc.portfolioImpact >= 0 ? '+' : ''}
-                  {sc.portfolioImpact.toFixed(1)}%
+                  {(sc.portfolioImpact ?? 0) >= 0 ? '+' : ''}
+                  {(sc.portfolioImpact ?? 0).toFixed(1)}%
                 </Text>
               </View>
 
@@ -85,11 +85,11 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                 <Text
                   style={[
                     styles.impactValue,
-                    { color: sc.sp500Impact >= 0 ? '#10B981' : '#EF4444' },
+                    { color: (sc.sp500Impact ?? 0) >= 0 ? '#10B981' : '#EF4444' },
                   ]}
                 >
-                  {sc.sp500Impact >= 0 ? '+' : ''}
-                  {sc.sp500Impact.toFixed(1)}%
+                  {(sc.sp500Impact ?? 0) >= 0 ? '+' : ''}
+                  {(sc.sp500Impact ?? 0).toFixed(1)}%
                 </Text>
               </View>
             </View>
@@ -108,8 +108,8 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                   <View style={styles.performerChip}>
                     <Ionicons name="arrow-up" size={12} color="#10B981" />
                     <Text style={styles.performerText}>
-                      {sc.bestPerformer.ticker} {sc.bestPerformer.impact > 0 ? '+' : ''}
-                      {sc.bestPerformer.impact.toFixed(1)}%
+                      {sc.bestPerformer.ticker} {(sc.bestPerformer.impact ?? 0) > 0 ? '+' : ''}
+                      {(sc.bestPerformer.impact ?? 0).toFixed(1)}%
                     </Text>
                   </View>
                 )}
@@ -117,8 +117,8 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                   <View style={styles.performerChip}>
                     <Ionicons name="arrow-down" size={12} color="#EF4444" />
                     <Text style={styles.performerText}>
-                      {sc.worstPerformer.ticker} {sc.worstPerformer.impact > 0 ? '+' : ''}
-                      {sc.worstPerformer.impact.toFixed(1)}%
+                      {sc.worstPerformer.ticker} {(sc.worstPerformer.impact ?? 0) > 0 ? '+' : ''}
+                      {(sc.worstPerformer.impact ?? 0).toFixed(1)}%
                     </Text>
                   </View>
                 )}

@@ -174,7 +174,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
                 <Text style={styles.tickerBadgeName}>{selectedName}</Text>
                 {currentPrice > 0 && (
                   <Text style={styles.tickerBadgePrice}>
-                    Current: ${currentPrice.toFixed(2)}
+                    Current: ${(currentPrice ?? 0).toFixed(2)}
                   </Text>
                 )}
               </View>
@@ -193,7 +193,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
               <Text style={styles.label}>Average Cost per Share</Text>
               <TextInput
                 style={styles.input}
-                placeholder={currentPrice > 0 ? `Default: $${currentPrice.toFixed(2)}` : 'e.g. 150.00'}
+                placeholder={currentPrice > 0 ? `Default: $${(currentPrice ?? 0).toFixed(2)}` : 'e.g. 150.00'}
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 value={avgCost}
                 onChangeText={setAvgCost}
@@ -204,7 +204,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
                 <View style={styles.preview}>
                   <Text style={styles.previewLabel}>Position Value</Text>
                   <Text style={styles.previewValue}>
-                    ${(parseFloat(shares) * (parseFloat(avgCost) || currentPrice)).toFixed(2)}
+                    ${((parseFloat(shares) || 0) * ((parseFloat(avgCost) || 0) || (currentPrice ?? 0))).toFixed(2)}
                   </Text>
                 </View>
               )}
@@ -242,7 +242,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
               </View>
               <Text style={styles.confirmTicker}>{selectedTicker}</Text>
               <Text style={styles.confirmDetail}>
-                {shares} shares at ${(parseFloat(avgCost) || currentPrice).toFixed(2)}
+                {shares} shares at ${((parseFloat(avgCost) || 0) || (currentPrice ?? 0)).toFixed(2)}
               </Text>
               {currentPrice > 0 && (
                 <Text
@@ -251,7 +251,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
                     { color: addedGainLoss >= 0 ? '#10B981' : '#EF4444' },
                   ]}
                 >
-                  {addedGainLoss >= 0 ? '+' : ''}${addedGainLoss.toFixed(2)} unrealized
+                  {(addedGainLoss ?? 0) >= 0 ? '+' : ''}${(addedGainLoss ?? 0).toFixed(2)} unrealized
                 </Text>
               )}
               <TouchableOpacity style={styles.doneBtn} onPress={handleClose}>

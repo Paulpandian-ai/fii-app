@@ -86,15 +86,15 @@ export const TrendingSection: React.FC = () => {
             <Text style={styles.cardTicker}>{item.ticker}</Text>
             <Text style={styles.cardName} numberOfLines={1}>{item.companyName}</Text>
 
-            <Text style={[styles.cardChange, { color: item.changePercent >= 0 ? '#10B981' : '#EF4444' }]}>
-              {item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(1)}%
+            <Text style={[styles.cardChange, { color: (item.changePercent ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+              {(item.changePercent ?? 0) >= 0 ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
             </Text>
 
             <Text style={styles.cardReason} numberOfLines={2}>{item.reason}</Text>
 
             <View style={styles.cardBottom}>
               <Text style={styles.volumeText}>Vol: {item.volume}</Text>
-              <Text style={styles.scoreText}>FII: {item.score.toFixed(1)}</Text>
+              <Text style={styles.scoreText}>FII: {(item.score ?? 0).toFixed(1)}</Text>
             </View>
           </TouchableOpacity>
         ))}
