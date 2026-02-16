@@ -24,8 +24,12 @@ Routes:
 """
 
 import json
+import os
 import sys
 import traceback
+
+# Prevent yfinance from using curl_cffi (not available in Lambda)
+os.environ["YF_USE_CURL"] = "0"
 
 # Lambda adds /opt/python to sys.path for layers automatically.
 # This explicit insert ensures it works in all execution contexts.
@@ -276,9 +280,6 @@ def _handle_price(method, ticker):
     if not ticker or len(ticker) > 10:
         return _response(400, {"error": "Invalid ticker"})
 
-    import os
-    os.environ["YF_USE_CURL"] = "0"
-
     try:
         import yfinance as yf
         yf.set_tz_cache_location("/tmp")
@@ -320,9 +321,6 @@ def _handle_search(method, query_params):
     query = query_params.get("q", "").strip()
     if not query or len(query) < 1:
         return _response(400, {"error": "Missing 'q' query parameter"})
-
-    import os
-    os.environ["YF_USE_CURL"] = "0"
 
     try:
         import yfinance as yf
@@ -690,8 +688,6 @@ def _handle_portfolio_summary(user_id):
 
 def _fetch_price_quiet(ticker):
     """Fetch price for a ticker, return None on failure."""
-    import os
-    os.environ["YF_USE_CURL"] = "0"
     try:
         import yfinance as yf
         yf.set_tz_cache_location("/tmp")

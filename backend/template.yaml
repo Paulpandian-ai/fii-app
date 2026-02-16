@@ -334,13 +334,114 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
-        # Authenticated endpoints (catch-all for POST/PUT/DELETE)
+        # Portfolio endpoints (public for dev — no login yet)
+        GetPortfolio:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /portfolio
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostPortfolio:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /portfolio
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetPortfolioHealth:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /portfolio/health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetPortfolioSummary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /portfolio/summary
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostPortfolioCsv:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /portfolio/parse-csv
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        # Watchlist endpoints (public for dev)
+        GetWatchlist:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /watchlist
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostWatchlist:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /watchlist
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostWatchlistAdd:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /watchlist/add
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostWatchlistRemove:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /watchlist/remove
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        DeleteWatchlist:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /watchlist/{name}
+            Method: DELETE
+            Auth:
+              Authorizer: NONE
+        # Signal write endpoints (public for dev)
+        PostSignalGenerate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /signals/generate/{ticker}
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostSignalRefresh:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /signals/refresh-all
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /{proxy+}
             Method: ANY
+            Auth:
+              Authorizer: NONE
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
