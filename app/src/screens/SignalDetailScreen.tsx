@@ -12,6 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { ScoreRing } from '../components/ScoreRing';
 import { SignalBadge } from '../components/SignalBadge';
 import { FactorBar } from '../components/FactorBar';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getSignalDetail, getPrice } from '../services/api';
 import type {
   FullAnalysis,
@@ -109,9 +112,25 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   if (loading) {
     return (
       <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#60A5FA" />
-          <Text style={styles.loadingText}>Loading analysis...</Text>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="close" size={28} color="rgba(255,255,255,0.7)" />
+        </TouchableOpacity>
+        <View style={styles.content}>
+          <View style={{ alignItems: 'center' }}>
+            <Skeleton width={100} height={100} borderRadius={50} />
+            <View style={{ height: 16 }} />
+            <Skeleton width={100} height={30} borderRadius={8} />
+            <View style={{ height: 8 }} />
+            <Skeleton width={180} height={14} borderRadius={4} />
+          </View>
+          <View style={{ height: 32 }} />
+          <Skeleton width={'100%'} height={80} borderRadius={12} />
+          <View style={{ height: 20 }} />
+          <Skeleton width={'100%'} height={60} borderRadius={12} />
+          <View style={{ height: 12 }} />
+          <Skeleton width={'100%'} height={60} borderRadius={12} />
+          <View style={{ height: 12 }} />
+          <Skeleton width={'100%'} height={60} borderRadius={12} />
         </View>
       </LinearGradient>
     );
@@ -120,12 +139,16 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   if (!analysis) {
     return (
       <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>No data available for {ticker}</Text>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="close" size={28} color="rgba(255,255,255,0.7)" />
+        </TouchableOpacity>
+        <ErrorState
+          icon="warning"
+          message={`No data available for ${ticker}`}
+          subtitle="The analysis may not be ready yet. Try again later."
+          onRetry={loadData}
+          retryLabel="Retry"
+        />
       </LinearGradient>
     );
   }
@@ -280,12 +303,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
 
         {/* Disclaimer */}
-        <View style={styles.disclaimer}>
-          <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.3)" />
-          <Text style={styles.disclaimerText}>
-            For educational purposes only. Not financial advice. Always do your own research.
-          </Text>
-        </View>
+        <DisclaimerBanner />
         <View style={{ height: 40 }} />
       </ScrollView>
     </LinearGradient>

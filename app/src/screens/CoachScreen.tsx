@@ -4,12 +4,15 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList } from '../types';
+import type { RootTabParamList, RootStackParamList } from '../types';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 import { useCoachStore } from '../store/coachStore';
 import { DailyBriefing } from '../components/DailyBriefing';
@@ -90,7 +93,12 @@ export const CoachScreen: React.FC = () => {
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>Coach</Text>
-        {isLoading && <ActivityIndicator color="#60A5FA" size="small" />}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {isLoading && <ActivityIndicator color="#60A5FA" size="small" />}
+          <TouchableOpacity onPress={() => navigation.getParent<any>()?.navigate('Settings')}>
+            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -126,6 +134,8 @@ export const CoachScreen: React.FC = () => {
           isLoading={isWeeklyLoading}
           onRefresh={handleRefreshWeekly}
         />
+
+        <DisclaimerBanner />
       </ScrollView>
 
       {/* Section 5: Volatility Alert (Modal overlay) */}

@@ -15,6 +15,7 @@ import type { RootStackParamList } from '../types';
 
 import { useStrategyStore } from '../store/strategyStore';
 import { PortfolioXRay } from '../components/PortfolioXRay';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 export const PortfolioXRayScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -51,6 +52,7 @@ export const PortfolioXRayScreen: React.FC = () => {
           isLoading={isDiversifying}
         />
 
+        <DisclaimerBanner />
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </LinearGradient>

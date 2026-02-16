@@ -24,6 +24,7 @@ import { RebalancingMoves } from '../components/RebalancingMoves';
 import { TimeMachine } from '../components/TimeMachine';
 import { BuildPortfolio } from '../components/BuildPortfolio';
 import { ShareResults } from '../components/ShareResults';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 type SectionId =
   | 'hero'
@@ -192,6 +193,7 @@ export const WealthSimulatorScreen: React.FC = () => {
         initialNumToRender={3}
         maxToRenderPerBatch={2}
         windowSize={5}
+        ListFooterComponent={<DisclaimerBanner />}
       />
     </LinearGradient>
   );

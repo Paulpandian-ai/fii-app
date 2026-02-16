@@ -16,6 +16,7 @@ import type { RootStackParamList } from '../types';
 import { useStrategyStore } from '../store/strategyStore';
 import { DiversificationCoach } from '../components/DiversificationCoach';
 import { StrategyDashboard } from '../components/StrategyDashboard';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 export const AIAdvisorScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -70,6 +71,7 @@ export const AIAdvisorScreen: React.FC = () => {
           onRefresh={handleReportCardRefresh}
         />
 
+        <DisclaimerBanner />
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </LinearGradient>

@@ -15,6 +15,7 @@ import type { RootStackParamList } from '../types';
 
 import { useStrategyStore } from '../store/strategyStore';
 import { TaxDoctor } from '../components/TaxDoctor';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 export const TaxStrategyScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -106,6 +107,7 @@ export const TaxStrategyScreen: React.FC = () => {
           onRefresh={handleTaxRefresh}
         />
 
+        <DisclaimerBanner />
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </LinearGradient>

@@ -17,6 +17,7 @@ import type { RootStackParamList } from '../types';
 
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useStrategyStore } from '../store/strategyStore';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 
 const GRADE_COLORS: Record<string, string> = {
   'A+': '#10B981',
@@ -162,7 +163,12 @@ export const StrategyScreen: React.FC = () => {
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>Strategy</Text>
-        {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
+          <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -275,6 +281,8 @@ export const StrategyScreen: React.FC = () => {
             </Text>
           </View>
         )}
+
+        <DisclaimerBanner />
       </ScrollView>
     </LinearGradient>
   );

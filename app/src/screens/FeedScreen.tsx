@@ -7,7 +7,7 @@ import {
   FlatList,
   StatusBar,
   TouchableOpacity,
-  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import type { ViewToken } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { FeedCard } from '../components/FeedCard';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
+import { Skeleton } from '../components/Skeleton';
 import { useFeedStore } from '../store/feedStore';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { getFeed } from '../services/api';
@@ -86,6 +87,7 @@ export const FeedScreen: React.FC = () => {
   const portfolioTickers = usePortfolioStore((s) => s.getPortfolioTickers)();
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [searchVisible, setSearchVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -227,13 +229,28 @@ export const FeedScreen: React.FC = () => {
     []
   );
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadFeed();
+    setRefreshing(false);
+  }, []);
+
   if (isLoading && feed.length === 0) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#60A5FA" />
-          <Text style={styles.loadingText}>Loading signals...</Text>
+          <Skeleton width={130} height={130} borderRadius={65} />
+          <View style={{ height: 20 }} />
+          <Skeleton width={120} height={36} borderRadius={8} />
+          <View style={{ height: 8 }} />
+          <Skeleton width={200} height={16} borderRadius={4} />
+          <View style={{ height: 24 }} />
+          <Skeleton width={80} height={32} borderRadius={16} />
+          <View style={{ height: 20 }} />
+          <Skeleton width={260} height={14} borderRadius={4} />
+          <View style={{ height: 8 }} />
+          <Skeleton width={200} height={14} borderRadius={4} />
         </View>
       </View>
     );
@@ -242,6 +259,11 @@ export const FeedScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* Settings gear */}
+      <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')}>
+        <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.7)" />
+      </TouchableOpacity>
 
       {/* Search button */}
       <TouchableOpacity style={styles.searchBtn} onPress={() => setSearchVisible(true)}>
@@ -265,6 +287,13 @@ export const FeedScreen: React.FC = () => {
         maxToRenderPerBatch={3}
         initialNumToRender={2}
         removeClippedSubviews={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#60A5FA"
+          />
+        }
       />
 
       <SearchOverlay
@@ -286,10 +315,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 16,
-    marginTop: 16,
+  settingsBtn: {
+    position: 'absolute',
+    top: 54,
+    right: 16,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   searchBtn: {
     position: 'absolute',

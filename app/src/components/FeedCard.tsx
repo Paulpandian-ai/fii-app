@@ -7,6 +7,7 @@ import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
+import { DisclaimerBanner } from './DisclaimerBanner';
 import { getPrice } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
@@ -182,6 +183,9 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         <View style={styles.tapHint}>
           <Text style={styles.tapHintText}>Tap for full analysis</Text>
         </View>
+
+        {/* Disclaimer */}
+        <DisclaimerBanner />
 
         {/* Swipe hint */}
         <View style={styles.hintContainer}>

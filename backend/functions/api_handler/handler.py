@@ -124,22 +124,44 @@ def _handle_signal(method, ticker, user_id):
     # Fetch full detail from S3
     full_signal = s3.read_json(f"signals/{ticker}.json")
 
+    result = None
     if full_signal:
-        return _response(200, full_signal)
+        result = full_signal
+    else:
+        # Fallback: return DynamoDB summary
+        top_factors = json.loads(summary.get("topFactors", "[]"))
+        result = {
+            "ticker": summary["ticker"],
+            "companyName": summary.get("companyName", ticker),
+            "compositeScore": float(summary.get("compositeScore", 5.0)),
+            "signal": summary.get("signal", "HOLD"),
+            "confidence": summary.get("confidence", "MEDIUM"),
+            "insight": summary.get("insight", ""),
+            "reasoning": summary.get("reasoning", ""),
+            "topFactors": top_factors,
+            "lastUpdated": summary.get("lastUpdated", ""),
+        }
 
-    # Fallback: return DynamoDB summary
-    top_factors = json.loads(summary.get("topFactors", "[]"))
-    return _response(200, {
-        "ticker": summary["ticker"],
-        "companyName": summary.get("companyName", ticker),
-        "compositeScore": float(summary.get("compositeScore", 5.0)),
-        "signal": summary.get("signal", "HOLD"),
-        "confidence": summary.get("confidence", "MEDIUM"),
-        "insight": summary.get("insight", ""),
-        "reasoning": summary.get("reasoning", ""),
-        "topFactors": top_factors,
-        "lastUpdated": summary.get("lastUpdated", ""),
-    })
+    # Add signal freshness indicator
+    from datetime import datetime, timezone
+    last_updated = result.get("lastUpdated") or result.get("updatedAt") or ""
+    freshness = "fresh"
+    freshness_days = 0
+    if last_updated:
+        try:
+            ts = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+            freshness_days = (datetime.now(timezone.utc) - ts).days
+            if freshness_days > 30:
+                freshness = "stale"
+            elif freshness_days > 7:
+                freshness = "aging"
+        except Exception:
+            pass
+    result["freshness"] = freshness
+    result["freshnessDays"] = freshness_days
+    result["dataSources"] = ["SEC EDGAR", "Federal Reserve FRED", "Claude AI"]
+
+    return _response(200, result)
 
 
 def _handle_batch_signals(method, query_params, user_id):
@@ -280,14 +302,43 @@ def _handle_feed(method, body, user_id):
 # ─── Price Endpoint ───
 
 def _handle_price(method, ticker):
-    """GET /price/<ticker> — Real-time price, with DynamoDB signal fallback."""
+    """GET /price/<ticker> — Real-time price with DynamoDB cache + signal fallback."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
     if not ticker or len(ticker) > 10:
         return _response(400, {"error": "Invalid ticker"})
 
-    # Try yfinance first
+    from datetime import datetime, timezone
+
+    # 1) Check DynamoDB price cache (fresh within 5 minutes)
+    cached = db.get_item(f"PRICE#{ticker}", "LATEST")
+    if cached:
+        cached_at = cached.get("cachedAt", "")
+        try:
+            ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds < 300:  # 5-minute TTL
+                return _response(200, {
+                    "ticker": ticker,
+                    "price": float(cached.get("price", 0)),
+                    "previousClose": float(cached.get("previousClose", 0)),
+                    "change": float(cached.get("change", 0)),
+                    "changePercent": float(cached.get("changePercent", 0)),
+                    "marketCap": int(cached.get("marketCap", 0)),
+                    "fiftyTwoWeekLow": float(cached.get("fiftyTwoWeekLow", 0)),
+                    "fiftyTwoWeekHigh": float(cached.get("fiftyTwoWeekHigh", 0)),
+                    "beta": float(cached.get("beta", 1.0)),
+                    "forwardPE": float(cached.get("forwardPE", 0)),
+                    "trailingPE": float(cached.get("trailingPE", 0)),
+                    "sector": cached.get("sector", ""),
+                    "companyName": cached.get("companyName", ticker),
+                    "source": "cache",
+                })
+        except Exception:
+            pass
+
+    # 2) Try yfinance for live data
     try:
         import yfinance as yf
         yf.set_tz_cache_location("/tmp")
@@ -302,7 +353,7 @@ def _handle_price(method, ticker):
             change = current_price - previous_close if previous_close else 0
             change_pct = (change / previous_close * 100) if previous_close else 0
 
-            return _response(200, {
+            price_data = {
                 "ticker": ticker,
                 "price": round(current_price, 2),
                 "previousClose": round(previous_close or 0, 2),
@@ -316,14 +367,44 @@ def _handle_price(method, ticker):
                 "trailingPE": round(info.get("trailingPE", 0) or 0, 2),
                 "sector": info.get("sector", ""),
                 "companyName": info.get("shortName") or info.get("longName", ticker),
-            })
+                "source": "live",
+            }
+
+            # 3) Cache to DynamoDB
+            try:
+                cache_item = dict(price_data)
+                cache_item["cachedAt"] = datetime.now(timezone.utc).isoformat()
+                db.put_item(f"PRICE#{ticker}", "LATEST", cache_item)
+            except Exception:
+                pass
+
+            return _response(200, price_data)
     except Exception:
         pass
 
-    # Fallback: try DynamoDB signal data
+    # 4) Return stale cache if available (any age)
+    if cached:
+        return _response(200, {
+            "ticker": ticker,
+            "price": float(cached.get("price", 0)) or None,
+            "previousClose": float(cached.get("previousClose", 0)),
+            "change": float(cached.get("change", 0)),
+            "changePercent": float(cached.get("changePercent", 0)),
+            "marketCap": int(cached.get("marketCap", 0)),
+            "fiftyTwoWeekLow": float(cached.get("fiftyTwoWeekLow", 0)),
+            "fiftyTwoWeekHigh": float(cached.get("fiftyTwoWeekHigh", 0)),
+            "beta": float(cached.get("beta", 1.0)),
+            "forwardPE": float(cached.get("forwardPE", 0)),
+            "trailingPE": float(cached.get("trailingPE", 0)),
+            "sector": cached.get("sector", ""),
+            "companyName": cached.get("companyName", ticker),
+            "source": "stale_cache",
+            "note": "Price may be outdated",
+        })
+
+    # 5) Fallback: try DynamoDB signal data
     signal = db.get_item(f"SIGNAL#{ticker}", "LATEST")
     if signal:
-        score = float(signal.get("compositeScore", 5.0))
         return _response(200, {
             "ticker": ticker,
             "price": None,

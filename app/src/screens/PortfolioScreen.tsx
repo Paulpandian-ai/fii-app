@@ -22,6 +22,7 @@ import { PortfolioHealthGauge } from '../components/PortfolioHealthGauge';
 import { StockDiscovery } from '../components/StockDiscovery';
 import { TrendingSection } from '../components/TrendingSection';
 import { SearchOverlay } from '../components/SearchOverlay';
+import { Skeleton } from '../components/Skeleton';
 import type { Holding, RootStackParamList } from '../types';
 
 const formatMoney = (n: unknown): string => {
@@ -348,9 +349,17 @@ export const PortfolioScreen: React.FC = () => {
   if (isLoading && holdings.length === 0) {
     return (
       <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.topTitle}>Portfolio</Text>
+        </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#60A5FA" />
-          <Text style={styles.loadingText}>Loading portfolio...</Text>
+          <Skeleton width={'85%'} height={100} borderRadius={16} />
+          <View style={{ height: 16 }} />
+          <Skeleton width={'85%'} height={60} borderRadius={12} />
+          <View style={{ height: 12 }} />
+          <Skeleton width={'85%'} height={60} borderRadius={12} />
+          <View style={{ height: 12 }} />
+          <Skeleton width={'85%'} height={60} borderRadius={12} />
         </View>
       </LinearGradient>
     );
@@ -361,9 +370,14 @@ export const PortfolioScreen: React.FC = () => {
       {/* Top bar */}
       <View style={styles.topBar}>
         <Text style={styles.topTitle}>Portfolio</Text>
-        <TouchableOpacity style={styles.searchBtn} onPress={openNavigateSearch}>
-          <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
-        </TouchableOpacity>
+        <View style={styles.topBarRight}>
+          <TouchableOpacity style={styles.searchBtn} onPress={openNavigateSearch}>
+            <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.searchBtn} onPress={() => navigation.navigate('Settings')}>
+            <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -395,7 +409,6 @@ export const PortfolioScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: 'rgba(255,255,255,0.6)', fontSize: 16, marginTop: 16 },
 
   // Top bar
   topBar: {
@@ -407,6 +420,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   topTitle: { color: '#FFF', fontSize: 28, fontWeight: '800' },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchBtn: {
     width: 36,
     height: 36,

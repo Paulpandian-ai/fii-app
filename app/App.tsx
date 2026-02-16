@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { FeedScreen } from './src/screens/FeedScreen';
@@ -15,6 +16,9 @@ import { WealthSimulatorScreen } from './src/screens/WealthSimulatorScreen';
 import { TaxStrategyScreen } from './src/screens/TaxStrategyScreen';
 import { PortfolioXRayScreen } from './src/screens/PortfolioXRayScreen';
 import { AIAdvisorScreen } from './src/screens/AIAdvisorScreen';
+import { OnboardingScreen } from './src/screens/OnboardingScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
+import { useCoachStore } from './src/store/coachStore';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
 const WrappedFeed = () => (
@@ -44,6 +48,9 @@ const WrappedPortfolioXRay = () => (
 const WrappedAIAdvisor = () => (
   <ErrorBoundary screenName="AIAdvisorScreen"><AIAdvisorScreen /></ErrorBoundary>
 );
+const WrappedSettings = () => (
+  <ErrorBoundary screenName="SettingsScreen"><SettingsScreen /></ErrorBoundary>
+);
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -56,6 +63,9 @@ const TAB_ICONS: Record<keyof RootTabParamList, { focused: keyof typeof Ionicons
 };
 
 function MainTabs() {
+  const dailyDismissed = useCoachStore((s) => s.dailyDismissed);
+  const daily = useCoachStore((s) => s.daily);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -84,12 +94,45 @@ function MainTabs() {
       <Tab.Screen name="Feed" component={WrappedFeed} />
       <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
       <Tab.Screen name="Strategy" component={WrappedStrategy} />
-      <Tab.Screen name="Coach" component={WrappedCoach} />
+      <Tab.Screen
+        name="Coach"
+        component={WrappedCoach}
+        options={{
+          tabBarBadge: daily && !dailyDismissed ? '' : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: '#EF4444',
+            minWidth: 8,
+            maxHeight: 8,
+            borderRadius: 4,
+            fontSize: 0,
+          },
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
 export default function App() {
+  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem('@fii_onboarding_complete').then((val) => {
+      setShowOnboarding(val !== 'true');
+    });
+  }, []);
+
+  // Wait for onboarding check
+  if (showOnboarding === null) return null;
+
+  if (showOnboarding) {
+    return (
+      <>
+        <StatusBar style="light" />
+        <OnboardingScreen onComplete={() => setShowOnboarding(false)} />
+      </>
+    );
+  }
+
   return (
     <NavigationContainer>
       <StatusBar style="light" />
@@ -122,6 +165,14 @@ export default function App() {
           name="AIAdvisor"
           component={WrappedAIAdvisor}
           options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={WrappedSettings}
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
         />
       </Stack.Navigator>
     </NavigationContainer>
