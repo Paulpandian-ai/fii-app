@@ -13,7 +13,8 @@ const getScoreColor = (score: number): string => {
   return '#10B981';                  // green
 };
 
-export const ScoreRing: React.FC<ScoreRingProps> = ({ score, size = 120 }) => {
+export const ScoreRing: React.FC<ScoreRingProps> = ({ score: rawScore, size = 120 }) => {
+  const score = typeof rawScore === 'number' && !Number.isNaN(rawScore) ? rawScore : 0;
   const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;

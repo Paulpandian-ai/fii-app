@@ -24,8 +24,17 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   LOW: '#EF4444',
 };
 
-const formatTimeAgo = (isoDate: string): string => {
+/** Safe number: coerce anything to a finite number or 0. */
+const safeNum = (v: unknown): number => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatTimeAgo = (isoDate: string | undefined | null): string => {
+  if (!isoDate) return 'Updated recently';
   const diff = Date.now() - new Date(isoDate).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return 'Updated recently';
   const hours = Math.floor(diff / (1000 * 60 * 60));
   if (hours < 1) return 'Updated just now';
   if (hours < 24) return `Updated ${hours}h ago`;
@@ -34,7 +43,10 @@ const formatTimeAgo = (isoDate: string): string => {
 };
 
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
-  const topFactors = item.topFactors.slice(0, 3);
+  // Defensive defaults for all fields that may arrive as null/undefined
+  const topFactors = Array.isArray(item.topFactors) ? item.topFactors.slice(0, 3) : [];
+  const score = safeNum(item.compositeScore);
+
   const ownedShares = usePortfolioStore((s) => s.getSharesForTicker)(item.ticker);
   const isBookmarked = useWatchlistStore((s) => s.isInAnyWatchlist)(item.ticker);
   const addTicker = useWatchlistStore((s) => s.addTicker);
@@ -50,7 +62,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   }, [isBookmarked, item.ticker, item.companyName, activeWatchlistId, addTicker, removeTicker]);
 
   const [priceData, setPriceData] = useState<{
-    price: number;
+    price: number | null;
     change: number;
     changePercent: number;
   } | null>(null);
@@ -58,16 +70,19 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   useEffect(() => {
     getPrice(item.ticker)
       .then((data) => {
+        // price can be null when yfinance is unavailable
+        const p = typeof data.price === 'number' && Number.isFinite(data.price) ? data.price : null;
         setPriceData({
-          price: data.price,
-          change: data.change,
-          changePercent: data.changePercent || data.change_percent || 0,
+          price: p,
+          change: safeNum(data.change),
+          changePercent: safeNum(data.changePercent || data.change_percent),
         });
       })
       .catch(() => {});
   }, [item.ticker]);
 
   const confidence = item.confidence;
+  const hasPriceToShow = priceData && priceData.price != null;
 
   return (
     <TouchableOpacity
@@ -95,7 +110,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
         {/* Score Ring */}
         <View style={styles.scoreContainer}>
-          <ScoreRing score={item.compositeScore} size={130} />
+          <ScoreRing score={score} size={130} />
         </View>
 
         {/* Ticker & Company */}
@@ -110,10 +125,10 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         )}
 
-        {/* Price */}
-        {priceData && (
+        {/* Price — only shown when we have a real numeric price */}
+        {hasPriceToShow && (
           <View style={styles.priceRow}>
-            <Text style={styles.price}>${priceData.price.toFixed(2)}</Text>
+            <Text style={styles.price}>${(priceData.price as number).toFixed(2)}</Text>
             <Text
               style={[
                 styles.priceChange,
@@ -128,7 +143,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
         {/* Signal Badge + Confidence */}
         <View style={styles.signalRow}>
-          <SignalBadge signal={item.signal} />
+          <SignalBadge signal={item.signal || 'HOLD'} />
           {confidence && (
             <View
               style={[
@@ -150,15 +165,15 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
         {/* Insight */}
         <Text style={styles.insight} numberOfLines={2}>
-          {item.insight}
+          {item.insight || ''}
         </Text>
 
         {/* Factor Bars (compact) */}
         <View style={styles.factorsRow}>
           {topFactors.map((f, i) => (
-            <React.Fragment key={f.name}>
+            <React.Fragment key={f.name || `f-${i}`}>
               {i > 0 && <Text style={styles.separator}>|</Text>}
-              <FactorBar factor={f} compact />
+              <FactorBar factor={f} compact={true} />
             </React.Fragment>
           ))}
         </View>
