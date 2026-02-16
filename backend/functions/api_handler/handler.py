@@ -273,13 +273,14 @@ def _handle_feed(method, body, user_id):
 # ─── Price Endpoint ───
 
 def _handle_price(method, ticker):
-    """GET /price/<ticker> — Real-time price from Yahoo Finance."""
+    """GET /price/<ticker> — Real-time price, with DynamoDB signal fallback."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
     if not ticker or len(ticker) > 10:
         return _response(400, {"error": "Invalid ticker"})
 
+    # Try yfinance first
     try:
         import yfinance as yf
         yf.set_tz_cache_location("/tmp")
@@ -289,32 +290,183 @@ def _handle_price(method, ticker):
 
         current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
         previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
-        change = current_price - previous_close if current_price and previous_close else 0
-        change_pct = (change / previous_close * 100) if previous_close else 0
 
+        if current_price:
+            change = current_price - previous_close if previous_close else 0
+            change_pct = (change / previous_close * 100) if previous_close else 0
+
+            return _response(200, {
+                "ticker": ticker,
+                "price": round(current_price, 2),
+                "previousClose": round(previous_close or 0, 2),
+                "change": round(change, 2),
+                "changePercent": round(change_pct, 2),
+                "marketCap": info.get("marketCap", 0),
+                "fiftyTwoWeekLow": round(info.get("fiftyTwoWeekLow", 0) or 0, 2),
+                "fiftyTwoWeekHigh": round(info.get("fiftyTwoWeekHigh", 0) or 0, 2),
+                "beta": round(info.get("beta", 1.0) or 1.0, 2),
+                "forwardPE": round(info.get("forwardPE", 0) or 0, 2),
+                "trailingPE": round(info.get("trailingPE", 0) or 0, 2),
+                "sector": info.get("sector", ""),
+                "companyName": info.get("shortName") or info.get("longName", ticker),
+            })
+    except Exception:
+        pass
+
+    # Fallback: try DynamoDB signal data
+    signal = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+    if signal:
+        score = float(signal.get("compositeScore", 5.0))
         return _response(200, {
             "ticker": ticker,
-            "price": round(current_price or 0, 2),
-            "previousClose": round(previous_close or 0, 2),
-            "change": round(change, 2),
-            "changePercent": round(change_pct, 2),
-            "marketCap": info.get("marketCap", 0),
-            "fiftyTwoWeekLow": round(info.get("fiftyTwoWeekLow", 0) or 0, 2),
-            "fiftyTwoWeekHigh": round(info.get("fiftyTwoWeekHigh", 0) or 0, 2),
-            "beta": round(info.get("beta", 1.0) or 1.0, 2),
-            "forwardPE": round(info.get("forwardPE", 0) or 0, 2),
-            "trailingPE": round(info.get("trailingPE", 0) or 0, 2),
-            "sector": info.get("sector", ""),
-            "companyName": info.get("shortName") or info.get("longName", ticker),
+            "price": None,
+            "previousClose": 0,
+            "change": 0,
+            "changePercent": 0,
+            "marketCap": 0,
+            "fiftyTwoWeekLow": 0,
+            "fiftyTwoWeekHigh": 0,
+            "beta": 0,
+            "forwardPE": 0,
+            "trailingPE": 0,
+            "sector": "",
+            "companyName": signal.get("companyName", ticker),
+            "note": "Live price unavailable — showing signal data only",
         })
-    except Exception as e:
-        return _response(500, {"error": f"Failed to fetch price for {ticker}: {str(e)}"})
+
+    return _response(200, {
+        "ticker": ticker,
+        "price": None,
+        "error": "Price data temporarily unavailable",
+    })
 
 
 # ─── Search Endpoint ───
 
+# Built-in ticker database — no yfinance needed
+_TICKER_DB = None
+
+def _get_ticker_db():
+    """Load ticker database from S3 (cached in module global)."""
+    global _TICKER_DB
+    if _TICKER_DB is not None:
+        return _TICKER_DB
+
+    s3_data = s3.read_json("tickers/us_top_500.json")
+    if s3_data and isinstance(s3_data, list):
+        _TICKER_DB = s3_data
+    elif s3_data and isinstance(s3_data, dict) and "tickers" in s3_data:
+        _TICKER_DB = s3_data["tickers"]
+    else:
+        _TICKER_DB = _FALLBACK_TICKERS
+    return _TICKER_DB
+
+
+_FALLBACK_TICKERS = [
+    {"ticker": "NVDA", "name": "NVIDIA Corporation", "sector": "Technology"},
+    {"ticker": "AAPL", "name": "Apple Inc.", "sector": "Technology"},
+    {"ticker": "MSFT", "name": "Microsoft Corporation", "sector": "Technology"},
+    {"ticker": "AMD", "name": "Advanced Micro Devices", "sector": "Technology"},
+    {"ticker": "GOOGL", "name": "Alphabet Inc.", "sector": "Communication Services"},
+    {"ticker": "AMZN", "name": "Amazon.com, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "META", "name": "Meta Platforms, Inc.", "sector": "Communication Services"},
+    {"ticker": "TSLA", "name": "Tesla, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "AVGO", "name": "Broadcom Inc.", "sector": "Technology"},
+    {"ticker": "CRM", "name": "Salesforce, Inc.", "sector": "Technology"},
+    {"ticker": "NFLX", "name": "Netflix, Inc.", "sector": "Communication Services"},
+    {"ticker": "JPM", "name": "JPMorgan Chase & Co.", "sector": "Financial Services"},
+    {"ticker": "V", "name": "Visa Inc.", "sector": "Financial Services"},
+    {"ticker": "UNH", "name": "UnitedHealth Group", "sector": "Healthcare"},
+    {"ticker": "XOM", "name": "Exxon Mobil Corporation", "sector": "Energy"},
+    {"ticker": "BRK.B", "name": "Berkshire Hathaway Inc.", "sector": "Financial Services"},
+    {"ticker": "LLY", "name": "Eli Lilly and Company", "sector": "Healthcare"},
+    {"ticker": "WMT", "name": "Walmart Inc.", "sector": "Consumer Defensive"},
+    {"ticker": "MA", "name": "Mastercard Incorporated", "sector": "Financial Services"},
+    {"ticker": "PG", "name": "Procter & Gamble Co.", "sector": "Consumer Defensive"},
+    {"ticker": "ORCL", "name": "Oracle Corporation", "sector": "Technology"},
+    {"ticker": "HD", "name": "The Home Depot, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "COST", "name": "Costco Wholesale Corporation", "sector": "Consumer Defensive"},
+    {"ticker": "ABBV", "name": "AbbVie Inc.", "sector": "Healthcare"},
+    {"ticker": "KO", "name": "The Coca-Cola Company", "sector": "Consumer Defensive"},
+    {"ticker": "PEP", "name": "PepsiCo, Inc.", "sector": "Consumer Defensive"},
+    {"ticker": "BAC", "name": "Bank of America Corporation", "sector": "Financial Services"},
+    {"ticker": "MRK", "name": "Merck & Co., Inc.", "sector": "Healthcare"},
+    {"ticker": "CVX", "name": "Chevron Corporation", "sector": "Energy"},
+    {"ticker": "ADBE", "name": "Adobe Inc.", "sector": "Technology"},
+    {"ticker": "TMO", "name": "Thermo Fisher Scientific", "sector": "Healthcare"},
+    {"ticker": "LIN", "name": "Linde plc", "sector": "Basic Materials"},
+    {"ticker": "ACN", "name": "Accenture plc", "sector": "Technology"},
+    {"ticker": "CSCO", "name": "Cisco Systems, Inc.", "sector": "Technology"},
+    {"ticker": "ABT", "name": "Abbott Laboratories", "sector": "Healthcare"},
+    {"ticker": "WFC", "name": "Wells Fargo & Company", "sector": "Financial Services"},
+    {"ticker": "DHR", "name": "Danaher Corporation", "sector": "Healthcare"},
+    {"ticker": "MCD", "name": "McDonald's Corporation", "sector": "Consumer Cyclical"},
+    {"ticker": "TXN", "name": "Texas Instruments", "sector": "Technology"},
+    {"ticker": "PM", "name": "Philip Morris International", "sector": "Consumer Defensive"},
+    {"ticker": "NEE", "name": "NextEra Energy, Inc.", "sector": "Utilities"},
+    {"ticker": "INTC", "name": "Intel Corporation", "sector": "Technology"},
+    {"ticker": "DIS", "name": "The Walt Disney Company", "sector": "Communication Services"},
+    {"ticker": "VZ", "name": "Verizon Communications", "sector": "Communication Services"},
+    {"ticker": "CMCSA", "name": "Comcast Corporation", "sector": "Communication Services"},
+    {"ticker": "IBM", "name": "International Business Machines", "sector": "Technology"},
+    {"ticker": "QCOM", "name": "QUALCOMM Incorporated", "sector": "Technology"},
+    {"ticker": "NOW", "name": "ServiceNow, Inc.", "sector": "Technology"},
+    {"ticker": "INTU", "name": "Intuit Inc.", "sector": "Technology"},
+    {"ticker": "AMAT", "name": "Applied Materials, Inc.", "sector": "Technology"},
+    {"ticker": "GE", "name": "GE Aerospace", "sector": "Industrials"},
+    {"ticker": "ISRG", "name": "Intuitive Surgical, Inc.", "sector": "Healthcare"},
+    {"ticker": "CAT", "name": "Caterpillar Inc.", "sector": "Industrials"},
+    {"ticker": "GS", "name": "Goldman Sachs Group", "sector": "Financial Services"},
+    {"ticker": "T", "name": "AT&T Inc.", "sector": "Communication Services"},
+    {"ticker": "BKNG", "name": "Booking Holdings Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "AXP", "name": "American Express Company", "sector": "Financial Services"},
+    {"ticker": "SPGI", "name": "S&P Global Inc.", "sector": "Financial Services"},
+    {"ticker": "BLK", "name": "BlackRock, Inc.", "sector": "Financial Services"},
+    {"ticker": "PFE", "name": "Pfizer Inc.", "sector": "Healthcare"},
+    {"ticker": "LOW", "name": "Lowe's Companies, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "UNP", "name": "Union Pacific Corporation", "sector": "Industrials"},
+    {"ticker": "SYK", "name": "Stryker Corporation", "sector": "Healthcare"},
+    {"ticker": "RTX", "name": "RTX Corporation", "sector": "Industrials"},
+    {"ticker": "HON", "name": "Honeywell International", "sector": "Industrials"},
+    {"ticker": "DE", "name": "Deere & Company", "sector": "Industrials"},
+    {"ticker": "UBER", "name": "Uber Technologies, Inc.", "sector": "Technology"},
+    {"ticker": "SCHW", "name": "Charles Schwab Corporation", "sector": "Financial Services"},
+    {"ticker": "LRCX", "name": "Lam Research Corporation", "sector": "Technology"},
+    {"ticker": "ELV", "name": "Elevance Health, Inc.", "sector": "Healthcare"},
+    {"ticker": "PANW", "name": "Palo Alto Networks", "sector": "Technology"},
+    {"ticker": "MDLZ", "name": "Mondelez International", "sector": "Consumer Defensive"},
+    {"ticker": "KLAC", "name": "KLA Corporation", "sector": "Technology"},
+    {"ticker": "CI", "name": "The Cigna Group", "sector": "Healthcare"},
+    {"ticker": "MMC", "name": "Marsh & McLennan", "sector": "Financial Services"},
+    {"ticker": "ADP", "name": "Automatic Data Processing", "sector": "Industrials"},
+    {"ticker": "SNPS", "name": "Synopsys, Inc.", "sector": "Technology"},
+    {"ticker": "CDNS", "name": "Cadence Design Systems", "sector": "Technology"},
+    {"ticker": "REGN", "name": "Regeneron Pharmaceuticals", "sector": "Healthcare"},
+    {"ticker": "CME", "name": "CME Group Inc.", "sector": "Financial Services"},
+    {"ticker": "COP", "name": "ConocoPhillips", "sector": "Energy"},
+    {"ticker": "SO", "name": "The Southern Company", "sector": "Utilities"},
+    {"ticker": "DUK", "name": "Duke Energy Corporation", "sector": "Utilities"},
+    {"ticker": "ICE", "name": "Intercontinental Exchange", "sector": "Financial Services"},
+    {"ticker": "PYPL", "name": "PayPal Holdings, Inc.", "sector": "Financial Services"},
+    {"ticker": "ZTS", "name": "Zoetis Inc.", "sector": "Healthcare"},
+    {"ticker": "PLD", "name": "Prologis, Inc.", "sector": "Real Estate"},
+    {"ticker": "AMT", "name": "American Tower Corporation", "sector": "Real Estate"},
+    {"ticker": "SHW", "name": "The Sherwin-Williams Company", "sector": "Basic Materials"},
+    {"ticker": "CB", "name": "Chubb Limited", "sector": "Financial Services"},
+    {"ticker": "FI", "name": "Fiserv, Inc.", "sector": "Financial Services"},
+    {"ticker": "USB", "name": "U.S. Bancorp", "sector": "Financial Services"},
+    {"ticker": "TJX", "name": "The TJX Companies", "sector": "Consumer Cyclical"},
+    {"ticker": "SBUX", "name": "Starbucks Corporation", "sector": "Consumer Cyclical"},
+    {"ticker": "NKE", "name": "NIKE, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "ABNB", "name": "Airbnb, Inc.", "sector": "Consumer Cyclical"},
+    {"ticker": "COIN", "name": "Coinbase Global, Inc.", "sector": "Financial Services"},
+    {"ticker": "SQ", "name": "Block, Inc.", "sector": "Financial Services"},
+    {"ticker": "CRWD", "name": "CrowdStrike Holdings", "sector": "Technology"},
+]
+
+
 def _handle_search(method, query_params):
-    """GET /search?q=<query> — Ticker search via yfinance."""
+    """GET /search?q=<query> — Ticker search via DynamoDB signals + S3 ticker list."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
@@ -322,49 +474,43 @@ def _handle_search(method, query_params):
     if not query or len(query) < 1:
         return _response(400, {"error": "Missing 'q' query parameter"})
 
-    try:
-        import yfinance as yf
-        yf.set_tz_cache_location("/tmp")
+    query_upper = query.upper()
+    query_lower = query.lower()
+    results = []
+    seen = set()
 
-        # Try direct ticker lookup first
-        results = []
-        ticker_upper = query.upper()
+    # 1. Check DynamoDB for an exact signal match
+    signal = db.get_item(f"SIGNAL#{query_upper}", "LATEST")
+    if signal and signal.get("ticker"):
+        t = signal["ticker"]
+        results.append({
+            "ticker": t,
+            "companyName": signal.get("companyName", t),
+            "exchange": "",
+            "sector": "",
+        })
+        seen.add(t)
 
-        # Try the exact ticker
-        try:
-            stock = yf.Ticker(ticker_upper)
-            info = stock.info or {}
-            name = info.get("shortName") or info.get("longName", "")
-            if name and info.get("regularMarketPrice"):
-                results.append({
-                    "ticker": ticker_upper,
-                    "companyName": name,
-                    "exchange": info.get("exchange", ""),
-                    "sector": info.get("sector", ""),
-                })
-        except Exception:
-            pass
+    # 2. Search the S3 / fallback ticker database
+    ticker_db = _get_ticker_db()
+    for entry in ticker_db:
+        t = entry.get("ticker", "")
+        name = entry.get("name", "")
+        if t in seen:
+            continue
+        # Match ticker prefix or company name substring
+        if t.startswith(query_upper) or query_lower in name.lower():
+            results.append({
+                "ticker": t,
+                "companyName": name,
+                "exchange": entry.get("exchange", ""),
+                "sector": entry.get("sector", ""),
+            })
+            seen.add(t)
+        if len(results) >= 10:
+            break
 
-        # Also search using yfinance search if direct lookup yielded nothing
-        if not results:
-            try:
-                search_results = yf.Search(query)
-                for quote in getattr(search_results, "quotes", [])[:8]:
-                    symbol = quote.get("symbol", "")
-                    name = quote.get("shortname") or quote.get("longname", "")
-                    if symbol and name:
-                        results.append({
-                            "ticker": symbol,
-                            "companyName": name,
-                            "exchange": quote.get("exchange", ""),
-                            "sector": "",
-                        })
-            except Exception:
-                pass
-
-        return _response(200, {"results": results[:10], "query": query})
-    except Exception as e:
-        return _response(500, {"error": f"Search failed: {str(e)}"})
+    return _response(200, {"results": results[:10], "query": query})
 
 
 # ─── Portfolio Endpoints ───
@@ -687,24 +833,41 @@ def _handle_portfolio_summary(user_id):
 
 
 def _fetch_price_quiet(ticker):
-    """Fetch price for a ticker, return None on failure."""
+    """Fetch price for a ticker, return None on failure. Falls back to DynamoDB."""
+    # Try yfinance
     try:
         import yfinance as yf
         yf.set_tz_cache_location("/tmp")
         stock = yf.Ticker(ticker)
         info = stock.info or {}
         current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
-        previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
-        change = current_price - previous_close if current_price and previous_close else 0
-        change_pct = (change / previous_close * 100) if previous_close else 0
-        return {
-            "price": round(current_price or 0, 2),
-            "change": round(change, 2),
-            "changePercent": round(change_pct, 2),
-            "companyName": info.get("shortName") or info.get("longName", ticker),
-        }
+        if current_price:
+            previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
+            change = current_price - previous_close if previous_close else 0
+            change_pct = (change / previous_close * 100) if previous_close else 0
+            return {
+                "price": round(current_price, 2),
+                "change": round(change, 2),
+                "changePercent": round(change_pct, 2),
+                "companyName": info.get("shortName") or info.get("longName", ticker),
+            }
     except Exception:
-        return None
+        pass
+
+    # Fallback: use DynamoDB signal data for company name (no live price)
+    try:
+        signal = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+        if signal:
+            return {
+                "price": 0,
+                "change": 0,
+                "changePercent": 0,
+                "companyName": signal.get("companyName", ticker),
+            }
+    except Exception:
+        pass
+
+    return None
 
 
 # ─── Portfolio Health Endpoint ───
