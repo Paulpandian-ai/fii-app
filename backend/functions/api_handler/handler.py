@@ -95,7 +95,7 @@ def lambda_handler(event, context):
         elif path.startswith("/strategy"):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
-            return _handle_coach(http_method, user_id)
+            return _handle_coach(http_method, path, body, user_id)
         else:
             return _response(404, {"error": "Not found"})
 
@@ -2281,14 +2281,344 @@ def _handle_strategy_report_card(user_id):
     })
 
 
-# ─── Coach Endpoint ───
+# ─── Coach Endpoints ───
 
-def _handle_coach(method, user_id):
-    """GET /coach/insights — Return behavioral coaching insights."""
-    if method != "GET":
-        return _response(405, {"error": "Method not allowed"})
+def _handle_coach(method, path, body, user_id):
+    """Route coach sub-endpoints."""
+    if path == "/coach/daily" and method == "GET":
+        return _handle_coach_daily(user_id)
+    elif path == "/coach/score" and method == "GET":
+        return _handle_coach_score(user_id)
+    elif path == "/coach/achievements" and method == "GET":
+        return _handle_coach_achievements(user_id)
+    elif path == "/coach/event" and method == "POST":
+        return _handle_coach_event(body, user_id)
+    elif path == "/coach/weekly" and method == "GET":
+        return _handle_coach_weekly(user_id)
+    elif path == "/coach/insights" and method == "GET":
+        return _handle_coach_daily(user_id)
+    return _response(404, {"error": f"Coach route not found: {path}"})
 
-    return _response(200, {"insights": [], "message": "Coach not yet available"})
+
+def _handle_coach_daily(user_id):
+    """GET /coach/daily — Daily briefing."""
+    from datetime import datetime
+    import random
+
+    hour = datetime.utcnow().hour - 5  # rough ET
+    if hour < 0:
+        hour += 24
+    if hour < 12:
+        greeting = "Good morning!"
+    elif hour < 17:
+        greeting = "Hey there!"
+    else:
+        greeting = "Late night trading?"
+
+    # Try loading cached daily from S3
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        cached = s3.read_json(f"coach/{user_id}_daily.json")
+        if cached.get("date") == today:
+            cached["greeting"] = greeting
+            return _response(200, cached)
+    except Exception:
+        pass
+
+    # Build a daily briefing
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+
+    # Simulate portfolio change (in prod: compare yesterday's close)
+    portfolio_change_pct = round(random.uniform(-2.0, 3.0), 2)
+    portfolio_value = 50000
+    try:
+        port_data = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+        if port_data:
+            holdings = port_data.get("holdings", [])
+            portfolio_value = sum(
+                float(h.get("shares", 0)) * float(h.get("currentPrice", 0))
+                for h in holdings
+            )
+    except Exception:
+        pass
+
+    portfolio_change_dollar = round(portfolio_value * portfolio_change_pct / 100, 2)
+
+    # Count signal changes
+    signals_changed = 0
+
+    # Market summary
+    market_direction = "up" if portfolio_change_pct > 0 else "down"
+    summary = (
+        f"Markets are {market_direction} today. "
+        f"Your portfolio is {'up' if portfolio_change_pct > 0 else 'down'} "
+        f"${abs(portfolio_change_dollar):,.0f}. "
+        f"{'No action needed — stay the course.' if abs(portfolio_change_pct) < 2 else 'Consider reviewing your positions.'}"
+    )
+
+    # Load behavior data for streak
+    behavior = _get_behavior(user_id)
+    streak = behavior.get("streak", 0)
+
+    briefing = {
+        "date": today,
+        "greeting": greeting,
+        "summary": summary,
+        "stats": {
+            "portfolioChange": portfolio_change_dollar,
+            "portfolioChangePct": portfolio_change_pct,
+            "signalsChanged": signals_changed,
+            "streak": streak,
+        },
+        "updatedAt": datetime.utcnow().isoformat(),
+    }
+
+    # Cache
+    try:
+        s3.write_json(f"coach/{user_id}_daily.json", briefing)
+    except Exception:
+        pass
+
+    return _response(200, briefing)
+
+
+def _get_behavior(user_id):
+    """Load behavior data from DynamoDB."""
+    try:
+        data = db.get_item(f"USER#{user_id}", "BEHAVIOR")
+        return data or {}
+    except Exception:
+        return {}
+
+
+def _save_behavior(user_id, behavior):
+    """Save behavior data to DynamoDB."""
+    try:
+        db.put_item({
+            "PK": f"USER#{user_id}",
+            "SK": "BEHAVIOR",
+            **behavior,
+        })
+    except Exception:
+        pass
+
+
+def _handle_coach_score(user_id):
+    """GET /coach/score — Discipline score + stats."""
+    from datetime import datetime
+
+    behavior = _get_behavior(user_id)
+
+    # Score algorithm: Base 50 + modifiers
+    base = 50
+    streak = behavior.get("streak", 0)
+    streak_bonus = min(30, streak)  # +1/day, max +30
+    panic_survived = behavior.get("panicSurvived", 0)
+    panic_bonus = panic_survived * 5
+    briefings_read = behavior.get("briefingsRead", 0)
+    briefing_bonus = min(20, briefings_read * 2)
+    badges_earned = behavior.get("badgesEarned", 0)
+    badge_bonus = badges_earned * 3
+    panic_sells = behavior.get("panicSells", 0)
+    panic_penalty = panic_sells * 10
+    bad_sells = behavior.get("badSells", 0)
+    bad_sell_penalty = bad_sells * 5
+
+    raw_score = base + streak_bonus + panic_bonus + briefing_bonus + badge_bonus - panic_penalty - bad_sell_penalty
+    score = max(0, min(100, raw_score))
+
+    # Level system
+    if score <= 20:
+        level = "Rookie"
+        level_color = "#CD7F32"  # bronze
+    elif score <= 40:
+        level = "Apprentice"
+        level_color = "#C0C0C0"  # silver
+    elif score <= 60:
+        level = "Steady"
+        level_color = "#60A5FA"  # blue
+    elif score <= 80:
+        level = "Disciplined"
+        level_color = "#FFD700"  # gold
+    else:
+        level = "Zen Master"
+        level_color = "#8B5CF6"  # purple
+
+    # Next level threshold
+    thresholds = [20, 40, 60, 80, 100]
+    next_threshold = 100
+    for t in thresholds:
+        if score < t:
+            next_threshold = t
+            break
+
+    worst_avoided = behavior.get("worstAvoided", 0)
+    signal_alignment = behavior.get("signalAlignment", 0)
+
+    return _response(200, {
+        "score": score,
+        "level": level,
+        "levelColor": level_color,
+        "nextThreshold": next_threshold,
+        "stats": {
+            "panicSurvived": panic_survived,
+            "worstAvoided": worst_avoided,
+            "streak": streak,
+            "signalAlignment": signal_alignment,
+        },
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_coach_achievements(user_id):
+    """GET /coach/achievements — Badge collection."""
+    from datetime import datetime
+
+    try:
+        data = db.get_item(f"USER#{user_id}", "ACHIEVEMENTS")
+        earned = data.get("badges", []) if data else []
+    except Exception:
+        earned = []
+
+    earned_ids = {b["id"] for b in earned}
+
+    # All possible badges
+    all_badges = [
+        {"id": "diamond_hands", "name": "Diamond Hands", "description": "Held through a 5%+ dip", "icon": "diamond"},
+        {"id": "data_driven", "name": "Data Driven", "description": "Checked signals before every trade", "icon": "analytics"},
+        {"id": "streak_14", "name": "14-Day Streak", "description": "Opened app 14 days straight", "icon": "flame"},
+        {"id": "zen_hold", "name": "Zen Hold", "description": "Stayed the course during volatility alert", "icon": "leaf"},
+        {"id": "student", "name": "Student", "description": "Read all educational cards", "icon": "school"},
+        {"id": "streak_30", "name": "30-Day Streak", "description": "Open app 30 days straight", "icon": "bonfire"},
+        {"id": "iron_will", "name": "Iron Will", "description": "Survive 5 panic events", "icon": "shield"},
+        {"id": "diversified", "name": "Diversified", "description": "Portfolio health score > 80", "icon": "globe"},
+        {"id": "beat_spy", "name": "Beat SPY", "description": "Outperform SPY over 3 months", "icon": "trophy"},
+        {"id": "perfect_align", "name": "Perfect Alignment", "description": "All holdings match FII signals", "icon": "star"},
+    ]
+
+    badges = []
+    for badge in all_badges:
+        is_earned = badge["id"] in earned_ids
+        earned_entry = next((b for b in earned if b["id"] == badge["id"]), None)
+        badges.append({
+            **badge,
+            "earned": is_earned,
+            "earnedAt": earned_entry.get("earnedAt") if earned_entry else None,
+        })
+
+    return _response(200, {
+        "badges": badges,
+        "totalEarned": len(earned),
+        "totalAvailable": len(all_badges),
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_coach_event(body, user_id):
+    """POST /coach/event — Log behavior event."""
+    from datetime import datetime
+
+    event_type = body.get("event", "")
+    behavior = _get_behavior(user_id)
+
+    if event_type == "briefing_read":
+        behavior["briefingsRead"] = behavior.get("briefingsRead", 0) + 1
+        behavior["streak"] = behavior.get("streak", 0) + 1
+        behavior["lastActive"] = datetime.utcnow().isoformat()
+
+    elif event_type == "panic_survived":
+        behavior["panicSurvived"] = behavior.get("panicSurvived", 0) + 1
+        amount = body.get("amount", 0)
+        behavior["worstAvoided"] = behavior.get("worstAvoided", 0) + amount
+        # Check for badge unlock
+        if behavior["panicSurvived"] >= 5:
+            _unlock_badge(user_id, "iron_will")
+        if behavior["panicSurvived"] >= 1:
+            _unlock_badge(user_id, "diamond_hands")
+
+    elif event_type == "stay_the_course":
+        behavior["panicSurvived"] = behavior.get("panicSurvived", 0) + 1
+        _unlock_badge(user_id, "zen_hold")
+
+    elif event_type == "panic_sell":
+        behavior["panicSells"] = behavior.get("panicSells", 0) + 1
+
+    elif event_type == "bad_sell":
+        behavior["badSells"] = behavior.get("badSells", 0) + 1
+
+    elif event_type == "cards_read":
+        behavior["cardsRead"] = behavior.get("cardsRead", 0) + 1
+        if behavior["cardsRead"] >= 5:
+            _unlock_badge(user_id, "student")
+
+    # Check streak badges
+    streak = behavior.get("streak", 0)
+    if streak >= 14:
+        _unlock_badge(user_id, "streak_14")
+    if streak >= 30:
+        _unlock_badge(user_id, "streak_30")
+
+    _save_behavior(user_id, behavior)
+
+    return _response(200, {
+        "event": event_type,
+        "streak": behavior.get("streak", 0),
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _unlock_badge(user_id, badge_id):
+    """Unlock an achievement badge."""
+    from datetime import datetime
+    try:
+        data = db.get_item(f"USER#{user_id}", "ACHIEVEMENTS")
+        badges = data.get("badges", []) if data else []
+        if any(b["id"] == badge_id for b in badges):
+            return  # Already earned
+        badges.append({"id": badge_id, "earnedAt": datetime.utcnow().isoformat()})
+        db.put_item({
+            "PK": f"USER#{user_id}",
+            "SK": "ACHIEVEMENTS",
+            "badges": badges,
+        })
+    except Exception:
+        pass
+
+
+def _handle_coach_weekly(user_id):
+    """GET /coach/weekly — Weekly recap."""
+    from datetime import datetime
+
+    behavior = _get_behavior(user_id)
+    tickers, weights = _get_portfolio_tickers_and_weights(user_id)
+
+    # Simulated weekly stats (in prod: computed from actual week's data)
+    import random
+    weekly_pct = round(random.uniform(-3.0, 5.0), 2)
+    weekly_dollar = round(50000 * weekly_pct / 100, 2)
+    signals_changed = random.randint(0, 3)
+    score = behavior.get("streak", 0) + 50  # rough estimate
+    score_change = random.randint(-2, 8)
+
+    # Build recap
+    ticker_list = list(tickers)[:2] if tickers else ["AAPL", "MSFT"]
+    signal_changes_text = f"{signals_changed} changed" if signals_changed > 0 else "No changes"
+
+    claude_line = (
+        f"{'Great' if weekly_pct > 0 else 'Tough'} week! "
+        f"{'Your discipline is paying off.' if weekly_pct > 0 else 'Stay the course — patience wins.'}"
+    )
+
+    return _response(200, {
+        "weeklyChange": weekly_dollar,
+        "weeklyChangePct": weekly_pct,
+        "signalsChanged": signals_changed,
+        "signalChangesText": signal_changes_text,
+        "score": min(100, max(0, score)),
+        "scoreChange": score_change,
+        "claudeLine": claude_line,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
 
 
 # ─── Response Helper ───

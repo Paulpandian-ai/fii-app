@@ -213,8 +213,28 @@ export const getReportCard = async () => {
 
 // ─── Coach ───
 
-export const getCoachInsights = async () => {
-  const { data } = await api.get('/coach/insights');
+export const getCoachDaily = async () => {
+  const { data } = await api.get('/coach/daily');
+  return data;
+};
+
+export const getCoachScore = async () => {
+  const { data } = await api.get('/coach/score');
+  return data;
+};
+
+export const getCoachAchievements = async () => {
+  const { data } = await api.get('/coach/achievements');
+  return data;
+};
+
+export const postCoachEvent = async (event: string, amount?: number) => {
+  const { data } = await api.post('/coach/event', { event, amount });
+  return data;
+};
+
+export const getCoachWeekly = async () => {
+  const { data } = await api.get('/coach/weekly');
   return data;
 };
 

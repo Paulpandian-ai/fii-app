@@ -469,6 +469,62 @@ export interface AuthState {
   isLoading: boolean;
 }
 
+// ─── Coach Types ───
+
+export interface DailyBriefingData {
+  date: string;
+  greeting: string;
+  summary: string;
+  stats: {
+    portfolioChange: number;
+    portfolioChangePct: number;
+    signalsChanged: number;
+    streak: number;
+  };
+  updatedAt: string;
+}
+
+export interface DisciplineScoreData {
+  score: number;
+  level: string;
+  levelColor: string;
+  nextThreshold: number;
+  stats: {
+    panicSurvived: number;
+    worstAvoided: number;
+    streak: number;
+    signalAlignment: number;
+  };
+  updatedAt: string;
+}
+
+export interface Badge {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  earned: boolean;
+  earnedAt: string | null;
+}
+
+export interface AchievementsData {
+  badges: Badge[];
+  totalEarned: number;
+  totalAvailable: number;
+  updatedAt: string;
+}
+
+export interface WeeklyRecapData {
+  weeklyChange: number;
+  weeklyChangePct: number;
+  signalsChanged: number;
+  signalChangesText: string;
+  score: number;
+  scoreChange: number;
+  claudeLine: string;
+  updatedAt: string;
+}
+
 // ─── Navigation Types ───
 
 export type RootTabParamList = {

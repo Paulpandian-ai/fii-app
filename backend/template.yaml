@@ -514,6 +514,47 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Coach endpoints (public for dev)
+        GetCoachDaily:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/daily
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetCoachScore:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/score
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetCoachAchievements:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/achievements
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostCoachEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/event
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetCoachWeekly:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/weekly
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
