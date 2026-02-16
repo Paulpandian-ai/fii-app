@@ -433,6 +433,47 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+        # Strategy endpoints (public for dev)
+        PostStrategyOptimize:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/optimize
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostStrategyProject:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/project
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostStrategyScenarios:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/scenarios
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostStrategyRebalance:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/rebalance
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetStrategyAchievements:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/achievements
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi

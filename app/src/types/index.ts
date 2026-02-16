@@ -235,10 +235,116 @@ export interface DiscoveryCard {
 // ─── Strategy Types ───
 
 export interface OptimizationResult {
-  weights: Record<string, number>;  // ticker → weight
+  weights: Record<string, number>;
   expectedReturn: number;
   expectedVolatility: number;
   sharpeRatio: number;
+}
+
+export interface FrontierPoint {
+  expectedReturn: number;
+  volatility: number;
+  sharpeRatio: number;
+}
+
+export interface BenchmarkPoint {
+  label: string;
+  expectedReturn: number;
+  volatility: number;
+  sharpeRatio: number;
+}
+
+export interface AllocationItem {
+  ticker: string;
+  companyName: string;
+  weight: number;
+  score: number;
+  signal: Signal;
+}
+
+export interface PortfolioMetrics {
+  expectedReturn: number;
+  expectedVolatility: number;
+  sharpeRatio: number;
+  weights: Record<string, number>;
+}
+
+export interface FullOptimizationResult {
+  optimized: OptimizationResult;
+  currentPortfolio: PortfolioMetrics;
+  efficientFrontier: FrontierPoint[];
+  benchmarks: BenchmarkPoint[];
+  allocation: AllocationItem[];
+  moneyLeftOnTable: number;
+  portfolioValue: number;
+  tickerCount: number;
+  simulationCount: number;
+  updatedAt: string;
+}
+
+export interface ProjectionPoint {
+  month: number;
+  p5: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+}
+
+export interface ProjectionResult {
+  years: number;
+  initialValue: number;
+  projection: ProjectionPoint[];
+  finalStats: {
+    best: number;
+    likely: number;
+    worst: number;
+    lossProbability: number;
+  };
+  annualReturn: number;
+  annualVolatility: number;
+  simulationCount: number;
+  updatedAt: string;
+}
+
+export interface TickerImpact {
+  ticker: string;
+  companyName: string;
+  impact: number;
+  sector: string;
+}
+
+export interface ScenarioCard {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  color: string;
+  portfolioImpact: number;
+  sp500Impact: number;
+  verdict: string;
+  bestPerformer: TickerImpact | null;
+  worstPerformer: TickerImpact | null;
+  tickerImpacts: TickerImpact[];
+}
+
+export interface RebalanceMove {
+  ticker: string;
+  companyName: string;
+  currentWeight: number;
+  optimalWeight: number;
+  direction: 'increase' | 'decrease';
+  reason: string;
+  signal: Signal;
+  score: number;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  earnedAt: string;
 }
 
 export interface MonteCarloPoint {

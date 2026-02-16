@@ -21,6 +21,11 @@ Routes:
   POST /watchlist/add                — Add ticker to watchlist
   POST /watchlist/remove             — Remove ticker from watchlist
   GET  /coach/insights               — Coaching insights
+  POST /strategy/optimize            — Monte Carlo optimization (numpy)
+  POST /strategy/project             — Fan chart projection data
+  POST /strategy/scenarios           — What-if scenario battles
+  POST /strategy/rebalance           — Rebalancing suggestions
+  GET  /strategy/achievements        — User achievement badges
 """
 
 import json
@@ -87,6 +92,8 @@ def lambda_handler(event, context):
             return _handle_watchlist(http_method, path, body, user_id)
         elif path.startswith("/portfolio"):
             return _handle_portfolio(http_method, path, body, user_id)
+        elif path.startswith("/strategy"):
+            return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, user_id)
         else:
@@ -1317,6 +1324,548 @@ def _handle_watchlist_delete(wl_name, user_id):
     })
 
     return _response(200, {"watchlists": existing})
+
+
+# ─── Strategy Endpoints ───
+
+def _handle_strategy(method, path, body, user_id):
+    """Strategy sub-router: optimize, project, scenarios, rebalance, achievements."""
+    if "/optimize" in path and method == "POST":
+        return _handle_strategy_optimize(body, user_id)
+    elif "/project" in path and method == "POST":
+        return _handle_strategy_project(body, user_id)
+    elif "/scenarios" in path and method == "POST":
+        return _handle_strategy_scenarios(body, user_id)
+    elif "/rebalance" in path and method == "POST":
+        return _handle_strategy_rebalance(body, user_id)
+    elif "/achievements" in path and method == "GET":
+        return _handle_strategy_achievements(user_id)
+    else:
+        return _response(405, {"error": "Strategy endpoint not found"})
+
+
+def _get_portfolio_tickers_and_weights(user_id):
+    """Helper: load portfolio holdings and compute weights."""
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if not record or not record.get("holdings"):
+        return [], {}
+    holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+    tickers = [h["ticker"] for h in holdings_raw]
+    total_cost = sum(float(h.get("shares", 0)) * float(h.get("avgCost", 0)) for h in holdings_raw) or 1
+    weights = {}
+    for h in holdings_raw:
+        w = (float(h.get("shares", 0)) * float(h.get("avgCost", 0))) / total_cost
+        weights[h["ticker"]] = round(w, 4)
+    return tickers, weights
+
+
+def _get_signal_data_for_tickers(tickers):
+    """Helper: batch fetch signal data from DynamoDB."""
+    if not tickers:
+        return {}
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in tickers]
+    items = db.batch_get(keys)
+    result = {}
+    for item in items:
+        ticker = item.get("ticker", "")
+        result[ticker] = {
+            "ticker": ticker,
+            "companyName": item.get("companyName", ticker),
+            "compositeScore": float(item.get("compositeScore", 5.0)),
+            "signal": item.get("signal", "HOLD"),
+            "confidence": item.get("confidence", "MEDIUM"),
+        }
+    return result
+
+
+def _estimate_returns_and_cov(tickers, signals_map):
+    """Estimate expected returns + covariance matrix using FII scores + sector data.
+
+    Uses numpy only — no scipy. Returns are estimated from composite scores
+    and sector-level priors. Covariance is built from sector correlations.
+    """
+    import numpy as np
+
+    n = len(tickers)
+    if n == 0:
+        return np.array([]), np.array([[]])
+
+    # Sector volatility priors (annualized)
+    sector_vol = {
+        "Technology": 0.28, "Communication Services": 0.25,
+        "Consumer Cyclical": 0.24, "Consumer Defensive": 0.14,
+        "Financial Services": 0.20, "Healthcare": 0.22,
+        "Energy": 0.30, "Industrials": 0.18, "Utilities": 0.14,
+        "Real Estate": 0.20, "Basic Materials": 0.22,
+    }
+
+    # Estimate expected return from FII score: score/10 * 0.18 (max ~18% annual)
+    expected_returns = np.zeros(n)
+    volatilities = np.zeros(n)
+
+    for i, t in enumerate(tickers):
+        sig = signals_map.get(t, {})
+        score = sig.get("compositeScore", 5.0)
+        # Map score 1-10 to return -5% to 20%
+        expected_returns[i] = (score - 3.0) / 7.0 * 0.20
+        # Look up sector vol from our ticker database
+        sector = _get_ticker_sector(t)
+        volatilities[i] = sector_vol.get(sector, 0.22)
+
+    # Build correlation matrix: same-sector = 0.65, cross-sector = 0.30
+    sectors = [_get_ticker_sector(t) for t in tickers]
+    corr = np.full((n, n), 0.30)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                corr[i][j] = 1.0
+            elif sectors[i] == sectors[j]:
+                corr[i][j] = 0.65
+
+    # Covariance = diag(vol) @ corr @ diag(vol)
+    D = np.diag(volatilities)
+    cov_matrix = D @ corr @ D
+
+    return expected_returns, cov_matrix
+
+
+def _get_ticker_sector(ticker):
+    """Look up sector for a ticker from the fallback database."""
+    for entry in _FALLBACK_TICKERS:
+        if entry["ticker"] == ticker:
+            return entry.get("sector", "Technology")
+    return "Technology"
+
+
+def _handle_strategy_optimize(body, user_id):
+    """POST /strategy/optimize — Numpy-only random-search optimization.
+
+    Generates 10,000 random portfolios, finds max Sharpe.
+    Returns efficient frontier (2K sampled), optimal weights,
+    current portfolio metrics, and benchmark data.
+    """
+    import numpy as np
+    from datetime import datetime
+
+    tickers, current_weights = _get_portfolio_tickers_and_weights(user_id)
+    if len(tickers) < 2:
+        return _response(200, {
+            "error": "Need at least 2 stocks for optimization",
+            "tickers": tickers,
+        })
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+    expected_returns, cov_matrix = _estimate_returns_and_cov(tickers, signals_map)
+
+    n = len(tickers)
+    num_portfolios = 10000
+    risk_free_rate = 0.045  # 4.5% risk-free rate
+
+    # Generate random portfolios
+    np.random.seed(42)
+    all_weights = np.random.dirichlet(np.ones(n), num_portfolios)
+
+    # Calculate metrics for each portfolio
+    port_returns = all_weights @ expected_returns
+    port_vols = np.sqrt(np.array([
+        w @ cov_matrix @ w for w in all_weights
+    ]))
+    sharpe_ratios = (port_returns - risk_free_rate) / np.maximum(port_vols, 1e-6)
+
+    # Find optimal portfolio (max Sharpe)
+    best_idx = np.argmax(sharpe_ratios)
+
+    optimal_weights = {}
+    for i, t in enumerate(tickers):
+        w = float(all_weights[best_idx][i])
+        if w > 0.01:
+            optimal_weights[t] = round(w, 4)
+
+    # Current portfolio metrics
+    cw = np.array([current_weights.get(t, 1.0 / n) for t in tickers])
+    cw = cw / cw.sum()  # normalize
+    curr_ret = float(cw @ expected_returns)
+    curr_vol = float(np.sqrt(cw @ cov_matrix @ cw))
+    curr_sharpe = float((curr_ret - risk_free_rate) / max(curr_vol, 1e-6))
+
+    # Downsample efficient frontier to 2000 points
+    indices = np.linspace(0, num_portfolios - 1, 2000, dtype=int)
+    frontier = []
+    for idx in indices:
+        frontier.append({
+            "expectedReturn": round(float(port_returns[idx]) * 100, 2),
+            "volatility": round(float(port_vols[idx]) * 100, 2),
+            "sharpeRatio": round(float(sharpe_ratios[idx]), 3),
+        })
+
+    # Benchmark data (synthetic)
+    benchmarks = [
+        {"label": "SPY", "expectedReturn": 10.5, "volatility": 15.2, "sharpeRatio": 0.39},
+        {"label": "QQQ", "expectedReturn": 14.8, "volatility": 20.1, "sharpeRatio": 0.51},
+    ]
+
+    # Build per-ticker allocation detail
+    allocation = []
+    for i, t in enumerate(tickers):
+        sig = signals_map.get(t, {})
+        w = float(all_weights[best_idx][i])
+        allocation.append({
+            "ticker": t,
+            "companyName": sig.get("companyName", t),
+            "weight": round(w, 4),
+            "score": sig.get("compositeScore", 5.0),
+            "signal": sig.get("signal", "HOLD"),
+        })
+    allocation.sort(key=lambda x: x["weight"], reverse=True)
+
+    # Calculate $ difference for "money left on the table"
+    portfolio_value = float(body.get("portfolioValue", 50000))
+    optimal_annual = portfolio_value * float(port_returns[best_idx])
+    current_annual = portfolio_value * curr_ret
+    money_diff = round(optimal_annual - current_annual, 0)
+
+    # Cache result
+    result = {
+        "optimized": {
+            "weights": optimal_weights,
+            "expectedReturn": round(float(port_returns[best_idx]) * 100, 2),
+            "expectedVolatility": round(float(port_vols[best_idx]) * 100, 2),
+            "sharpeRatio": round(float(sharpe_ratios[best_idx]), 3),
+        },
+        "currentPortfolio": {
+            "expectedReturn": round(curr_ret * 100, 2),
+            "expectedVolatility": round(curr_vol * 100, 2),
+            "sharpeRatio": round(curr_sharpe, 3),
+            "weights": {t: round(current_weights.get(t, 1.0/n), 4) for t in tickers},
+        },
+        "efficientFrontier": frontier,
+        "benchmarks": benchmarks,
+        "allocation": allocation,
+        "moneyLeftOnTable": money_diff,
+        "portfolioValue": portfolio_value,
+        "tickerCount": n,
+        "simulationCount": num_portfolios,
+        "updatedAt": datetime.utcnow().isoformat(),
+    }
+
+    # Cache in S3
+    try:
+        s3.write_json(f"strategy/{user_id}_optimization.json", result)
+    except Exception:
+        pass
+
+    return _response(200, result)
+
+
+def _handle_strategy_project(body, user_id):
+    """POST /strategy/project — Monte Carlo projection fan chart.
+
+    Projects portfolio value over 1-10 years with percentile bands.
+    """
+    import numpy as np
+    from datetime import datetime
+
+    years = int(body.get("years", 5))
+    years = max(1, min(10, years))
+    initial_value = float(body.get("portfolioValue", 50000))
+    num_sims = 5000
+
+    tickers, current_weights = _get_portfolio_tickers_and_weights(user_id)
+    if not tickers:
+        return _response(200, {"error": "No portfolio holdings found"})
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+    expected_returns, cov_matrix = _estimate_returns_and_cov(tickers, signals_map)
+
+    n = len(tickers)
+    cw = np.array([current_weights.get(t, 1.0 / n) for t in tickers])
+    cw = cw / cw.sum()
+
+    port_return = float(cw @ expected_returns)
+    port_vol = float(np.sqrt(cw @ cov_matrix @ cw))
+
+    # Simulate paths (GBM)
+    np.random.seed(None)
+    months = years * 12
+    monthly_ret = port_return / 12
+    monthly_vol = port_vol / np.sqrt(12)
+
+    # Generate random returns for all sims at once
+    random_returns = np.random.normal(monthly_ret, monthly_vol, (num_sims, months))
+    # Cumulative product to get paths
+    paths = initial_value * np.cumprod(1 + random_returns, axis=1)
+
+    # Calculate percentiles at each month
+    percentiles = [5, 25, 50, 75, 95]
+    projection = []
+    for m in range(months):
+        vals = paths[:, m]
+        point = {"month": m + 1}
+        for p in percentiles:
+            point[f"p{p}"] = round(float(np.percentile(vals, p)), 0)
+        projection.append(point)
+
+    # Final stats
+    final_vals = paths[:, -1]
+    loss_prob = float(np.mean(final_vals < initial_value) * 100)
+
+    return _response(200, {
+        "years": years,
+        "initialValue": initial_value,
+        "projection": projection,
+        "finalStats": {
+            "best": round(float(np.percentile(final_vals, 95)), 0),
+            "likely": round(float(np.percentile(final_vals, 50)), 0),
+            "worst": round(float(np.percentile(final_vals, 5)), 0),
+            "lossProbability": round(loss_prob, 1),
+        },
+        "annualReturn": round(port_return * 100, 1),
+        "annualVolatility": round(port_vol * 100, 1),
+        "simulationCount": num_sims,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+# Default scenarios for "What If?" battles
+DEFAULT_SCENARIOS = [
+    {
+        "id": "fed-cuts",
+        "title": "What if the Fed cuts rates 3x?",
+        "description": "Three 25bp rate cuts over the next 12 months",
+        "icon": "trending-down",
+        "color": "#10B981",
+        "sectorImpacts": {
+            "Technology": 0.15, "Financial Services": -0.05,
+            "Real Estate": 0.12, "Consumer Cyclical": 0.10,
+            "Utilities": 0.08, "Healthcare": 0.04,
+            "Energy": 0.02, "Consumer Defensive": 0.03,
+            "Industrials": 0.06, "Communication Services": 0.08,
+            "Basic Materials": 0.05,
+        },
+        "sp500Impact": 8.1,
+    },
+    {
+        "id": "china-taiwan",
+        "title": "What if China invades Taiwan?",
+        "description": "Military conflict disrupts global chip supply chains",
+        "icon": "warning",
+        "color": "#EF4444",
+        "sectorImpacts": {
+            "Technology": -0.35, "Financial Services": -0.18,
+            "Real Estate": -0.10, "Consumer Cyclical": -0.22,
+            "Utilities": -0.05, "Healthcare": -0.08,
+            "Energy": 0.15, "Consumer Defensive": -0.05,
+            "Industrials": -0.20, "Communication Services": -0.15,
+            "Basic Materials": -0.12,
+        },
+        "sp500Impact": -22.5,
+    },
+    {
+        "id": "ai-bubble",
+        "title": "What if the AI bubble pops?",
+        "description": "AI revenues disappoint, valuations correct sharply",
+        "icon": "flash-off",
+        "color": "#F59E0B",
+        "sectorImpacts": {
+            "Technology": -0.40, "Financial Services": -0.08,
+            "Real Estate": -0.02, "Consumer Cyclical": -0.12,
+            "Utilities": 0.03, "Healthcare": 0.02,
+            "Energy": 0.05, "Consumer Defensive": 0.04,
+            "Industrials": -0.05, "Communication Services": -0.20,
+            "Basic Materials": -0.03,
+        },
+        "sp500Impact": -15.3,
+    },
+    {
+        "id": "inflation-returns",
+        "title": "What if inflation returns to 6%?",
+        "description": "Sticky inflation forces Fed to reverse course",
+        "icon": "flame",
+        "color": "#F97316",
+        "sectorImpacts": {
+            "Technology": -0.18, "Financial Services": 0.05,
+            "Real Estate": -0.15, "Consumer Cyclical": -0.12,
+            "Utilities": -0.08, "Healthcare": -0.03,
+            "Energy": 0.20, "Consumer Defensive": 0.02,
+            "Industrials": -0.05, "Communication Services": -0.10,
+            "Basic Materials": 0.10,
+        },
+        "sp500Impact": -8.7,
+    },
+    {
+        "id": "do-nothing",
+        "title": "What if you did nothing for 10 years?",
+        "description": "Hold current portfolio with no changes for a decade",
+        "icon": "time",
+        "color": "#8B5CF6",
+        "sectorImpacts": {
+            "Technology": 0.12, "Financial Services": 0.08,
+            "Real Estate": 0.06, "Consumer Cyclical": 0.09,
+            "Utilities": 0.05, "Healthcare": 0.07,
+            "Energy": 0.04, "Consumer Defensive": 0.06,
+            "Industrials": 0.07, "Communication Services": 0.10,
+            "Basic Materials": 0.05,
+        },
+        "sp500Impact": 10.2,
+    },
+]
+
+
+def _handle_strategy_scenarios(body, user_id):
+    """POST /strategy/scenarios — Generate what-if scenario battle cards."""
+    from datetime import datetime
+
+    tickers, current_weights = _get_portfolio_tickers_and_weights(user_id)
+    if not tickers:
+        return _response(200, {"scenarios": DEFAULT_SCENARIOS, "hasPortfolio": False})
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+    sectors = {t: _get_ticker_sector(t) for t in tickers}
+
+    scenarios = []
+    for sc in DEFAULT_SCENARIOS:
+        # Compute portfolio-specific impact
+        portfolio_impact = 0.0
+        ticker_impacts = []
+        for t in tickers:
+            w = current_weights.get(t, 0)
+            sector = sectors.get(t, "Technology")
+            sector_impact = sc["sectorImpacts"].get(sector, 0)
+            ticker_impact = sector_impact * 100
+            portfolio_impact += w * sector_impact * 100
+            ticker_impacts.append({
+                "ticker": t,
+                "companyName": signals_map.get(t, {}).get("companyName", t),
+                "impact": round(ticker_impact, 1),
+                "sector": sector,
+            })
+
+        # Sort to find best and worst performers
+        ticker_impacts.sort(key=lambda x: x["impact"])
+        worst = ticker_impacts[0] if ticker_impacts else None
+        best = ticker_impacts[-1] if ticker_impacts else None
+
+        # Determine "winner" message
+        sp500 = sc["sp500Impact"]
+        diff = round(portfolio_impact - sp500, 1)
+        if portfolio_impact > sp500:
+            verdict = f"You beat the market by {abs(diff):.1f}%!"
+        elif portfolio_impact < sp500:
+            if sp500 < 0:
+                verdict = f"Your diversification saved you {abs(diff):.1f}%"
+            else:
+                verdict = f"You trail the market by {abs(diff):.1f}%"
+        else:
+            verdict = "You matched the market"
+
+        scenarios.append({
+            "id": sc["id"],
+            "title": sc["title"],
+            "description": sc["description"],
+            "icon": sc["icon"],
+            "color": sc["color"],
+            "portfolioImpact": round(portfolio_impact, 1),
+            "sp500Impact": sp500,
+            "verdict": verdict,
+            "bestPerformer": best,
+            "worstPerformer": worst,
+            "tickerImpacts": ticker_impacts,
+        })
+
+    # Cache
+    try:
+        s3.write_json(f"scenarios/{user_id}.json", {
+            "scenarios": scenarios,
+            "updatedAt": datetime.utcnow().isoformat(),
+        })
+    except Exception:
+        pass
+
+    return _response(200, {
+        "scenarios": scenarios,
+        "hasPortfolio": True,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_strategy_rebalance(body, user_id):
+    """POST /strategy/rebalance — Generate rebalancing suggestions."""
+    from datetime import datetime
+
+    tickers, current_weights = _get_portfolio_tickers_and_weights(user_id)
+    if len(tickers) < 2:
+        return _response(200, {"moves": [], "error": "Need at least 2 stocks"})
+
+    signals_map = _get_signal_data_for_tickers(tickers)
+
+    # Run optimization to get optimal weights
+    import numpy as np
+    expected_returns, cov_matrix = _estimate_returns_and_cov(tickers, signals_map)
+
+    n = len(tickers)
+    risk_free_rate = 0.045
+    np.random.seed(42)
+    all_weights = np.random.dirichlet(np.ones(n), 10000)
+    port_returns = all_weights @ expected_returns
+    port_vols = np.sqrt(np.array([w @ cov_matrix @ w for w in all_weights]))
+    sharpe_ratios = (port_returns - risk_free_rate) / np.maximum(port_vols, 1e-6)
+    best_idx = np.argmax(sharpe_ratios)
+
+    optimal = {tickers[i]: float(all_weights[best_idx][i]) for i in range(n)}
+
+    # Generate rebalancing moves
+    moves = []
+    for t in tickers:
+        curr = current_weights.get(t, 0)
+        opt = optimal.get(t, 0)
+        diff = opt - curr
+
+        if abs(diff) < 0.02:
+            continue  # Skip tiny changes
+
+        sig = signals_map.get(t, {})
+        signal_val = sig.get("signal", "HOLD")
+        score = sig.get("compositeScore", 5.0)
+
+        if diff > 0:
+            direction = "increase"
+            reason = f"Score {score:.1f}/10 — underweighted vs optimal allocation"
+            if signal_val == "BUY":
+                reason = f"BUY signal (score {score:.1f}) — increase exposure"
+        else:
+            direction = "decrease"
+            reason = f"Score {score:.1f}/10 — overweighted vs optimal allocation"
+            if signal_val == "SELL":
+                reason = f"SELL signal (score {score:.1f}) — reduce risk"
+
+        moves.append({
+            "ticker": t,
+            "companyName": sig.get("companyName", t),
+            "currentWeight": round(curr * 100, 1),
+            "optimalWeight": round(opt * 100, 1),
+            "direction": direction,
+            "reason": reason,
+            "signal": signal_val,
+            "score": score,
+        })
+
+    # Sort: biggest changes first
+    moves.sort(key=lambda x: abs(x["optimalWeight"] - x["currentWeight"]), reverse=True)
+
+    return _response(200, {
+        "moves": moves,
+        "updatedAt": datetime.utcnow().isoformat(),
+    })
+
+
+def _handle_strategy_achievements(user_id):
+    """GET /strategy/achievements — Return user's earned achievement badges."""
+    record = db.get_item(f"USER#{user_id}", "ACHIEVEMENTS")
+    if not record or not record.get("achievements"):
+        return _response(200, {"achievements": []})
+
+    achievements = json.loads(record["achievements"]) if isinstance(record["achievements"], str) else record["achievements"]
+    return _response(200, {"achievements": achievements})
 
 
 # ─── Coach Endpoint ───

@@ -156,19 +156,31 @@ export const getPortfolioHealth = async () => {
 
 // ─── Strategy ───
 
-export const runOptimization = async (portfolioId: string) => {
-  const { data } = await api.post('/strategy/optimize', { portfolioId });
+export const runOptimization = async (portfolioValue?: number) => {
+  const { data } = await api.post('/strategy/optimize', { portfolioValue: portfolioValue || 50000 });
   return data;
 };
 
-export const runMonteCarlo = async (
-  portfolioId: string,
-  simulations: number = 10000
-) => {
-  const { data } = await api.post('/strategy/montecarlo', {
-    portfolioId,
-    simulations,
+export const runProjection = async (years: number, portfolioValue?: number) => {
+  const { data } = await api.post('/strategy/project', {
+    years,
+    portfolioValue: portfolioValue || 50000,
   });
+  return data;
+};
+
+export const runScenarios = async () => {
+  const { data } = await api.post('/strategy/scenarios', {});
+  return data;
+};
+
+export const runRebalance = async () => {
+  const { data } = await api.post('/strategy/rebalance', {});
+  return data;
+};
+
+export const getAchievements = async () => {
+  const { data } = await api.get('/strategy/achievements');
   return data;
 };
 
