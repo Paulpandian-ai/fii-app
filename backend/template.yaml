@@ -506,6 +506,14 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+        PostStrategyBacktest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /strategy/backtest
+            Method: POST
+            Auth:
+              Authorizer: NONE
         GetStrategyReportCard:
           Type: HttpApi
           Properties:
@@ -552,6 +560,14 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /coach/weekly
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetCoachInsights:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /coach/insights
             Method: GET
             Auth:
               Authorizer: NONE
