@@ -136,6 +136,15 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
             {inWatchlist && (
               <Ionicons name="bookmark" size={10} color="#60A5FA" style={styles.bookmarkIcon} />
             )}
+            {item.score != null && item.signal != null && (
+              <View style={[styles.searchSignalPill, {
+                backgroundColor: item.signal === 'BUY' ? 'rgba(16,185,129,0.15)' : item.signal === 'SELL' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+              }]}>
+                <Text style={[styles.searchSignalText, {
+                  color: item.signal === 'BUY' ? '#10B981' : item.signal === 'SELL' ? '#EF4444' : '#F59E0B',
+                }]}>{item.signal} {item.score.toFixed(1)}</Text>
+              </View>
+            )}
           </View>
           <Text style={styles.resultName} numberOfLines={1}>{item.companyName}</Text>
           {item.sector ? (
@@ -341,6 +350,16 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.3)',
     fontSize: 11,
     marginTop: 1,
+  },
+  searchSignalPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    marginLeft: 6,
+  },
+  searchSignalText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   resultRight: {
     marginLeft: 12,

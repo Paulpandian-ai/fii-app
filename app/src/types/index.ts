@@ -67,6 +67,8 @@ export interface SearchResult {
   companyName: string;
   exchange: string;
   sector: string;
+  score: number | null;
+  signal: Signal | null;
 }
 
 export interface Alternative {

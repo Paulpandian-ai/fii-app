@@ -575,7 +575,9 @@ def _handle_search(method, query_params):
             "ticker": t,
             "companyName": signal.get("companyName", t),
             "exchange": "",
-            "sector": "",
+            "sector": signal.get("sector", ""),
+            "score": round(float(signal.get("compositeScore", 0)), 1) or None,
+            "signal": signal.get("signal") or None,
         })
         seen.add(t)
 
@@ -593,10 +595,22 @@ def _handle_search(method, query_params):
                 "companyName": name,
                 "exchange": entry.get("exchange", ""),
                 "sector": entry.get("sector", ""),
+                "score": None,
+                "signal": None,
             })
             seen.add(t)
         if len(results) >= 10:
             break
+
+    # 3. Enrich results with DynamoDB signals for any matched tickers
+    tickers_to_enrich = [r["ticker"] for r in results if r.get("score") is None]
+    if tickers_to_enrich:
+        signals_map = _get_signal_data_for_tickers(tickers_to_enrich)
+        for r in results:
+            if r.get("score") is None and r["ticker"] in signals_map:
+                sig = signals_map[r["ticker"]]
+                r["score"] = round(sig.get("compositeScore", 0), 1) or None
+                r["signal"] = sig.get("signal") or None
 
     return _response(200, {"results": results[:10], "query": query})
 
@@ -1076,13 +1090,12 @@ DEFAULT_BASKETS = [
         "emoji": "\U0001f916",
         "description": "Companies leading the AI revolution with strong fundamentals and FII scores",
         "stocks": [
-            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.30, "score": 8.4, "signal": "BUY", "reason": "AI chip monopoly + datacenter demand"},
-            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "score": 7.8, "signal": "BUY", "reason": "Azure AI + Copilot integration"},
-            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.20, "score": 7.0, "signal": "BUY", "reason": "Gemini AI + Search dominance"},
-            {"ticker": "META", "companyName": "Meta Platforms, Inc.", "weight": 0.15, "score": 6.5, "signal": "HOLD", "reason": "LLaMA open-source + ad AI"},
-            {"ticker": "AMD", "companyName": "Advanced Micro Devices", "weight": 0.10, "score": 6.8, "signal": "HOLD", "reason": "MI300 GPU alternative"},
+            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.30, "reason": "AI chip monopoly + datacenter demand"},
+            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "reason": "Azure AI + Copilot integration"},
+            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.20, "reason": "Gemini AI + Search dominance"},
+            {"ticker": "META", "companyName": "Meta Platforms, Inc.", "weight": 0.15, "reason": "LLaMA open-source + ad AI"},
+            {"ticker": "AMD", "companyName": "Advanced Micro Devices", "weight": 0.10, "reason": "MI300 GPU alternative"},
         ],
-        "returnYTD": 24.3,
         "riskLevel": "High",
     },
     {
@@ -1091,13 +1104,12 @@ DEFAULT_BASKETS = [
         "emoji": "\U0001f3af",
         "description": "Reliable large-caps with consistent earnings growth and low volatility",
         "stocks": [
-            {"ticker": "AAPL", "companyName": "Apple Inc.", "weight": 0.25, "score": 7.1, "signal": "BUY", "reason": "Services flywheel + iPhone cycle"},
-            {"ticker": "V", "companyName": "Visa Inc.", "weight": 0.20, "score": 7.5, "signal": "BUY", "reason": "Payments duopoly + cross-border growth"},
-            {"ticker": "UNH", "companyName": "UnitedHealth Group", "weight": 0.20, "score": 6.9, "signal": "HOLD", "reason": "Healthcare moat + aging demographics"},
-            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.20, "score": 7.8, "signal": "BUY", "reason": "Enterprise software + cloud"},
-            {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.15, "score": 6.6, "signal": "HOLD", "reason": "Banking leader + rate tailwind"},
+            {"ticker": "AAPL", "companyName": "Apple Inc.", "weight": 0.25, "reason": "Services flywheel + iPhone cycle"},
+            {"ticker": "V", "companyName": "Visa Inc.", "weight": 0.20, "reason": "Payments duopoly + cross-border growth"},
+            {"ticker": "UNH", "companyName": "UnitedHealth Group", "weight": 0.20, "reason": "Healthcare moat + aging demographics"},
+            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.20, "reason": "Enterprise software + cloud"},
+            {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.15, "reason": "Banking leader + rate tailwind"},
         ],
-        "returnYTD": 15.7,
         "riskLevel": "Low",
     },
     {
@@ -1106,13 +1118,12 @@ DEFAULT_BASKETS = [
         "emoji": "\u2601\ufe0f",
         "description": "Dominant cloud infrastructure and SaaS platforms driving digital transformation",
         "stocks": [
-            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.30, "score": 7.3, "signal": "BUY", "reason": "AWS market leader + advertising"},
-            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "score": 7.8, "signal": "BUY", "reason": "Azure growth + enterprise"},
-            {"ticker": "CRM", "companyName": "Salesforce, Inc.", "weight": 0.20, "score": 6.4, "signal": "HOLD", "reason": "CRM market share + AI agents"},
-            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.15, "score": 7.0, "signal": "BUY", "reason": "Google Cloud + BigQuery"},
-            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.10, "score": 7.2, "signal": "BUY", "reason": "VMware + cloud networking"},
+            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.30, "reason": "AWS market leader + advertising"},
+            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "reason": "Azure growth + enterprise"},
+            {"ticker": "CRM", "companyName": "Salesforce, Inc.", "weight": 0.20, "reason": "CRM market share + AI agents"},
+            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.15, "reason": "Google Cloud + BigQuery"},
+            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.10, "reason": "VMware + cloud networking"},
         ],
-        "returnYTD": 19.1,
         "riskLevel": "Medium",
     },
     {
@@ -1121,12 +1132,11 @@ DEFAULT_BASKETS = [
         "emoji": "\u26a1",
         "description": "Traditional energy leaders with strong cash flows benefiting from AI power demand",
         "stocks": [
-            {"ticker": "XOM", "companyName": "Exxon Mobil Corporation", "weight": 0.35, "score": 5.8, "signal": "HOLD", "reason": "Cash cow + Pioneer acquisition"},
-            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.25, "score": 7.2, "signal": "BUY", "reason": "Data center power management"},
-            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "score": 7.4, "signal": "BUY", "reason": "Content spending discipline + ads tier"},
-            {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.20, "score": 6.6, "signal": "HOLD", "reason": "Energy financing + rate margin"},
+            {"ticker": "XOM", "companyName": "Exxon Mobil Corporation", "weight": 0.35, "reason": "Cash cow + Pioneer acquisition"},
+            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.25, "reason": "Data center power management"},
+            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "reason": "Content spending discipline + ads tier"},
+            {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.20, "reason": "Energy financing + rate margin"},
         ],
-        "returnYTD": 11.2,
         "riskLevel": "Medium",
     },
     {
@@ -1135,16 +1145,50 @@ DEFAULT_BASKETS = [
         "emoji": "\U0001f680",
         "description": "High-beta names with strong recent performance and positive FII signals",
         "stocks": [
-            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.25, "score": 8.4, "signal": "BUY", "reason": "Strongest momentum in market"},
-            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "score": 7.4, "signal": "BUY", "reason": "Subscriber re-acceleration"},
-            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.20, "score": 7.3, "signal": "BUY", "reason": "Margin expansion story"},
-            {"ticker": "META", "companyName": "Meta Platforms, Inc.", "weight": 0.20, "score": 6.5, "signal": "HOLD", "reason": "AI ad revenue boost"},
-            {"ticker": "TSLA", "companyName": "Tesla, Inc.", "weight": 0.15, "score": 5.2, "signal": "HOLD", "reason": "Robotaxi catalyst potential"},
+            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.25, "reason": "Strongest momentum in market"},
+            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "reason": "Subscriber re-acceleration"},
+            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.20, "reason": "Margin expansion story"},
+            {"ticker": "META", "companyName": "Meta Platforms, Inc.", "weight": 0.20, "reason": "AI ad revenue boost"},
+            {"ticker": "TSLA", "companyName": "Tesla, Inc.", "weight": 0.15, "reason": "Robotaxi catalyst potential"},
         ],
-        "returnYTD": 28.9,
         "riskLevel": "High",
     },
 ]
+
+
+def _enrich_baskets_with_signals(baskets):
+    """Enrich basket stocks with live DynamoDB signal data."""
+    # Collect all unique tickers
+    all_tickers = set()
+    for b in baskets:
+        for s in b.get("stocks", []):
+            all_tickers.add(s["ticker"])
+
+    if not all_tickers:
+        return baskets
+
+    # Batch fetch from DynamoDB
+    signals_map = _get_signal_data_for_tickers(list(all_tickers))
+
+    enriched = []
+    for b in baskets:
+        new_stocks = []
+        total_score = 0.0
+        count = 0
+        for s in b.get("stocks", []):
+            sig = signals_map.get(s["ticker"], {})
+            score = sig.get("compositeScore", 5.0)
+            signal = sig.get("signal", "HOLD")
+            new_stocks.append({
+                **s,
+                "score": round(score, 1),
+                "signal": signal,
+            })
+            total_score += score
+            count += 1
+        avg_score = round(total_score / count, 1) if count else 5.0
+        enriched.append({**b, "stocks": new_stocks, "avgScore": avg_score})
+    return enriched
 
 
 def _handle_baskets(method, path):
@@ -1159,35 +1203,54 @@ def _handle_baskets(method, path):
         # Try S3 first
         s3_basket = s3.read_json(f"baskets/{basket_id}.json")
         if s3_basket:
-            return _response(200, s3_basket)
+            enriched = _enrich_baskets_with_signals([s3_basket])
+            return _response(200, enriched[0])
         # Fallback to default
         for b in DEFAULT_BASKETS:
             if b["id"] == basket_id:
-                return _response(200, b)
+                enriched = _enrich_baskets_with_signals([b])
+                return _response(200, enriched[0])
         return _response(404, {"error": f"Basket '{basket_id}' not found"})
 
     # List all baskets
     s3_baskets = s3.read_json("baskets/default.json")
     if s3_baskets and s3_baskets.get("baskets"):
-        return _response(200, {"baskets": s3_baskets["baskets"]})
+        baskets = s3_baskets["baskets"]
+    else:
+        baskets = DEFAULT_BASKETS
 
     from datetime import datetime
     now = datetime.utcnow().isoformat()
-    baskets_with_dates = [
-        {**b, "updatedAt": now} for b in DEFAULT_BASKETS
-    ]
+    enriched = _enrich_baskets_with_signals(baskets)
+    baskets_with_dates = [{**b, "updatedAt": now} for b in enriched]
     return _response(200, {"baskets": baskets_with_dates})
 
 
 # ─── Trending Endpoint ───
 
 DEFAULT_TRENDING = [
-    {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "score": 8.4, "signal": "BUY", "reason": "AI chip demand surge after earnings beat", "changePercent": 4.2, "volume": "52.3M", "rank": 1},
-    {"ticker": "TSLA", "companyName": "Tesla, Inc.", "score": 5.2, "signal": "HOLD", "reason": "Robotaxi unveil drives speculation", "changePercent": -2.1, "volume": "38.7M", "rank": 2},
-    {"ticker": "AAPL", "companyName": "Apple Inc.", "score": 7.1, "signal": "BUY", "reason": "iPhone 17 pre-orders exceed expectations", "changePercent": 1.8, "volume": "28.1M", "rank": 3},
-    {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "score": 7.3, "signal": "BUY", "reason": "AWS growth accelerates to 19% YoY", "changePercent": 3.1, "volume": "22.5M", "rank": 4},
-    {"ticker": "META", "companyName": "Meta Platforms, Inc.", "score": 6.5, "signal": "HOLD", "reason": "Threads user growth hits 200M DAUs", "changePercent": 0.9, "volume": "18.9M", "rank": 5},
+    {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "reason": "AI chip demand surge after earnings beat", "changePercent": 4.2, "volume": "52.3M", "rank": 1},
+    {"ticker": "TSLA", "companyName": "Tesla, Inc.", "reason": "Robotaxi unveil drives speculation", "changePercent": -2.1, "volume": "38.7M", "rank": 2},
+    {"ticker": "AAPL", "companyName": "Apple Inc.", "reason": "iPhone 17 pre-orders exceed expectations", "changePercent": 1.8, "volume": "28.1M", "rank": 3},
+    {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "reason": "AWS growth accelerates to 19% YoY", "changePercent": 3.1, "volume": "22.5M", "rank": 4},
+    {"ticker": "META", "companyName": "Meta Platforms, Inc.", "reason": "Threads user growth hits 200M DAUs", "changePercent": 0.9, "volume": "18.9M", "rank": 5},
 ]
+
+
+def _enrich_trending_with_signals(items):
+    """Enrich trending items with live DynamoDB signal data."""
+    tickers = [item["ticker"] for item in items]
+    signals_map = _get_signal_data_for_tickers(tickers)
+
+    enriched = []
+    for item in items:
+        sig = signals_map.get(item["ticker"], {})
+        enriched.append({
+            **item,
+            "score": round(sig.get("compositeScore", 5.0), 1),
+            "signal": sig.get("signal", "HOLD"),
+        })
+    return enriched
 
 
 def _handle_trending(method):
@@ -1197,23 +1260,70 @@ def _handle_trending(method):
 
     s3_trending = s3.read_json("trending/latest.json")
     if s3_trending and s3_trending.get("items"):
-        return _response(200, {"items": s3_trending["items"]})
+        items = s3_trending["items"]
+    else:
+        items = DEFAULT_TRENDING
 
-    return _response(200, {"items": DEFAULT_TRENDING})
+    enriched = _enrich_trending_with_signals(items)
+    return _response(200, {"items": enriched})
 
 
 # ─── Discovery Endpoint ───
 
 DEFAULT_DISCOVERY = [
-    {"ticker": "AVGO", "companyName": "Broadcom Inc.", "score": 7.2, "signal": "BUY", "insight": "VMware integration drives recurring revenue; AI networking chip demand surges", "sector": "Technology", "price": 185.30, "changePercent": 2.4, "topFactors": [{"name": "Supply Chain", "score": 1.4}, {"name": "Performance", "score": 1.2}]},
-    {"ticker": "CRM", "companyName": "Salesforce, Inc.", "score": 6.4, "signal": "HOLD", "insight": "AgentForce AI platform gaining traction; margins expanding through discipline", "sector": "Technology", "price": 312.50, "changePercent": 1.1, "topFactors": [{"name": "Customers", "score": 1.0}, {"name": "Performance", "score": 0.8}]},
-    {"ticker": "NFLX", "companyName": "Netflix, Inc.", "score": 7.4, "signal": "BUY", "insight": "Ad-supported tier exceeds projections; content spending discipline improves margins", "sector": "Communication", "price": 725.80, "changePercent": 3.5, "topFactors": [{"name": "Customers", "score": 1.5}, {"name": "Performance", "score": 1.3}]},
-    {"ticker": "JPM", "companyName": "JPMorgan Chase", "score": 6.6, "signal": "HOLD", "insight": "Rate environment supports NII; investment banking recovery underway", "sector": "Financials", "price": 215.40, "changePercent": 0.7, "topFactors": [{"name": "Macro", "score": 0.9}, {"name": "Performance", "score": 0.8}]},
-    {"ticker": "V", "companyName": "Visa Inc.", "score": 7.5, "signal": "BUY", "insight": "Cross-border volume recovery accelerates; new value-added services growing 20%+", "sector": "Financials", "price": 298.60, "changePercent": 1.3, "topFactors": [{"name": "Customers", "score": 1.4}, {"name": "Performance", "score": 1.1}]},
-    {"ticker": "UNH", "companyName": "UnitedHealth Group", "score": 6.9, "signal": "HOLD", "insight": "Optum Health growth offsets Medicare Advantage headwinds; aging population tailwind", "sector": "Healthcare", "price": 542.30, "changePercent": -0.4, "topFactors": [{"name": "Customers", "score": 1.1}, {"name": "Macro", "score": 0.7}]},
-    {"ticker": "XOM", "companyName": "Exxon Mobil Corporation", "score": 5.8, "signal": "HOLD", "insight": "Pioneer acquisition adds Permian scale; free cash flow supports buybacks", "sector": "Energy", "price": 118.90, "changePercent": -1.2, "topFactors": [{"name": "Supply Chain", "score": 0.8}, {"name": "Macro", "score": -0.5}]},
-    {"ticker": "AMD", "companyName": "Advanced Micro Devices", "score": 6.8, "signal": "HOLD", "insight": "MI300 GPU demand strong but supply constrained; data center revenue doubles", "sector": "Technology", "price": 178.40, "changePercent": 2.8, "topFactors": [{"name": "Supply Chain", "score": 1.2}, {"name": "Performance", "score": 1.0}]},
+    {"ticker": "AVGO", "companyName": "Broadcom Inc.", "insight": "VMware integration drives recurring revenue; AI networking chip demand surges", "sector": "Technology", "topFactors": [{"name": "Supply Chain", "score": 1.4}, {"name": "Performance", "score": 1.2}]},
+    {"ticker": "CRM", "companyName": "Salesforce, Inc.", "insight": "AgentForce AI platform gaining traction; margins expanding through discipline", "sector": "Technology", "topFactors": [{"name": "Customers", "score": 1.0}, {"name": "Performance", "score": 0.8}]},
+    {"ticker": "NFLX", "companyName": "Netflix, Inc.", "insight": "Ad-supported tier exceeds projections; content spending discipline improves margins", "sector": "Communication", "topFactors": [{"name": "Customers", "score": 1.5}, {"name": "Performance", "score": 1.3}]},
+    {"ticker": "JPM", "companyName": "JPMorgan Chase", "insight": "Rate environment supports NII; investment banking recovery underway", "sector": "Financials", "topFactors": [{"name": "Macro", "score": 0.9}, {"name": "Performance", "score": 0.8}]},
+    {"ticker": "V", "companyName": "Visa Inc.", "insight": "Cross-border volume recovery accelerates; new value-added services growing 20%+", "sector": "Financials", "topFactors": [{"name": "Customers", "score": 1.4}, {"name": "Performance", "score": 1.1}]},
+    {"ticker": "UNH", "companyName": "UnitedHealth Group", "insight": "Optum Health growth offsets Medicare Advantage headwinds; aging population tailwind", "sector": "Healthcare", "topFactors": [{"name": "Customers", "score": 1.1}, {"name": "Macro", "score": 0.7}]},
+    {"ticker": "XOM", "companyName": "Exxon Mobil Corporation", "insight": "Pioneer acquisition adds Permian scale; free cash flow supports buybacks", "sector": "Energy", "topFactors": [{"name": "Supply Chain", "score": 0.8}, {"name": "Macro", "score": -0.5}]},
+    {"ticker": "AMD", "companyName": "Advanced Micro Devices", "insight": "MI300 GPU demand strong but supply constrained; data center revenue doubles", "sector": "Technology", "topFactors": [{"name": "Supply Chain", "score": 1.2}, {"name": "Performance", "score": 1.0}]},
 ]
+
+
+def _enrich_discovery_with_signals(cards):
+    """Enrich discovery cards with live DynamoDB signal data and prices."""
+    tickers = [c["ticker"] for c in cards]
+    signals_map = _get_signal_data_for_tickers(tickers)
+
+    # Batch fetch full signal records to get insights, topFactors, sector from DynamoDB
+    full_records = {}
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in tickers]
+    if keys:
+        items = db.batch_get(keys)
+        for item in items:
+            full_records[item.get("ticker", "")] = item
+
+    enriched = []
+    for card in cards:
+        t = card["ticker"]
+        sig = signals_map.get(t, {})
+        full = full_records.get(t, {})
+
+        # Use DynamoDB insight/topFactors if available, else keep defaults from card
+        insight = full.get("insight") or card.get("insight", "")
+        top_factors = card.get("topFactors", [])
+        if full.get("topFactors"):
+            try:
+                db_factors = full["topFactors"]
+                if isinstance(db_factors, str):
+                    db_factors = json.loads(db_factors)
+                if isinstance(db_factors, list) and len(db_factors) > 0:
+                    top_factors = db_factors[:3]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        enriched.append({
+            **card,
+            "score": round(sig.get("compositeScore", 5.0), 1),
+            "signal": sig.get("signal", "HOLD"),
+            "insight": insight,
+            "topFactors": top_factors,
+            "price": float(full.get("price", card.get("price", 0))),
+            "changePercent": float(full.get("changePercent", card.get("changePercent", 0))),
+        })
+    return enriched
 
 
 def _handle_discovery(method):
@@ -1223,9 +1333,12 @@ def _handle_discovery(method):
 
     s3_discovery = s3.read_json("discovery/latest.json")
     if s3_discovery and s3_discovery.get("cards"):
-        return _response(200, {"cards": s3_discovery["cards"]})
+        cards = s3_discovery["cards"]
+    else:
+        cards = DEFAULT_DISCOVERY
 
-    return _response(200, {"cards": DEFAULT_DISCOVERY})
+    enriched = _enrich_discovery_with_signals(cards)
+    return _response(200, {"cards": enriched})
 
 
 # ─── Watchlist Endpoints ───

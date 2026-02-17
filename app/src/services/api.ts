@@ -1,7 +1,25 @@
 import axios from 'axios';
 import { getCurrentSession } from './auth';
+import { useSignalStore } from '../store/signalStore';
+import type { Signal } from '../types';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.fii.app';
+
+/** Helper: extract signal summaries from any API response and cache them. */
+const _cacheSignals = (
+  items: Array<{ ticker?: string; score?: number; signal?: string; compositeScore?: number }>,
+) => {
+  const summaries = items
+    .filter((i) => i.ticker && (i.score != null || i.compositeScore != null) && i.signal)
+    .map((i) => ({
+      ticker: i.ticker!,
+      score: i.score ?? i.compositeScore ?? 0,
+      signal: (i.signal as Signal) || 'HOLD',
+    }));
+  if (summaries.length > 0) {
+    useSignalStore.getState().upsertSignals(summaries);
+  }
+};
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -31,6 +49,8 @@ api.interceptors.request.use(async (config) => {
 export const getFeed = async (cursor?: string) => {
   const params = cursor ? { cursor } : {};
   const { data } = await api.get('/feed', { params });
+  // Cache signal data from feed items
+  _cacheSignals(data.items || []);
   return data;
 };
 
@@ -45,6 +65,7 @@ export const getPrice = async (ticker: string) => {
 
 export const searchTickers = async (query: string) => {
   const { data } = await api.get('/search', { params: { q: query } });
+  _cacheSignals(data.results || []);
   return data;
 };
 
@@ -52,6 +73,9 @@ export const searchTickers = async (query: string) => {
 
 export const getSignalDetail = async (ticker: string) => {
   const { data } = await api.get(`/signals/${ticker}`);
+  if (data.ticker) {
+    _cacheSignals([data]);
+  }
   return data;
 };
 
@@ -64,6 +88,7 @@ export const batchSignals = async (tickers: string[]) => {
   const { data } = await api.get('/signals/batch', {
     params: { tickers: tickers.join(',') },
   });
+  _cacheSignals(data.signals || []);
   return data;
 };
 
@@ -98,11 +123,15 @@ export const getPortfolioSummary = async () => {
 
 export const getBaskets = async () => {
   const { data } = await api.get('/baskets');
+  // Cache signal data from all basket stocks
+  const allStocks = (data.baskets || []).flatMap((b: any) => b.stocks || []);
+  _cacheSignals(allStocks);
   return data;
 };
 
 export const getBasketDetail = async (id: string) => {
   const { data } = await api.get(`/baskets/${id}`);
+  _cacheSignals(data.stocks || []);
   return data;
 };
 
@@ -110,6 +139,7 @@ export const getBasketDetail = async (id: string) => {
 
 export const getTrending = async () => {
   const { data } = await api.get('/trending');
+  _cacheSignals(data.items || []);
   return data;
 };
 
@@ -117,6 +147,7 @@ export const getTrending = async () => {
 
 export const getDiscoveryCards = async () => {
   const { data } = await api.get('/discovery');
+  _cacheSignals(data.cards || []);
   return data;
 };
 
