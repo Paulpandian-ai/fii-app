@@ -184,6 +184,11 @@ export const getAchievements = async () => {
   return data;
 };
 
+export const runBacktest = async (tickers?: string[], period?: string) => {
+  const { data } = await api.post('/strategy/backtest', { tickers, period: period || '3m' });
+  return data;
+};
+
 // ─── Strategy: Diversification / Tax / Advice / Report Card ───
 
 export const runDiversification = async () => {

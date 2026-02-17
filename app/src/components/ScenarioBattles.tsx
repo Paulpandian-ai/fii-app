@@ -95,8 +95,8 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
             </View>
 
             {/* Verdict */}
-            <View style={[styles.verdictBadge, { backgroundColor: sc.color + '20' }]}>
-              <Text style={[styles.verdictText, { color: sc.color }]}>
+            <View style={[styles.verdictBadge, { backgroundColor: (sc.verdictColor ?? sc.color) + '20' }]}>
+              <Text style={[styles.verdictText, { color: sc.verdictColor ?? sc.color }]}>
                 {sc.verdict}
               </Text>
             </View>
@@ -106,7 +106,11 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
               <View style={styles.performersRow}>
                 {sc.bestPerformer && (
                   <View style={styles.performerChip}>
-                    <Ionicons name="arrow-up" size={12} color="#10B981" />
+                    <Ionicons
+                      name={(sc.bestPerformer.impact ?? 0) >= 0 ? 'arrow-up' : 'arrow-down'}
+                      size={12}
+                      color={(sc.bestPerformer.impact ?? 0) >= 0 ? '#4ADE80' : '#F87171'}
+                    />
                     <Text style={styles.performerText}>
                       {sc.bestPerformer.ticker} {(sc.bestPerformer.impact ?? 0) > 0 ? '+' : ''}
                       {(sc.bestPerformer.impact ?? 0).toFixed(1)}%
@@ -115,7 +119,11 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                 )}
                 {sc.worstPerformer && (
                   <View style={styles.performerChip}>
-                    <Ionicons name="arrow-down" size={12} color="#EF4444" />
+                    <Ionicons
+                      name={(sc.worstPerformer.impact ?? 0) >= 0 ? 'arrow-up' : 'arrow-down'}
+                      size={12}
+                      color={(sc.worstPerformer.impact ?? 0) >= 0 ? '#4ADE80' : '#F87171'}
+                    />
                     <Text style={styles.performerText}>
                       {sc.worstPerformer.ticker} {(sc.worstPerformer.impact ?? 0) > 0 ? '+' : ''}
                       {(sc.worstPerformer.impact ?? 0).toFixed(1)}%

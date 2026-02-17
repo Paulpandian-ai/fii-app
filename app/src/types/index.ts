@@ -323,6 +323,7 @@ export interface ScenarioCard {
   portfolioImpact: number;
   sp500Impact: number;
   verdict: string;
+  verdictColor?: string;
   bestPerformer: TickerImpact | null;
   worstPerformer: TickerImpact | null;
   tickerImpacts: TickerImpact[];
@@ -452,6 +453,43 @@ export interface ReportCard {
   updatedAt: string;
 }
 
+// ─── Backtest Types ───
+
+export interface BacktestResult {
+  ticker: string;
+  companyName: string;
+  signalDate: string;
+  signal: Signal;
+  score: number;
+  actualReturn: number;
+  correct: boolean;
+  status: 'correct' | 'incorrect' | 'borderline';
+}
+
+export interface BacktestStats {
+  hitRate: number;
+  buyAccuracy: number;
+  holdAccuracy: number;
+  sellAccuracy: number;
+  totalSignals: number;
+  totalCorrect: number;
+}
+
+export interface PortfolioBacktest {
+  estimatedReturn: number;
+  sp500Return: number;
+  fiiAdvantage: number;
+  isSimulated: boolean;
+}
+
+export interface BacktestResponse {
+  results: BacktestResult[];
+  stats: BacktestStats;
+  portfolioBacktest: PortfolioBacktest;
+  hasPortfolio: boolean;
+  updatedAt: string;
+}
+
 // ─── Auth Types ───
 
 export interface User {
@@ -542,4 +580,6 @@ export type RootStackParamList = {
   TaxStrategy: undefined;
   PortfolioXRay: undefined;
   AIAdvisor: undefined;
+  Backtest: undefined;
+  Settings: undefined;
 };

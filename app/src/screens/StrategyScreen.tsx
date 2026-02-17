@@ -157,6 +157,15 @@ export const StrategyScreen: React.FC = () => {
       grade: adviceCount > 0 ? '' : '--',
       screen: 'AIAdvisor',
     },
+    {
+      id: 'backtest',
+      title: 'Signal Backtester',
+      icon: 'time-outline',
+      iconColor: '#F472B6',
+      subtitle: 'See how FII signals performed',
+      grade: '',
+      screen: 'Backtest',
+    },
   ];
 
   return (
@@ -214,7 +223,7 @@ export const StrategyScreen: React.FC = () => {
               <TouchableOpacity
                 key={card.id}
                 style={styles.card}
-                onPress={() => navigation.navigate(card.screen)}
+                onPress={() => navigation.navigate(card.screen as any)}
                 activeOpacity={0.7}
               >
                 <View style={styles.cardHeader}>
