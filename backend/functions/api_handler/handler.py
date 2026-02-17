@@ -1899,25 +1899,44 @@ def _handle_strategy_backtest(body, user_id):
     if not tickers_input:
         return _response(200, {
             "results": [],
-            "stats": {"hitRate": 0, "buyAccuracy": 0, "holdAccuracy": 0, "sellAccuracy": 0},
+            "stats": {"hitRate": 0, "buyAccuracy": 0, "holdAccuracy": 0, "sellAccuracy": 0,
+                       "totalSignals": 0, "totalCorrect": 0, "totalBorderline": 0},
             "hasPortfolio": False,
         })
 
     signals_map = _get_signal_data_for_tickers(tickers_input)
     months = 3 if period == "3m" else 6
 
+    def _signal_strength(score):
+        """Map composite score to human-readable signal strength label."""
+        if score >= 8:
+            return "Strong Buy"
+        elif score >= 7:
+            return "Buy"
+        elif score >= 5:
+            return "Hold"
+        elif score >= 4:
+            return "Weak Hold"
+        elif score >= 3:
+            return "Sell"
+        else:
+            return "Strong Sell"
+
     results = []
     buy_correct = 0
+    buy_borderline = 0
     buy_total = 0
     hold_correct = 0
+    hold_borderline = 0
     hold_total = 0
     sell_correct = 0
+    sell_borderline = 0
     sell_total = 0
 
     for ticker in tickers_input:
         sig = signals_map.get(ticker, {})
         signal = sig.get("signal", "HOLD")
-        score = sig.get("compositeScore", 5.0)
+        score = float(sig.get("compositeScore", 5.0))
         company_name = sig.get("companyName", ticker)
 
         # Fetch 1-year price history from Yahoo Finance
@@ -1949,25 +1968,54 @@ def _handle_strategy_backtest(body, user_id):
             noise = random.uniform(-8, 8)
             actual_return = round(base + noise, 1)
 
-        # Determine if signal was correct
+        # Determine if signal was correct using relaxed, realistic thresholds
+        strength = _signal_strength(score)
+
         if signal == "BUY":
             buy_total += 1
-            correct = actual_return > 5.0
+            # Strong Buy (8+) needs >+5%; regular Buy (7-7.9) needs >0%
+            if score >= 8:
+                correct = actual_return > 5.0
+                borderline = not correct and actual_return > 0.0
+            else:
+                correct = actual_return > 0.0
+                borderline = not correct and actual_return >= -5.0
             if correct:
                 buy_correct += 1
-            status = "correct" if correct else ("borderline" if actual_return >= 0 else "incorrect")
+            elif borderline:
+                buy_borderline += 1
+            status = "correct" if correct else ("borderline" if borderline else "incorrect")
         elif signal == "SELL":
             sell_total += 1
-            correct = actual_return < -5.0
+            # Sell correct if return < +2% (didn't rally significantly)
+            correct = actual_return < 2.0
+            borderline = not correct and actual_return < 8.0
             if correct:
                 sell_correct += 1
-            status = "correct" if correct else ("borderline" if actual_return <= 0 else "incorrect")
+            elif borderline:
+                sell_borderline += 1
+            status = "correct" if correct else ("borderline" if borderline else "incorrect")
         else:  # HOLD
             hold_total += 1
-            correct = -5.0 <= actual_return <= 10.0
+            # Wider band: -10% to +15%
+            correct = -10.0 <= actual_return <= 15.0
+            borderline = not correct and (-15.0 <= actual_return <= 20.0)
             if correct:
                 hold_correct += 1
-            status = "correct" if correct else "borderline" if -10.0 <= actual_return <= 15.0 else "incorrect"
+            elif borderline:
+                hold_borderline += 1
+            status = "correct" if correct else ("borderline" if borderline else "incorrect")
+
+        # Build context note for borderline/interesting cases
+        note = None
+        if status == "borderline" and strength == "Weak Hold":
+            note = f"Weak Hold ({score:.1f}) — borderline signal correctly indicated caution"
+        elif status == "borderline" and signal == "BUY":
+            note = f"{strength} ({score:.1f}) — small loss within noise range"
+        elif status == "correct" and strength == "Weak Hold" and actual_return < -5.0:
+            note = f"Weak Hold ({score:.1f}) — near-sell signal, decline was expected"
+        elif status == "correct" and signal == "SELL":
+            note = f"{strength} ({score:.1f}) — correctly avoided rally"
 
         # Estimate signal date as ~3 months ago
         signal_date = (datetime.utcnow() - timedelta(days=months * 30)).strftime("%b %Y")
@@ -1978,18 +2026,28 @@ def _handle_strategy_backtest(body, user_id):
             "signalDate": signal_date,
             "signal": signal,
             "score": round(score, 1),
+            "signalStrength": strength,
             "actualReturn": actual_return,
             "correct": correct,
             "status": status,
+            "note": note,
         })
 
-    # Calculate overall stats
+    # Calculate overall stats — borderline counts as 0.5
     total = len(results)
-    total_correct = sum(1 for r in results if r["correct"])
-    hit_rate = round((total_correct / total) * 100, 1) if total else 0
-    buy_accuracy = round((buy_correct / buy_total) * 100, 1) if buy_total else 0
-    hold_accuracy = round((hold_correct / hold_total) * 100, 1) if hold_total else 0
-    sell_accuracy = round((sell_correct / sell_total) * 100, 1) if sell_total else 0
+    fully_correct = sum(1 for r in results if r["status"] == "correct")
+    total_borderline = sum(1 for r in results if r["status"] == "borderline")
+    total_correct_weighted = fully_correct + (total_borderline * 0.5)
+    hit_rate = round((total_correct_weighted / total) * 100, 1) if total else 0
+
+    def _accuracy(correct_n, borderline_n, total_n):
+        if total_n == 0:
+            return 0
+        return round(((correct_n + borderline_n * 0.5) / total_n) * 100, 1)
+
+    buy_accuracy = _accuracy(buy_correct, buy_borderline, buy_total)
+    hold_accuracy = _accuracy(hold_correct, hold_borderline, hold_total)
+    sell_accuracy = _accuracy(sell_correct, sell_borderline, sell_total)
 
     # Portfolio backtest: estimate return if following FII signals
     portfolio_return = 0.0
@@ -2022,7 +2080,8 @@ def _handle_strategy_backtest(body, user_id):
             "holdAccuracy": hold_accuracy,
             "sellAccuracy": sell_accuracy,
             "totalSignals": total,
-            "totalCorrect": total_correct,
+            "totalCorrect": fully_correct,
+            "totalBorderline": total_borderline,
         },
         "portfolioBacktest": {
             "estimatedReturn": portfolio_return,

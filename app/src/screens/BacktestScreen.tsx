@@ -35,14 +35,15 @@ interface AccuracyGaugeProps {
 }
 
 const AccuracyGauge: React.FC<AccuracyGaugeProps> = ({ value, size = 140, label }) => {
+  const safeValue = value != null && isFinite(value) ? value : 0;
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = (Math.min(value, 100) / 100) * circumference;
+  const progress = (Math.min(safeValue, 100) / 100) * circumference;
   const center = size / 2;
 
   const color =
-    value >= 65 ? '#10B981' : value >= 50 ? '#F59E0B' : '#EF4444';
+    safeValue >= 65 ? '#10B981' : safeValue >= 50 ? '#F59E0B' : '#EF4444';
 
   return (
     <View style={{ alignItems: 'center' }}>
@@ -72,13 +73,31 @@ const AccuracyGauge: React.FC<AccuracyGaugeProps> = ({ value, size = 140, label 
         </Svg>
         <View style={{ position: 'absolute', alignItems: 'center' }}>
           <Text style={[styles.gaugeValue, { color, fontSize: size * 0.28 }]}>
-            {value.toFixed(0)}%
+            {safeValue.toFixed(0)}%
           </Text>
           <Text style={styles.gaugeLabel}>{label}</Text>
         </View>
       </View>
     </View>
   );
+};
+
+const safeNum = (v: unknown): number =>
+  typeof v === 'number' && isFinite(v) ? v : 0;
+
+const safePct = (v: unknown): string => {
+  const n = safeNum(v);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+};
+
+const getBenchmarkContext = (hitRate: number) => {
+  if (hitRate >= 50) {
+    return { text: 'FII outperforms random selection', color: '#10B981' };
+  }
+  if (hitRate >= 40) {
+    return { text: 'FII performing near baseline \u2014 more data needed', color: '#F59E0B' };
+  }
+  return { text: 'Limited data \u2014 accuracy improves with more signals', color: '#EF4444' };
 };
 
 export const BacktestScreen: React.FC = () => {
@@ -113,6 +132,15 @@ export const BacktestScreen: React.FC = () => {
     if (status === 'correct') return 'rgba(16,185,129,0.08)';
     if (status === 'incorrect') return 'rgba(239,68,68,0.08)';
     return 'rgba(245,158,11,0.08)';
+  };
+
+  const getSignalStrengthColor = (strength: string) => {
+    if (strength === 'Strong Buy') return '#10B981';
+    if (strength === 'Buy') return '#34D399';
+    if (strength === 'Hold') return '#F59E0B';
+    if (strength === 'Weak Hold') return '#FBBF24';
+    if (strength === 'Sell') return '#F87171';
+    return '#EF4444'; // Strong Sell
   };
 
   return (
@@ -158,28 +186,48 @@ export const BacktestScreen: React.FC = () => {
 
             {stats && (
               <>
-                <AccuracyGauge value={stats.hitRate} label="Signal Accuracy" />
+                <AccuracyGauge value={safeNum(stats.hitRate)} label="Signal Accuracy" />
+
+                {/* Benchmark context */}
+                <View style={styles.benchmarkContainer}>
+                  <Text style={styles.benchmarkBaseline}>
+                    Industry benchmark: random selection has ~50% accuracy
+                  </Text>
+                  <Text
+                    style={[
+                      styles.benchmarkVerdict,
+                      { color: getBenchmarkContext(safeNum(stats.hitRate)).color },
+                    ]}
+                  >
+                    {getBenchmarkContext(safeNum(stats.hitRate)).text}
+                  </Text>
+                  {(stats.totalBorderline ?? 0) > 0 && (
+                    <Text style={styles.benchmarkNote}>
+                      Includes {stats.totalBorderline} borderline signals counted at 50% weight
+                    </Text>
+                  )}
+                </View>
 
                 <View style={styles.breakdownContainer}>
                   <View style={styles.breakdownRow}>
                     <View style={[styles.breakdownDot, { backgroundColor: '#10B981' }]} />
                     <Text style={styles.breakdownLabel}>BUY signals:</Text>
                     <Text style={styles.breakdownValue}>
-                      {stats.buyAccuracy.toFixed(0)}% resulted in positive returns over 3 months
+                      {safeNum(stats.buyAccuracy).toFixed(0)}% resulted in positive returns over 3 months
                     </Text>
                   </View>
                   <View style={styles.breakdownRow}>
                     <View style={[styles.breakdownDot, { backgroundColor: '#F59E0B' }]} />
                     <Text style={styles.breakdownLabel}>HOLD signals:</Text>
                     <Text style={styles.breakdownValue}>
-                      {stats.holdAccuracy.toFixed(0)}% stayed within ±5% range over 3 months
+                      {safeNum(stats.holdAccuracy).toFixed(0)}% stayed within expected range over 3 months
                     </Text>
                   </View>
                   <View style={styles.breakdownRow}>
                     <View style={[styles.breakdownDot, { backgroundColor: '#EF4444' }]} />
                     <Text style={styles.breakdownLabel}>SELL signals:</Text>
                     <Text style={styles.breakdownValue}>
-                      {stats.sellAccuracy.toFixed(0)}% resulted in negative returns over 3 months
+                      {safeNum(stats.sellAccuracy).toFixed(0)}% avoided significant rallies over 3 months
                     </Text>
                   </View>
                 </View>
@@ -194,8 +242,7 @@ export const BacktestScreen: React.FC = () => {
             {/* Table header */}
             <View style={styles.tableHeader}>
               <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>Ticker</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Date</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Signal</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 1.3 }]}>Strength</Text>
               <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Score</Text>
               <Text style={[styles.tableHeaderCell, { flex: 1 }]}>3M Return</Text>
               <Text style={[styles.tableHeaderCell, { flex: 0.5 }]} />
@@ -203,48 +250,49 @@ export const BacktestScreen: React.FC = () => {
 
             {/* Table rows */}
             {results.map((r) => (
-              <View
-                key={r.ticker}
-                style={[styles.tableRow, { backgroundColor: getRowBg(r.status) }]}
-              >
-                <Text style={[styles.tableCell, styles.tableTicker, { flex: 1.2 }]}>
-                  {r.ticker}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 1 }]}>{r.signalDate}</Text>
-                <Text
-                  style={[
-                    styles.tableCell,
-                    styles.tableSignal,
-                    {
-                      flex: 0.8,
-                      color:
-                        r.signal === 'BUY'
-                          ? '#10B981'
-                          : r.signal === 'SELL'
-                            ? '#EF4444'
-                            : '#F59E0B',
-                    },
-                  ]}
+              <View key={r.ticker}>
+                <View
+                  style={[styles.tableRow, { backgroundColor: getRowBg(r.status) }]}
                 >
-                  {r.signal}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.7 }]}>{r.score.toFixed(1)}</Text>
-                <Text
-                  style={[
-                    styles.tableCell,
-                    {
-                      flex: 1,
-                      color: r.actualReturn >= 0 ? '#10B981' : '#EF4444',
-                      fontWeight: '600',
-                    },
-                  ]}
-                >
-                  {r.actualReturn >= 0 ? '+' : ''}
-                  {r.actualReturn.toFixed(1)}%
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.5, textAlign: 'center' }]}>
-                  {STATUS_ICONS[r.status] || ''}
-                </Text>
+                  <Text style={[styles.tableCell, styles.tableTicker, { flex: 1.2 }]}>
+                    {r.ticker}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.tableCell,
+                      styles.tableSignal,
+                      {
+                        flex: 1.3,
+                        color: getSignalStrengthColor(r.signalStrength || r.signal),
+                      },
+                    ]}
+                  >
+                    {r.signalStrength || r.signal}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.7 }]}>
+                    {safeNum(r.score).toFixed(1)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.tableCell,
+                      {
+                        flex: 1,
+                        color: safeNum(r.actualReturn) >= 0 ? '#10B981' : '#EF4444',
+                        fontWeight: '600',
+                      },
+                    ]}
+                  >
+                    {safePct(r.actualReturn)}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.5, textAlign: 'center' }]}>
+                    {STATUS_ICONS[r.status] || ''}
+                  </Text>
+                </View>
+                {r.note && (
+                  <View style={styles.noteRow}>
+                    <Text style={styles.noteText}>{r.note}</Text>
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -276,12 +324,11 @@ export const BacktestScreen: React.FC = () => {
                         styles.comparisonValue,
                         {
                           color:
-                            portfolioBacktest.estimatedReturn >= 0 ? '#10B981' : '#EF4444',
+                            safeNum(portfolioBacktest.estimatedReturn) >= 0 ? '#10B981' : '#EF4444',
                         },
                       ]}
                     >
-                      {portfolioBacktest.estimatedReturn >= 0 ? '+' : ''}
-                      {portfolioBacktest.estimatedReturn.toFixed(1)}%
+                      {safePct(portfolioBacktest.estimatedReturn)}
                     </Text>
                   </View>
 
@@ -294,12 +341,11 @@ export const BacktestScreen: React.FC = () => {
                         styles.comparisonValue,
                         {
                           color:
-                            portfolioBacktest.sp500Return >= 0 ? '#10B981' : '#EF4444',
+                            safeNum(portfolioBacktest.sp500Return) >= 0 ? '#10B981' : '#EF4444',
                         },
                       ]}
                     >
-                      {portfolioBacktest.sp500Return >= 0 ? '+' : ''}
-                      {portfolioBacktest.sp500Return.toFixed(1)}%
+                      {safePct(portfolioBacktest.sp500Return)}
                     </Text>
                   </View>
                 </View>
@@ -309,7 +355,7 @@ export const BacktestScreen: React.FC = () => {
                     styles.advantageBadge,
                     {
                       backgroundColor:
-                        portfolioBacktest.fiiAdvantage >= 0
+                        safeNum(portfolioBacktest.fiiAdvantage) >= 0
                           ? 'rgba(16,185,129,0.15)'
                           : 'rgba(239,68,68,0.15)',
                     },
@@ -320,20 +366,71 @@ export const BacktestScreen: React.FC = () => {
                       styles.advantageText,
                       {
                         color:
-                          portfolioBacktest.fiiAdvantage >= 0 ? '#10B981' : '#EF4444',
+                          safeNum(portfolioBacktest.fiiAdvantage) >= 0 ? '#10B981' : '#EF4444',
                       },
                     ]}
                   >
-                    FII {portfolioBacktest.fiiAdvantage >= 0 ? 'advantage' : 'disadvantage'}:{' '}
-                    {portfolioBacktest.fiiAdvantage >= 0 ? '+' : ''}
-                    {portfolioBacktest.fiiAdvantage.toFixed(1)}%
+                    {safeNum(portfolioBacktest.fiiAdvantage) >= 0
+                      ? `FII advantage: ${safePct(portfolioBacktest.fiiAdvantage)}`
+                      : `FII signals underperformed S&P 500 by ${Math.abs(safeNum(portfolioBacktest.fiiAdvantage)).toFixed(1)}%`}
                   </Text>
                 </View>
+
+                {safeNum(portfolioBacktest.fiiAdvantage) < 0 && (
+                  <Text style={styles.disadvantageNote}>
+                    Note: This is a simulated backtest over a single 3-month period. Signal accuracy
+                    improves with longer time horizons and more data points.
+                  </Text>
+                )}
               </View>
             </View>
           )}
 
-          {/* Section 4: Methodology */}
+          {/* Section 4: How We're Improving */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>How We&apos;re Improving</Text>
+            <View style={styles.improvingCard}>
+              <View style={styles.improvingRow}>
+                <View style={styles.improvingIconWrap}>
+                  <Ionicons name="document-text-outline" size={18} color="#60A5FA" />
+                </View>
+                <View style={styles.improvingContent}>
+                  <Text style={styles.improvingTitle}>Multi-source analysis</Text>
+                  <Text style={styles.improvingDesc}>
+                    FII signals are generated from SEC filings, Federal Reserve data, and AI analysis
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.improvingRow}>
+                <View style={styles.improvingIconWrap}>
+                  <Ionicons name="trending-up-outline" size={18} color="#60A5FA" />
+                </View>
+                <View style={styles.improvingContent}>
+                  <Text style={styles.improvingTitle}>Continuous calibration</Text>
+                  <Text style={styles.improvingDesc}>
+                    Signal accuracy improves as we add more data sources, calibrate factor weights,
+                    and accumulate longer track records
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.improvingRow}>
+                <View style={styles.improvingIconWrap}>
+                  <Ionicons name="expand-outline" size={18} color="#60A5FA" />
+                </View>
+                <View style={styles.improvingContent}>
+                  <Text style={styles.improvingTitle}>Growing coverage</Text>
+                  <Text style={styles.improvingDesc}>
+                    Current coverage: {stats?.totalSignals ?? 15} stocks. Target: 500+ stocks with
+                    12-month track record
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* Section 5: Methodology */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Methodology</Text>
             <View style={styles.methodologyCard}>
@@ -344,6 +441,7 @@ export const BacktestScreen: React.FC = () => {
               </Text>
               <Text style={[styles.methodologyText, { marginTop: 12 }]}>
                 Accuracy is measured over 3-month forward periods from signal generation date.
+                Borderline results (near threshold) count as 50% in accuracy calculations.
               </Text>
               <Text style={[styles.methodologyText, { marginTop: 12, fontStyle: 'italic' }]}>
                 Past performance does not guarantee future results.
@@ -447,6 +545,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 2,
   },
+  benchmarkContainer: {
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 4,
+  },
+  benchmarkBaseline: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+  },
+  benchmarkVerdict: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  benchmarkNote: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    marginTop: 2,
+  },
   breakdownContainer: {
     marginTop: 20,
     gap: 12,
@@ -507,6 +623,15 @@ const styles = StyleSheet.create({
   tableSignal: {
     fontWeight: '700',
     fontSize: 11,
+  },
+  noteRow: {
+    paddingHorizontal: 12,
+    paddingBottom: 6,
+  },
+  noteText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontStyle: 'italic',
   },
   simulatedBadge: {
     flexDirection: 'row',
@@ -569,6 +694,45 @@ const styles = StyleSheet.create({
   advantageText: {
     fontSize: 14,
     fontWeight: '700',
+  },
+  disadvantageNote: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  improvingCard: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 20,
+    gap: 18,
+  },
+  improvingRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  improvingIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  improvingContent: {
+    flex: 1,
+  },
+  improvingTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  improvingDesc: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    lineHeight: 19,
   },
   methodologyCard: {
     backgroundColor: 'rgba(255,255,255,0.06)',

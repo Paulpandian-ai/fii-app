@@ -461,9 +461,11 @@ export interface BacktestResult {
   signalDate: string;
   signal: Signal;
   score: number;
+  signalStrength: string;
   actualReturn: number;
   correct: boolean;
   status: 'correct' | 'incorrect' | 'borderline';
+  note: string | null;
 }
 
 export interface BacktestStats {
@@ -473,6 +475,7 @@ export interface BacktestStats {
   sellAccuracy: number;
   totalSignals: number;
   totalCorrect: number;
+  totalBorderline: number;
 }
 
 export interface PortfolioBacktest {
