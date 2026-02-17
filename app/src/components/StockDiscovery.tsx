@@ -167,7 +167,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
         {/* Next card (behind) */}
         {nextCard && (
           <View style={[styles.cardWrap, styles.nextCard]}>
-            <LinearGradient colors={['rgba(255,255,255,0.04)', 'rgba(255,255,255,0.02)']} style={styles.innerCard}>
+            <LinearGradient colors={['#1E293B', '#0F172A']} style={styles.innerCard}>
               <Text style={styles.cardTicker}>{nextCard.ticker}</Text>
               <Text style={styles.cardCompany}>{nextCard.companyName}</Text>
             </LinearGradient>
@@ -189,7 +189,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
             onPress={() => navigation.navigate('SignalDetail', { ticker: card.ticker, feedItemId: card.ticker })}
           >
             <LinearGradient
-              colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)']}
+              colors={['#1E293B', '#0F172A']}
               style={styles.innerCard}
             >
               {/* Swipe overlays */}
@@ -238,7 +238,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
                 <View style={styles.factors}>
                   {card.topFactors.map((f) => (
                     <View key={f.name} style={styles.factorPill}>
-                      <Text style={[styles.factorText, { color: f.score >= 0 ? '#10B981' : '#EF4444' }]}>
+                      <Text style={styles.factorText}>
                         {f.name} {(f.score ?? 0) >= 0 ? '+' : ''}{(f.score ?? 0).toFixed(1)}
                       </Text>
                     </View>
@@ -266,7 +266,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
           style={[styles.actionBtn, styles.actionPrimary]}
           onPress={() => swipeCard('right')}
         >
-          <Ionicons name="bookmark" size={24} color="#10B981" />
+          <Ionicons name="bookmark" size={24} color="#4ADE80" />
         </TouchableOpacity>
       </View>
     </View>
@@ -277,14 +277,14 @@ const styles = StyleSheet.create({
   section: { marginTop: 24 },
   sectionHeader: { paddingHorizontal: 20, marginBottom: 12 },
   sectionTitle: { color: '#FFF', fontSize: 20, fontWeight: '800' },
-  sectionSubtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 2 },
+  sectionSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 2 },
   loadingContainer: { height: 200, justifyContent: 'center', alignItems: 'center' },
   emptyState: { alignItems: 'center', paddingVertical: 32, gap: 8 },
   emptyText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
   resetBtn: { marginTop: 4, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(96,165,250,0.15)' },
   resetText: { color: '#60A5FA', fontSize: 13, fontWeight: '600' },
   cardContainer: {
-    height: 280,
+    height: 320,
     marginHorizontal: 20,
     position: 'relative',
   },
@@ -295,11 +295,16 @@ const styles = StyleSheet.create({
   },
   nextCard: { opacity: 0.4, transform: [{ scale: 0.95 }] },
   innerCard: {
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    minHeight: 260,
+    borderColor: 'rgba(255,255,255,0.15)',
+    minHeight: 300,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 10,
   },
   swipeOverlay: {
     position: 'absolute',
@@ -317,21 +322,21 @@ const styles = StyleSheet.create({
   swipeLeft: { left: 16, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)' },
   swipeLabel: { color: '#10B981', fontSize: 14, fontWeight: '800' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  cardTicker: { color: '#FFF', fontSize: 24, fontWeight: '800', letterSpacing: 1 },
-  cardCompany: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 2 },
-  cardSector: { color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 2 },
+  cardTicker: { color: '#FFF', fontSize: 32, fontWeight: '800', letterSpacing: 1 },
+  cardCompany: { color: 'rgba(255,255,255,0.7)', fontSize: 16, marginTop: 2 },
+  cardSector: { color: '#FFF', fontSize: 11, marginTop: 6, backgroundColor: 'rgba(255,255,255,0.1)', alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: 'hidden' },
   cardScoreWrap: { alignItems: 'flex-end' },
   cardScoreNum: { color: '#FFF', fontSize: 28, fontWeight: '800' },
   signalPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 4 },
   signalText: { fontSize: 11, fontWeight: '700' },
-  cardInsight: { color: 'rgba(255,255,255,0.6)', fontSize: 13, lineHeight: 19, marginTop: 16 },
+  cardInsight: { color: 'rgba(255,255,255,0.8)', fontSize: 14, lineHeight: 20, marginTop: 16 },
   cardStats: { flexDirection: 'row', gap: 24, marginTop: 16 },
   stat: {},
   statLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 10, fontWeight: '600', textTransform: 'uppercase' },
-  statValue: { color: '#FFF', fontSize: 16, fontWeight: '700', marginTop: 2 },
+  statValue: { color: '#FFF', fontSize: 20, fontWeight: '700', marginTop: 2 },
   factors: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 14 },
-  factorPill: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  factorText: { fontSize: 11, fontWeight: '600' },
+  factorPill: { backgroundColor: 'rgba(96,165,250,0.2)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  factorText: { color: '#60A5FA', fontSize: 11, fontWeight: '600' },
   alreadyBadge: {
     position: 'absolute',
     bottom: 12,
@@ -352,14 +357,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   actionBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(239,68,68,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(239,68,68,0.3)',
   },
-  actionPrimary: { backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)' },
+  actionPrimary: { backgroundColor: 'rgba(74,222,128,0.2)', borderColor: 'rgba(74,222,128,0.3)' },
 });
