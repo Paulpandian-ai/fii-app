@@ -50,11 +50,22 @@ def lambda_handler(event, context):
     """Main API Gateway event router."""
     try:
         http_method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-        path = event.get("rawPath", "/")
+
+        # Robust path extraction — supports HttpApi v2 (rawPath) and REST API v1 (path/resource)
+        path = event.get("rawPath") or event.get("path") or event.get("resource") or "/"
+
         # Strip stage prefix if present (e.g., /dev/signals/NVDA -> /signals/NVDA)
         stage = event.get("requestContext", {}).get("stage", "")
-        if stage and path.startswith(f"/{stage}"):
+        if stage and stage != "$default" and path.startswith(f"/{stage}"):
             path = path[len(f"/{stage}"):]
+
+        # Ensure path starts with /
+        if not path.startswith("/"):
+            path = "/" + path
+
+        # Debug logging for route resolution
+        print(f"[Router] method={http_method} rawPath={event.get('rawPath')} path={path} stage={stage}")
+
         body = json.loads(event.get("body", "{}") or "{}")
         query_params = event.get("queryStringParameters") or {}
         user_id = (
@@ -105,7 +116,8 @@ def lambda_handler(event, context):
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
         else:
-            return _response(404, {"error": "Not found"})
+            print(f"[Router] No route matched for path={path} method={http_method}")
+            return _response(404, {"error": "Not found", "path": path, "method": http_method})
 
     except Exception as e:
         traceback.print_exc()
@@ -152,7 +164,7 @@ def _handle_signal(method, ticker, user_id):
 
     # Add signal freshness indicator
     from datetime import datetime, timezone
-    last_updated = result.get("lastUpdated") or result.get("updatedAt") or ""
+    last_updated = result.get("lastUpdated") or result.get("analyzedAt") or ""
     freshness = "fresh"
     freshness_days = 0
     if last_updated:
@@ -167,7 +179,36 @@ def _handle_signal(method, ticker, user_id):
             pass
     result["freshness"] = freshness
     result["freshnessDays"] = freshness_days
-    result["dataSources"] = ["SEC EDGAR", "Federal Reserve FRED", "Claude AI"]
+    result["dataSources"] = ["SEC EDGAR", "Federal Reserve FRED", "Finnhub", "Claude AI"]
+
+    # Enrich with technicalScore from DynamoDB if not already present
+    if "technicalAnalysis" not in result or not result.get("technicalAnalysis"):
+        tech_score_str = summary.get("technicalScore", "")
+        if tech_score_str:
+            try:
+                result["technicalScore"] = float(tech_score_str)
+            except (ValueError, TypeError):
+                pass
+
+        # Try to fetch live technicals from cache
+        try:
+            tech_cached = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
+            if tech_cached:
+                indicators = tech_cached.get("indicators", {})
+                result["technicalAnalysis"] = {
+                    "technicalScore": indicators.get("technicalScore", 0),
+                    "rsi": indicators.get("rsi"),
+                    "macd": indicators.get("macd", {}),
+                    "sma20": indicators.get("sma20"),
+                    "sma50": indicators.get("sma50"),
+                    "sma200": indicators.get("sma200"),
+                    "bollingerBands": indicators.get("bollingerBands", {}),
+                    "atr": indicators.get("atr"),
+                    "signals": indicators.get("signals", {}),
+                    "indicatorCount": indicators.get("indicatorCount", 0),
+                }
+        except Exception:
+            pass
 
     return _response(200, result)
 
