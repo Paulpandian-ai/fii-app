@@ -3,6 +3,10 @@
 Fetches quotes, candles, company profiles, and basic financials
 from Finnhub's free-tier REST API (60 calls/min).
 
+Historical candles: Finnhub first, Yahoo Finance chart API fallback.
+(Finnhub free tier does not include US stock candles.)
+When upgrading to Finnhub premium, the Yahoo fallback is unused automatically.
+
 API key is read from:
   1. FINNHUB_API_KEY env var (local dev)
   2. FINNHUB_API_KEY_ARN env var -> AWS Secrets Manager
@@ -134,7 +138,23 @@ def get_quote(ticker):
 
 
 def get_candles(ticker, resolution="D", from_ts=None, to_ts=None):
-    """Get OHLCV candles. Returns list of {date, open, high, low, close, volume}."""
+    """Get OHLCV candles. Tries Finnhub first, falls back to Yahoo Finance.
+
+    Returns list of {date, open, high, low, close, volume} sorted oldest-first.
+    When Finnhub premium is enabled, Finnhub candles are returned directly
+    and the Yahoo fallback is never reached.
+    """
+    candles = _get_candles_finnhub(ticker, resolution, from_ts, to_ts)
+    if candles:
+        return candles
+
+    # Finnhub free tier doesn't include US stock candles — use Yahoo
+    logger.info(f"[Finnhub] No candle data for {ticker}, falling back to Yahoo Finance")
+    return _get_candles_yahoo(ticker)
+
+
+def _get_candles_finnhub(ticker, resolution="D", from_ts=None, to_ts=None):
+    """Fetch candles from Finnhub API (works with premium, empty on free tier for US stocks)."""
     now = int(datetime.now(timezone.utc).timestamp())
     if to_ts is None:
         to_ts = now
@@ -169,6 +189,65 @@ def get_candles(ticker, resolution="D", from_ts=None, to_ts=None):
             "volume": int(volumes[i]),
         })
     return candles
+
+
+def _get_candles_yahoo(ticker):
+    """Fetch 1 year of daily OHLCV candles from Yahoo Finance chart API.
+
+    Uses the public v8 chart endpoint — no API key needed.
+    Returns same format as Finnhub candles: list of
+    {date, open, high, low, close, volume} sorted oldest-first.
+    """
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        f"?range=1y&interval=1d&includePrePost=false"
+    )
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            logger.warning(f"[Yahoo] No chart data for {ticker}")
+            return []
+
+        chart = result[0]
+        timestamps = chart.get("timestamp", [])
+        quote = chart.get("indicators", {}).get("quote", [{}])[0]
+        opens = quote.get("open", [])
+        highs = quote.get("high", [])
+        lows = quote.get("low", [])
+        closes = quote.get("close", [])
+        volumes = quote.get("volume", [])
+
+        candles = []
+        for i in range(len(timestamps)):
+            # Yahoo sometimes returns None for individual values on holidays
+            o = opens[i] if i < len(opens) else None
+            h = highs[i] if i < len(highs) else None
+            l = lows[i] if i < len(lows) else None
+            c = closes[i] if i < len(closes) else None
+            v = volumes[i] if i < len(volumes) else None
+            if o is None or h is None or l is None or c is None:
+                continue
+            candles.append({
+                "date": datetime.fromtimestamp(timestamps[i], tz=timezone.utc).strftime("%Y-%m-%d"),
+                "open": round(o, 2),
+                "high": round(h, 2),
+                "low": round(l, 2),
+                "close": round(c, 2),
+                "volume": int(v or 0),
+            })
+
+        logger.info(f"[Yahoo] Got {len(candles)} candles for {ticker}")
+        return candles
+
+    except Exception as e:
+        logger.error(f"[Yahoo] Failed to fetch candles for {ticker}: {e}")
+        return []
 
 
 def get_company_profile(ticker):
