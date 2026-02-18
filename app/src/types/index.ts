@@ -509,6 +509,84 @@ export interface BacktestResponse {
   updatedAt: string;
 }
 
+// ─── Fundamental Analysis Types ───
+
+export interface ZScoreResult {
+  value: number;
+  zone: 'safe' | 'gray' | 'distress';
+  components: {
+    workingCapitalToAssets: number;
+    retainedEarningsToAssets: number;
+    ebitToAssets: number;
+    marketCapToLiabilities: number;
+    revenueToAssets: number;
+  };
+}
+
+export interface FScoreCriterion {
+  name: string;
+  earned: boolean;
+  detail: string;
+}
+
+export interface FScoreResult {
+  value: number;
+  maxScore: number;
+  interpretation: 'strong' | 'moderate' | 'weak';
+  criteria: FScoreCriterion[];
+}
+
+export interface MScoreResult {
+  value: number;
+  threshold: number;
+  interpretation: 'likely_manipulator' | 'unlikely_manipulator';
+  components: Record<string, number>;
+}
+
+export interface DCFSensitivityRow {
+  wacc: number;
+  values: (number | null)[];
+}
+
+export interface DCFResult {
+  fairValue: number;
+  currentPrice: number | null;
+  upside: number | null;
+  growthRate: number;
+  discountRate: number;
+  terminalGrowth: number;
+  sensitivity: DCFSensitivityRow[];
+  terminalGrowthScenarios: number[];
+}
+
+export interface FinancialRatios {
+  currentRatio?: number;
+  debtToEquity?: number;
+  roe?: number;
+  roa?: number;
+  netProfitMargin?: number;
+  operatingMargin?: number;
+  assetTurnover?: number;
+  peRatio?: number;
+  priceToBook?: number;
+  evToEbitda?: number;
+}
+
+export interface FundamentalAnalysis {
+  ticker: string;
+  grade: string;
+  gradeScore: number;
+  zScore: ZScoreResult | null;
+  fScore: FScoreResult | null;
+  mScore: MScoreResult | null;
+  dcf: DCFResult | null;
+  ratios: FinancialRatios;
+  years: number[];
+  analyzedAt: string;
+  source?: string;
+  error?: string;
+}
+
 // ─── Auth Types ───
 
 export interface User {
@@ -594,6 +672,7 @@ export type RootTabParamList = {
 export type RootStackParamList = {
   MainTabs: undefined;
   SignalDetail: { ticker: string; feedItemId: string };
+  FinancialHealth: { ticker: string };
   Profile: undefined;
   WealthSimulator: undefined;
   TaxStrategy: undefined;

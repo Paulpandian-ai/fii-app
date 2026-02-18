@@ -16,6 +16,7 @@ Routes:
   GET  /price/<ticker>               — Real-time price via Finnhub
   GET  /prices/<ticker>              — Alias for /price/<ticker>
   GET  /technicals/<ticker>          — Technical indicators (15 indicators)
+  GET  /fundamentals/<ticker>        — Financial health + DCF valuation
   GET  /trending                     — Social proof / trending stocks
   GET  /discovery                    — Tinder-style discovery cards
   GET  /watchlist                    — User watchlists
@@ -50,6 +51,7 @@ import db
 import s3
 import finnhub_client
 import technical_engine
+import fundamentals_engine
 
 
 def lambda_handler(event, context):
@@ -95,6 +97,9 @@ def lambda_handler(event, context):
         elif path.startswith("/technicals/"):
             ticker = path.split("/technicals/")[-1].strip("/").upper()
             return _handle_technicals(http_method, ticker)
+        elif path.startswith("/fundamentals/"):
+            ticker = path.split("/fundamentals/")[-1].strip("/").upper()
+            return _handle_fundamentals(http_method, ticker)
         elif path.startswith("/search"):
             return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
@@ -213,6 +218,30 @@ def _handle_signal(method, ticker, user_id):
                     "signals": indicators.get("signals", {}),
                     "indicatorCount": indicators.get("indicatorCount", 0),
                 }
+        except Exception:
+            pass
+
+    # Enrich with fundamental health grade from cache
+    if "fundamentalGrade" not in result:
+        try:
+            health_cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
+            if health_cached:
+                analysis = health_cached.get("analysis", {})
+                result["fundamentalGrade"] = analysis.get("grade", "N/A")
+                result["fundamentalScore"] = analysis.get("gradeScore", 0)
+                dcf = analysis.get("dcf")
+                if dcf:
+                    result["fairValue"] = dcf.get("fairValue")
+                    result["fairValueUpside"] = dcf.get("upside")
+                z = analysis.get("zScore")
+                if z:
+                    result["zScore"] = z.get("value")
+                f = analysis.get("fScore")
+                if f:
+                    result["fScore"] = f.get("value")
+                m = analysis.get("mScore")
+                if m:
+                    result["mScore"] = m.get("value")
         except Exception:
             pass
 
@@ -535,6 +564,98 @@ def _handle_technicals(method, ticker):
             "ticker": ticker,
             "error": f"Technical analysis unavailable: {str(e)}",
             "indicatorCount": 0,
+        })
+
+
+# ─── Fundamentals Endpoint ───
+
+
+def _handle_fundamentals(method, ticker):
+    """GET /fundamentals/<ticker> — Financial health grade + DCF valuation."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    from datetime import datetime, timezone
+
+    # 1) Check DynamoDB cache (24-hour TTL)
+    cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
+    if cached:
+        cached_at = cached.get("cachedAt", "")
+        try:
+            ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds < 86400:  # 24-hour TTL
+                data = cached.get("analysis", {})
+                data["source"] = "cache"
+                return _response(200, data)
+        except Exception:
+            pass
+
+    # 2) Get market data from Finnhub for DCF inputs
+    market_cap = None
+    beta = 1.0
+    current_price = None
+    shares_outstanding = None
+
+    try:
+        quote = finnhub_client.get_quote(ticker)
+        current_price = quote.get("price")
+        profile = finnhub_client.get_company_profile(ticker)
+        market_cap = profile.get("marketCap")
+        financials_data = finnhub_client.get_basic_financials(ticker)
+        beta = financials_data.get("beta") or 1.0
+        if market_cap and current_price and current_price > 0:
+            shares_outstanding = market_cap / current_price
+    except Exception:
+        pass
+
+    # 3) Run fundamental analysis
+    try:
+        analysis = fundamentals_engine.analyze(
+            ticker,
+            market_cap=market_cap,
+            beta=beta,
+            current_price=current_price,
+            shares_outstanding=shares_outstanding,
+        )
+
+        if "error" in analysis and "grade" not in analysis:
+            # Return stale cache if fresh analysis failed
+            if cached:
+                data = cached.get("analysis", {})
+                data["source"] = "stale_cache"
+                return _response(200, data)
+            return _response(200, analysis)
+
+        # 4) Cache to DynamoDB
+        try:
+            cache_item = {
+                "PK": f"HEALTH#{ticker}",
+                "SK": "LATEST",
+                "analysis": analysis,
+                "cachedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            db.put_item(cache_item)
+        except Exception:
+            pass
+
+        analysis["source"] = "live"
+        return _response(200, analysis)
+
+    except Exception as e:
+        if cached:
+            data = cached.get("analysis", {})
+            data["source"] = "stale_cache"
+            return _response(200, data)
+
+        return _response(200, {
+            "ticker": ticker,
+            "error": f"Fundamental analysis unavailable: {str(e)}",
+            "grade": "N/A",
+            "gradeScore": 0,
         })
 
 

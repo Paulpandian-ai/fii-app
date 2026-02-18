@@ -8,7 +8,7 @@ import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { DisclaimerBanner } from './DisclaimerBanner';
-import { getPrice, getTechnicals } from '../services/api';
+import { getPrice, getTechnicals, getFundamentals } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -69,6 +69,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   } | null>(null);
   const [techScore, setTechScore] = useState<number | null>(null);
   const [techTrend, setTechTrend] = useState<string | null>(null);
+  const [healthGrade, setHealthGrade] = useState<string | null>(null);
 
   useEffect(() => {
     getPrice(item.ticker)
@@ -86,6 +87,13 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         if (data && data.indicatorCount > 0) {
           setTechScore(safeNum(data.technicalScore));
           setTechTrend(data.signals?.trend || null);
+        }
+      })
+      .catch(() => {});
+    getFundamentals(item.ticker)
+      .then((data) => {
+        if (data && data.grade && data.grade !== 'N/A') {
+          setHealthGrade(data.grade);
         }
       })
       .catch(() => {});
@@ -187,6 +195,22 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
                 {techTrend}
               </Text>
             )}
+          </View>
+        )}
+
+        {/* Health Grade Badge */}
+        {healthGrade && (
+          <View style={[styles.healthBadge, {
+            borderColor: healthGrade.startsWith('A') || healthGrade.startsWith('B')
+              ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444',
+          }]}>
+            <Text style={[styles.healthBadgeText, {
+              color: healthGrade.startsWith('A') || healthGrade.startsWith('B')
+                ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444',
+            }]}>
+              {healthGrade}
+            </Text>
+            <Text style={styles.healthBadgeLabel}>Health</Text>
           </View>
         )}
 
@@ -347,6 +371,25 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 40,
     alignSelf: 'center',
+  },
+  healthBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 5,
+    marginBottom: 8,
+  },
+  healthBadgeText: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  healthBadgeLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
   },
   techBadge: {
     flexDirection: 'row',

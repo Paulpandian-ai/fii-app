@@ -17,6 +17,7 @@ import { TaxStrategyScreen } from './src/screens/TaxStrategyScreen';
 import { PortfolioXRayScreen } from './src/screens/PortfolioXRayScreen';
 import { AIAdvisorScreen } from './src/screens/AIAdvisorScreen';
 import { BacktestScreen } from './src/screens/BacktestScreen';
+import { FinancialHealthScreen } from './src/screens/FinancialHealthScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { useCoachStore } from './src/store/coachStore';
@@ -51,6 +52,9 @@ const WrappedAIAdvisor = () => (
 );
 const WrappedBacktest = () => (
   <ErrorBoundary screenName="BacktestScreen"><BacktestScreen /></ErrorBoundary>
+);
+const WrappedFinancialHealth = (props: any) => (
+  <ErrorBoundary screenName="FinancialHealthScreen"><FinancialHealthScreen {...props} /></ErrorBoundary>
 );
 const WrappedSettings = () => (
   <ErrorBoundary screenName="SettingsScreen"><SettingsScreen /></ErrorBoundary>
@@ -149,6 +153,11 @@ export default function App() {
             presentation: 'modal',
             animation: 'slide_from_bottom',
           }}
+        />
+        <Stack.Screen
+          name="FinancialHealth"
+          component={WrappedFinancialHealth}
+          options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="WealthSimulator"

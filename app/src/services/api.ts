@@ -68,6 +68,13 @@ export const getTechnicals = async (ticker: string) => {
   return data;
 };
 
+// ─── Fundamentals ───
+
+export const getFundamentals = async (ticker: string) => {
+  const { data } = await api.get(`/fundamentals/${ticker}`);
+  return data;
+};
+
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {

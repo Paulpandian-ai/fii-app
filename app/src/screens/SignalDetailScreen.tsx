@@ -15,11 +15,12 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice, getTechnicals } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals } from '../services/api';
 import type {
   FullAnalysis,
   PriceData,
   TechnicalAnalysis,
+  FundamentalAnalysis,
   FactorCategory,
   Confidence,
   Signal,
@@ -75,6 +76,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [analysis, setAnalysis] = useState<FullAnalysis | null>(null);
   const [priceData, setPriceData] = useState<PriceData | null>(null);
   const [technicals, setTechnicals] = useState<TechnicalAnalysis | null>(null);
+  const [fundamentals, setFundamentals] = useState<FundamentalAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
@@ -85,14 +87,16 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const loadData = async () => {
     setLoading(true);
     try {
-      const [signalData, price, techData] = await Promise.all([
+      const [signalData, price, techData, fundData] = await Promise.all([
         getSignalDetail(ticker).catch(() => null),
         getPrice(ticker).catch(() => null),
         getTechnicals(ticker).catch(() => null),
+        getFundamentals(ticker).catch(() => null),
       ]);
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
       if (techData && techData.indicatorCount > 0) setTechnicals(techData);
+      if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData);
     } finally {
       setLoading(false);
     }
@@ -318,7 +322,46 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
-        {/* Section 5: Alternatives */}
+        {/* Section 5: Financial Health */}
+        {fundamentals && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.healthCard}
+              onPress={() => navigation.push('FinancialHealth', { ticker })}
+              activeOpacity={0.7}
+            >
+              <View style={styles.healthCardLeft}>
+                <View style={[styles.healthGradeBadge, {
+                  borderColor: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
+                    ? '#10B981' : fundamentals.grade.startsWith('C') ? '#F59E0B' : '#EF4444',
+                }]}>
+                  <Text style={[styles.healthGradeText, {
+                    color: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
+                      ? '#10B981' : fundamentals.grade.startsWith('C') ? '#F59E0B' : '#EF4444',
+                  }]}>
+                    {fundamentals.grade}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.healthTitle}>Financial Health</Text>
+                  {fundamentals.dcf && fundamentals.dcf.fairValue > 0 && (
+                    <Text style={[styles.healthDcf, {
+                      color: (fundamentals.dcf.upside ?? 0) >= 0 ? '#10B981' : '#EF4444',
+                    }]}>
+                      Fair Value: ${safeNum(fundamentals.dcf.fairValue).toFixed(0)}
+                      {fundamentals.dcf.upside != null
+                        ? ` (${(fundamentals.dcf.upside ?? 0) >= 0 ? '+' : ''}${safeNum(fundamentals.dcf.upside).toFixed(1)}%)`
+                        : ''}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Section 6: Alternatives */}
         {showAlternatives && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Alternatives</Text>
@@ -430,6 +473,19 @@ const styles = StyleSheet.create({
   techSignals: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   techPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 },
   techPillText: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
+  healthCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  healthCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  healthGradeBadge: {
+    width: 44, height: 44, borderRadius: 22, borderWidth: 2,
+    justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  healthGradeText: { fontSize: 18, fontWeight: '900' },
+  healthTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  healthDcf: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   disclaimer: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 16,
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)',
