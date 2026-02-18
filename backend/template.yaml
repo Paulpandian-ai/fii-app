@@ -299,6 +299,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetPrices:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /prices/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetTechnicals:
           Type: HttpApi
           Properties:

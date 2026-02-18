@@ -13,7 +13,9 @@ Routes:
   GET  /portfolio/health             — Portfolio health score (0-100)
   GET  /baskets                      — AI-optimized stock baskets
   GET  /baskets/<name>               — Single basket detail
-  GET  /technicals/<ticker>           — Technical indicators (15 indicators)
+  GET  /price/<ticker>               — Real-time price via Finnhub
+  GET  /prices/<ticker>              — Alias for /price/<ticker>
+  GET  /technicals/<ticker>          — Technical indicators (15 indicators)
   GET  /trending                     — Social proof / trending stocks
   GET  /discovery                    — Tinder-style discovery cards
   GET  /watchlist                    — User watchlists
@@ -67,6 +69,9 @@ def lambda_handler(event, context):
 
         if path.startswith("/feed"):
             return _handle_feed(http_method, body, user_id)
+        elif path.startswith("/prices/"):
+            ticker = path.split("/prices/")[-1].strip("/").upper()
+            return _handle_price(http_method, ticker)
         elif path.startswith("/price/"):
             ticker = path.split("/price/")[-1].strip("/").upper()
             return _handle_price(http_method, ticker)
