@@ -1,18 +1,18 @@
-"""Market data fetcher using yfinance and FRED.
+"""Market data fetcher using Finnhub and FRED.
 
-Provides Yahoo Finance stock data, FRED macro indicators,
+Provides Finnhub stock data, FRED macro indicators,
 correlation matrices, and relative performance metrics.
+yfinance has been replaced with Finnhub free-tier API.
 """
 
 import logging
 import os
 from typing import Optional
 
-# Disable yfinance's curl_cffi backend — it's not in the Lambda layer.
-# Must be set before importing yfinance.
-os.environ["YF_USE_CURL"] = "0"
-
 import numpy as np
+import pandas as pd
+
+import finnhub_client
 
 logger = logging.getLogger(__name__)
 
@@ -149,117 +149,34 @@ def _get_fred_api_key() -> str:
     return response["SecretString"]
 
 
-# ─── Yahoo Finance Data ───
+# ─── Finnhub Market Data ───
 
 def get_yahoo_finance_data(ticker: str) -> dict:
-    """Fetch market data from Yahoo Finance.
+    """Fetch market data from Finnhub (replaces yfinance).
 
-    Pulls: current price, 52-week range, market cap, last earnings
-    surprise %, beta, forward PE.
-
-    Args:
-        ticker: Stock ticker symbol.
+    Kept as get_yahoo_finance_data() for backward compatibility with
+    the signal engine which calls this function by name.
 
     Returns:
         Dict with market data metrics.
     """
-    try:
-        import yfinance as yf
-
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-
-        # Current price
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
-
-        # 52-week range
-        fifty_two_week_low = info.get("fiftyTwoWeekLow", 0)
-        fifty_two_week_high = info.get("fiftyTwoWeekHigh", 0)
-
-        # Position in 52-week range (0 = at low, 1 = at high)
-        if fifty_two_week_high > fifty_two_week_low:
-            range_position = (current_price - fifty_two_week_low) / (
-                fifty_two_week_high - fifty_two_week_low
-            )
-        else:
-            range_position = 0.5
-
-        # Market cap
-        market_cap = info.get("marketCap", 0)
-
-        # Earnings surprise
-        try:
-            earnings = stock.earnings_history
-            if earnings is not None and len(earnings) > 0:
-                last_row = earnings.iloc[-1]
-                eps_actual = last_row.get("epsActual", 0)
-                eps_estimate = last_row.get("epsEstimate", 0)
-                if eps_estimate != 0:
-                    earnings_surprise_pct = ((eps_actual - eps_estimate) / abs(eps_estimate)) * 100
-                else:
-                    earnings_surprise_pct = 0
-            else:
-                earnings_surprise_pct = 0
-        except Exception:
-            earnings_surprise_pct = 0
-
-        # Beta
-        beta = info.get("beta", 1.0)
-
-        # Forward PE
-        forward_pe = info.get("forwardPE", 0)
-
-        # 30-day return vs SPY
-        relative_return = get_30d_relative_return(ticker)
-
-        return {
-            "ticker": ticker,
-            "current_price": round(current_price, 2),
-            "fifty_two_week_low": round(fifty_two_week_low, 2),
-            "fifty_two_week_high": round(fifty_two_week_high, 2),
-            "range_position": round(range_position, 4),
-            "market_cap": market_cap,
-            "earnings_surprise_pct": round(earnings_surprise_pct, 2),
-            "beta": round(beta or 1.0, 4),
-            "forward_pe": round(forward_pe or 0, 2),
-            "relative_return_30d": round(relative_return, 4),
-        }
-
-    except Exception as e:
-        logger.error(f"[YF] Failed to fetch data for {ticker}: {e}")
-        return {
-            "ticker": ticker,
-            "current_price": 0,
-            "fifty_two_week_low": 0,
-            "fifty_two_week_high": 0,
-            "range_position": 0.5,
-            "market_cap": 0,
-            "earnings_surprise_pct": 0,
-            "beta": 1.0,
-            "forward_pe": 0,
-            "relative_return_30d": 0,
-        }
+    return finnhub_client.get_market_data_for_signal(ticker)
 
 
 def get_correlation_matrix(ticker: str, peers: list[str]) -> dict:
     """Compute 90-day correlation matrix for ticker vs benchmarks and peers.
 
-    Calculates correlations against: SPY, sector ETF, top 3 peers,
-    GLD, USO, BTC-USD.
+    Uses Finnhub candles to compute daily return correlations against:
+    SPY, sector ETF, top 3 peers, GLD, USO.
 
-    Args:
-        ticker: Target stock ticker.
-        peers: List of peer ticker symbols.
-
-    Returns:
-        Dict with correlation values and derived scores.
+    Note: BTC-USD is not available on Finnhub free tier, omitted.
     """
     try:
-        import yfinance as yf
+        from datetime import datetime, timezone
         from models import SECTOR_ETF_MAP
 
         sector_etf = SECTOR_ETF_MAP.get(ticker, "XLK")
-        comparison_tickers = [ticker, "SPY", sector_etf] + peers[:3] + ["GLD", "USO", "BTC-USD"]
+        comparison_tickers = [ticker, "SPY", sector_etf] + peers[:3] + ["GLD", "USO"]
 
         # Remove duplicates while preserving order
         seen = set()
@@ -269,19 +186,26 @@ def get_correlation_matrix(ticker: str, peers: list[str]) -> dict:
                 seen.add(t)
                 unique_tickers.append(t)
 
-        # Download 90 days of closing prices
-        data = yf.download(unique_tickers, period="3mo", progress=False)
+        # Fetch 90 days of candles from Finnhub
+        now = int(datetime.now(timezone.utc).timestamp())
+        from_ts = now - (90 * 24 * 3600)
 
-        if data.empty:
+        close_data = {}
+        for t in unique_tickers:
+            candles = finnhub_client.get_candles(t, resolution="D", from_ts=from_ts, to_ts=now)
+            if candles:
+                series = {c["date"]: c["close"] for c in candles}
+                close_data[t] = series
+
+        if ticker not in close_data or len(close_data) < 2:
             return {"correlations": {}, "scores": {}}
 
-        # Get closing prices
-        close = data["Close"] if "Close" in data.columns else data
-        if isinstance(close, np.ndarray):
-            return {"correlations": {}, "scores": {}}
+        # Build DataFrame from close prices
+        df = pd.DataFrame(close_data).sort_index()
+        df = df.dropna(how="all")
 
         # Calculate daily returns
-        returns = close.pct_change().dropna()
+        returns = df.pct_change().dropna()
 
         if ticker not in returns.columns:
             return {"correlations": {}, "scores": {}}
@@ -303,7 +227,7 @@ def get_correlation_matrix(ticker: str, peers: list[str]) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"[YF] Failed to compute correlations for {ticker}: {e}")
+        logger.error(f"[Finnhub] Failed to compute correlations for {ticker}: {e}")
         return {"correlations": {}, "scores": {}}
 
 
@@ -347,94 +271,78 @@ def _score_correlation_factors(
 
 
 def get_30d_relative_return(ticker: str) -> float:
-    """Calculate 30-day return of ticker relative to SPY.
-
-    Returns:
-        Relative return as a decimal (e.g., 0.05 = 5% outperformance).
-    """
+    """Calculate 30-day return of ticker relative to SPY using Finnhub."""
     try:
-        import yfinance as yf
+        from datetime import datetime, timezone
 
-        data = yf.download([ticker, "SPY"], period="1mo", progress=False)
+        now = int(datetime.now(timezone.utc).timestamp())
+        from_ts = now - (30 * 24 * 3600)
 
-        if data.empty:
+        ticker_candles = finnhub_client.get_candles(ticker, resolution="D", from_ts=from_ts, to_ts=now)
+        spy_candles = finnhub_client.get_candles("SPY", resolution="D", from_ts=from_ts, to_ts=now)
+
+        if not ticker_candles or not spy_candles:
             return 0.0
 
-        close = data["Close"]
-        if ticker not in close.columns or "SPY" not in close.columns:
-            return 0.0
+        ticker_return = (ticker_candles[-1]["close"] / ticker_candles[0]["close"]) - 1
+        spy_return = (spy_candles[-1]["close"] / spy_candles[0]["close"]) - 1
 
-        ticker_return = (close[ticker].iloc[-1] / close[ticker].iloc[0]) - 1
-        spy_return = (close["SPY"].iloc[-1] / close["SPY"].iloc[0]) - 1
-
-        return float(ticker_return - spy_return)
+        return round(float(ticker_return - spy_return), 4)
 
     except Exception as e:
-        logger.debug(f"[YF] Failed to compute relative return for {ticker}: {e}")
+        logger.debug(f"[Finnhub] Failed to compute relative return for {ticker}: {e}")
         return 0.0
 
 
 def get_price_history(ticker: str, period: str = "1y") -> dict:
-    """Fetch historical price data for a ticker.
+    """Fetch historical price data from Finnhub candles.
 
     Args:
         ticker: Stock ticker symbol.
         period: Time period (e.g., "1y", "6mo", "3mo").
-
-    Returns:
-        Dict with dates, prices, volumes.
     """
     try:
-        import yfinance as yf
+        from datetime import datetime, timezone
 
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
+        period_map = {"1y": 365, "6mo": 180, "3mo": 90, "1mo": 30}
+        days = period_map.get(period, 365)
+
+        now = int(datetime.now(timezone.utc).timestamp())
+        from_ts = now - (days * 24 * 3600)
+
+        candles = finnhub_client.get_candles(ticker, resolution="D", from_ts=from_ts, to_ts=now)
 
         return {
             "ticker": ticker,
             "period": period,
-            "prices": [
-                {
-                    "date": str(date.date()),
-                    "open": round(row["Open"], 2),
-                    "high": round(row["High"], 2),
-                    "low": round(row["Low"], 2),
-                    "close": round(row["Close"], 2),
-                    "volume": int(row["Volume"]),
-                }
-                for date, row in hist.iterrows()
-            ],
+            "prices": candles or [],
         }
 
     except Exception as e:
-        logger.error(f"[YF] Failed to fetch price history for {ticker}: {e}")
+        logger.error(f"[Finnhub] Failed to fetch price history for {ticker}: {e}")
         return {"ticker": ticker, "period": period, "prices": []}
 
 
 def get_fundamentals(ticker: str) -> dict:
-    """Fetch fundamental data (PE, revenue, margins, etc.)."""
+    """Fetch fundamental data from Finnhub."""
     try:
-        import yfinance as yf
-
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
+        financials = finnhub_client.get_basic_financials(ticker)
 
         return {
             "ticker": ticker,
             "fundamentals": {
-                "market_cap": info.get("marketCap", 0),
-                "pe_ratio": info.get("trailingPE", 0),
-                "forward_pe": info.get("forwardPE", 0),
-                "peg_ratio": info.get("pegRatio", 0),
-                "profit_margin": info.get("profitMargins", 0),
-                "revenue_growth": info.get("revenueGrowth", 0),
-                "debt_to_equity": info.get("debtToEquity", 0),
-                "return_on_equity": info.get("returnOnEquity", 0),
+                "market_cap": 0,  # Not in basic financials; use profile if needed
+                "pe_ratio": financials.get("peRatio", 0),
+                "forward_pe": financials.get("forwardPE", 0),
+                "profit_margin": financials.get("profitMargin", 0),
+                "revenue_growth": financials.get("revenueGrowthTTM", 0),
+                "debt_to_equity": financials.get("debtEquity", 0),
+                "return_on_equity": financials.get("roeTTM", 0),
             },
         }
 
     except Exception as e:
-        logger.error(f"[YF] Failed to fetch fundamentals for {ticker}: {e}")
+        logger.error(f"[Finnhub] Failed to fetch fundamentals for {ticker}: {e}")
         return {"ticker": ticker, "fundamentals": {}}
 
 

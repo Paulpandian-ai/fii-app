@@ -13,6 +13,7 @@ Routes:
   GET  /portfolio/health             — Portfolio health score (0-100)
   GET  /baskets                      — AI-optimized stock baskets
   GET  /baskets/<name>               — Single basket detail
+  GET  /technicals/<ticker>           — Technical indicators (15 indicators)
   GET  /trending                     — Social proof / trending stocks
   GET  /discovery                    — Tinder-style discovery cards
   GET  /watchlist                    — User watchlists
@@ -33,15 +34,14 @@ import os
 import sys
 import traceback
 
-# Prevent yfinance from using curl_cffi (not available in Lambda)
-os.environ["YF_USE_CURL"] = "0"
-
 # Lambda adds /opt/python to sys.path for layers automatically.
 # This explicit insert ensures it works in all execution contexts.
 sys.path.insert(0, "/opt/python")
 
 import db
 import s3
+import finnhub_client
+import technical_engine
 
 
 def lambda_handler(event, context):
@@ -70,6 +70,9 @@ def lambda_handler(event, context):
         elif path.startswith("/price/"):
             ticker = path.split("/price/")[-1].strip("/").upper()
             return _handle_price(http_method, ticker)
+        elif path.startswith("/technicals/"):
+            ticker = path.split("/technicals/")[-1].strip("/").upper()
+            return _handle_technicals(http_method, ticker)
         elif path.startswith("/search"):
             return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
@@ -302,7 +305,7 @@ def _handle_feed(method, body, user_id):
 # ─── Price Endpoint ───
 
 def _handle_price(method, ticker):
-    """GET /price/<ticker> — Real-time price with DynamoDB cache + signal fallback."""
+    """GET /price/<ticker> — Real-time price via Finnhub with DynamoDB cache."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
@@ -319,62 +322,42 @@ def _handle_price(method, ticker):
             ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
             age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
             if age_seconds < 300:  # 5-minute TTL
-                return _response(200, {
-                    "ticker": ticker,
-                    "price": float(cached.get("price", 0)),
-                    "previousClose": float(cached.get("previousClose", 0)),
-                    "change": float(cached.get("change", 0)),
-                    "changePercent": float(cached.get("changePercent", 0)),
-                    "marketCap": int(cached.get("marketCap", 0)),
-                    "fiftyTwoWeekLow": float(cached.get("fiftyTwoWeekLow", 0)),
-                    "fiftyTwoWeekHigh": float(cached.get("fiftyTwoWeekHigh", 0)),
-                    "beta": float(cached.get("beta", 1.0)),
-                    "forwardPE": float(cached.get("forwardPE", 0)),
-                    "trailingPE": float(cached.get("trailingPE", 0)),
-                    "sector": cached.get("sector", ""),
-                    "companyName": cached.get("companyName", ticker),
-                    "source": "cache",
-                })
+                return _response(200, _format_price_response(ticker, cached, "cache"))
         except Exception:
             pass
 
-    # 2) Try yfinance for live data
+    # 2) Fetch live data from Finnhub
     try:
-        import yfinance as yf
-        yf.set_tz_cache_location("/tmp")
+        quote = finnhub_client.get_quote(ticker)
+        financials = finnhub_client.get_basic_financials(ticker)
+        profile = finnhub_client.get_company_profile(ticker)
 
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
-        previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
-
+        current_price = quote.get("price", 0)
         if current_price:
-            change = current_price - previous_close if previous_close else 0
-            change_pct = (change / previous_close * 100) if previous_close else 0
-
             price_data = {
                 "ticker": ticker,
                 "price": round(current_price, 2),
-                "previousClose": round(previous_close or 0, 2),
-                "change": round(change, 2),
-                "changePercent": round(change_pct, 2),
-                "marketCap": info.get("marketCap", 0),
-                "fiftyTwoWeekLow": round(info.get("fiftyTwoWeekLow", 0) or 0, 2),
-                "fiftyTwoWeekHigh": round(info.get("fiftyTwoWeekHigh", 0) or 0, 2),
-                "beta": round(info.get("beta", 1.0) or 1.0, 2),
-                "forwardPE": round(info.get("forwardPE", 0) or 0, 2),
-                "trailingPE": round(info.get("trailingPE", 0) or 0, 2),
-                "sector": info.get("sector", ""),
-                "companyName": info.get("shortName") or info.get("longName", ticker),
+                "previousClose": round(quote.get("prevClose", 0), 2),
+                "change": round(quote.get("change", 0), 2),
+                "changePercent": round(quote.get("changePercent", 0), 2),
+                "marketCap": profile.get("marketCap", 0),
+                "fiftyTwoWeekLow": round(financials.get("fiftyTwoWeekLow", 0) or 0, 2),
+                "fiftyTwoWeekHigh": round(financials.get("fiftyTwoWeekHigh", 0) or 0, 2),
+                "beta": round(financials.get("beta", 1.0) or 1.0, 2),
+                "forwardPE": round(financials.get("forwardPE", 0) or 0, 2),
+                "trailingPE": round(financials.get("peRatio", 0) or 0, 2),
+                "sector": profile.get("sector", ""),
+                "companyName": profile.get("name", ticker),
                 "source": "live",
             }
 
-            # 3) Cache to DynamoDB
+            # 3) Cache to DynamoDB (fixed: put_item takes single dict with PK/SK)
             try:
                 cache_item = dict(price_data)
+                cache_item["PK"] = f"PRICE#{ticker}"
+                cache_item["SK"] = "LATEST"
                 cache_item["cachedAt"] = datetime.now(timezone.utc).isoformat()
-                db.put_item(f"PRICE#{ticker}", "LATEST", cache_item)
+                db.put_item(cache_item)
             except Exception:
                 pass
 
@@ -384,23 +367,8 @@ def _handle_price(method, ticker):
 
     # 4) Return stale cache if available (any age)
     if cached:
-        return _response(200, {
-            "ticker": ticker,
-            "price": float(cached.get("price", 0)) or None,
-            "previousClose": float(cached.get("previousClose", 0)),
-            "change": float(cached.get("change", 0)),
-            "changePercent": float(cached.get("changePercent", 0)),
-            "marketCap": int(cached.get("marketCap", 0)),
-            "fiftyTwoWeekLow": float(cached.get("fiftyTwoWeekLow", 0)),
-            "fiftyTwoWeekHigh": float(cached.get("fiftyTwoWeekHigh", 0)),
-            "beta": float(cached.get("beta", 1.0)),
-            "forwardPE": float(cached.get("forwardPE", 0)),
-            "trailingPE": float(cached.get("trailingPE", 0)),
-            "sector": cached.get("sector", ""),
-            "companyName": cached.get("companyName", ticker),
-            "source": "stale_cache",
-            "note": "Price may be outdated",
-        })
+        return _response(200, _format_price_response(ticker, cached, "stale_cache",
+                                                     note="Price may be outdated"))
 
     # 5) Fallback: try DynamoDB signal data
     signal = db.get_item(f"SIGNAL#{ticker}", "LATEST")
@@ -429,9 +397,98 @@ def _handle_price(method, ticker):
     })
 
 
+def _format_price_response(ticker, data, source, note=None):
+    """Format a cached price record into API response shape."""
+    result = {
+        "ticker": ticker,
+        "price": float(data.get("price", 0) or 0),
+        "previousClose": float(data.get("previousClose", 0) or 0),
+        "change": float(data.get("change", 0) or 0),
+        "changePercent": float(data.get("changePercent", 0) or 0),
+        "marketCap": int(data.get("marketCap", 0) or 0),
+        "fiftyTwoWeekLow": float(data.get("fiftyTwoWeekLow", 0) or 0),
+        "fiftyTwoWeekHigh": float(data.get("fiftyTwoWeekHigh", 0) or 0),
+        "beta": float(data.get("beta", 1.0) or 1.0),
+        "forwardPE": float(data.get("forwardPE", 0) or 0),
+        "trailingPE": float(data.get("trailingPE", 0) or 0),
+        "sector": data.get("sector", ""),
+        "companyName": data.get("companyName", ticker),
+        "source": source,
+    }
+    if note:
+        result["note"] = note
+    return result
+
+
+def _handle_technicals(method, ticker):
+    """GET /technicals/<ticker> — Technical indicators with DynamoDB cache."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    from datetime import datetime, timezone
+
+    # 1) Check DynamoDB cache (fresh within 1 hour)
+    cached = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
+    if cached:
+        cached_at = cached.get("cachedAt", "")
+        try:
+            ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds < 3600:  # 1-hour TTL
+                indicators = cached.get("indicators", {})
+                indicators["source"] = "cache"
+                return _response(200, indicators)
+        except Exception:
+            pass
+
+    # 2) Compute fresh from Finnhub candle data
+    try:
+        candles = finnhub_client.get_candles(ticker, resolution="D")
+        if not candles:
+            return _response(200, {
+                "ticker": ticker,
+                "error": "No candle data available",
+                "indicatorCount": 0,
+            })
+
+        indicators = technical_engine.compute_indicators(candles)
+        indicators["ticker"] = ticker
+
+        # 3) Cache to DynamoDB
+        try:
+            cache_item = {
+                "PK": f"TECHNICALS#{ticker}",
+                "SK": "LATEST",
+                "indicators": indicators,
+                "cachedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            db.put_item(cache_item)
+        except Exception:
+            pass
+
+        indicators["source"] = "live"
+        return _response(200, indicators)
+
+    except Exception as e:
+        # Return stale cache if computation fails
+        if cached:
+            indicators = cached.get("indicators", {})
+            indicators["source"] = "stale_cache"
+            return _response(200, indicators)
+
+        return _response(200, {
+            "ticker": ticker,
+            "error": f"Technical analysis unavailable: {str(e)}",
+            "indicatorCount": 0,
+        })
+
+
 # ─── Search Endpoint ───
 
-# Built-in ticker database — no yfinance needed
+# Built-in ticker database for search
 _TICKER_DB = None
 
 def _get_ticker_db():
@@ -936,22 +993,29 @@ def _handle_portfolio_summary(user_id):
 
 def _fetch_price_quiet(ticker):
     """Fetch price for a ticker, return None on failure. Falls back to DynamoDB."""
-    # Try yfinance
+    # Try DynamoDB price cache first (fastest)
     try:
-        import yfinance as yf
-        yf.set_tz_cache_location("/tmp")
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
-        if current_price:
-            previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose", 0)
-            change = current_price - previous_close if previous_close else 0
-            change_pct = (change / previous_close * 100) if previous_close else 0
+        cached = db.get_item(f"PRICE#{ticker}", "LATEST")
+        if cached and cached.get("price"):
             return {
-                "price": round(current_price, 2),
-                "change": round(change, 2),
-                "changePercent": round(change_pct, 2),
-                "companyName": info.get("shortName") or info.get("longName", ticker),
+                "price": round(float(cached.get("price", 0)), 2),
+                "change": round(float(cached.get("change", 0)), 2),
+                "changePercent": round(float(cached.get("changePercent", 0)), 2),
+                "companyName": cached.get("companyName", ticker),
+            }
+    except Exception:
+        pass
+
+    # Try Finnhub live
+    try:
+        quote = finnhub_client.get_quote(ticker)
+        if quote and quote.get("price"):
+            profile = finnhub_client.get_company_profile(ticker)
+            return {
+                "price": round(quote.get("price", 0), 2),
+                "change": round(quote.get("change", 0), 2),
+                "changePercent": round(quote.get("changePercent", 0), 2),
+                "companyName": profile.get("name", ticker),
             }
     except Exception:
         pass

@@ -80,6 +80,19 @@ export interface Alternative {
   altType: string;
 }
 
+export interface TechnicalAnalysis {
+  technicalScore: number;
+  rsi: number | null;
+  macd: { value: number | null; signal: number | null; histogram: number | null };
+  sma20: number | null;
+  sma50: number | null;
+  sma200: number | null;
+  bollingerBands: { upper: number | null; middle: number | null; lower: number | null };
+  atr: number | null;
+  signals: { trend?: string; momentum?: string; volatility?: string };
+  indicatorCount: number;
+}
+
 export interface FullAnalysis {
   ticker: string;
   companyName: string;
@@ -93,6 +106,7 @@ export interface FullAnalysis {
   alternatives: Alternative[];
   analyzedAt: string;
   marketData?: Record<string, any>;
+  technicalAnalysis?: TechnicalAnalysis;
 }
 
 // ─── Portfolio Types ───

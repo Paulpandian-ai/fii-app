@@ -2,13 +2,13 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import type { FeedItem } from '../types';
+import type { FeedItem, TechnicalAnalysis } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { DisclaimerBanner } from './DisclaimerBanner';
-import { getPrice } from '../services/api';
+import { getPrice, getTechnicals } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -67,17 +67,26 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     change: number;
     changePercent: number;
   } | null>(null);
+  const [techScore, setTechScore] = useState<number | null>(null);
+  const [techTrend, setTechTrend] = useState<string | null>(null);
 
   useEffect(() => {
     getPrice(item.ticker)
       .then((data) => {
-        // price can be null when yfinance is unavailable
         const p = typeof data.price === 'number' && Number.isFinite(data.price) ? data.price : null;
         setPriceData({
           price: p,
           change: safeNum(data.change),
           changePercent: safeNum(data.changePercent || data.change_percent),
         });
+      })
+      .catch(() => {});
+    getTechnicals(item.ticker)
+      .then((data) => {
+        if (data && data.indicatorCount > 0) {
+          setTechScore(safeNum(data.technicalScore));
+          setTechTrend(data.signals?.trend || null);
+        }
       })
       .catch(() => {});
   }, [item.ticker]);
@@ -163,6 +172,23 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
             </View>
           )}
         </View>
+
+        {/* Technical Indicator Badge */}
+        {techScore != null && (
+          <View style={styles.techBadge}>
+            <Ionicons name="analytics-outline" size={12} color="#60A5FA" />
+            <Text style={styles.techBadgeText}>
+              Tech: {techScore.toFixed(1)}/10
+            </Text>
+            {techTrend && (
+              <Text style={[styles.techTrendText, {
+                color: techTrend.includes('bullish') ? '#10B981' : techTrend.includes('bearish') ? '#EF4444' : '#94A3B8'
+              }]}>
+                {techTrend}
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Insight */}
         <Text style={styles.insight} numberOfLines={2}>
@@ -321,5 +347,25 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 40,
     alignSelf: 'center',
+  },
+  techBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(96,165,250,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    gap: 6,
+    marginBottom: 12,
+  },
+  techBadgeText: {
+    color: '#60A5FA',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  techTrendText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
 });

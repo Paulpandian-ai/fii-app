@@ -15,10 +15,11 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals } from '../services/api';
 import type {
   FullAnalysis,
   PriceData,
+  TechnicalAnalysis,
   FactorCategory,
   Confidence,
   Signal,
@@ -73,6 +74,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const { ticker } = route.params;
   const [analysis, setAnalysis] = useState<FullAnalysis | null>(null);
   const [priceData, setPriceData] = useState<PriceData | null>(null);
+  const [technicals, setTechnicals] = useState<TechnicalAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
@@ -83,12 +85,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const loadData = async () => {
     setLoading(true);
     try {
-      const [signalData, price] = await Promise.all([
+      const [signalData, price, techData] = await Promise.all([
         getSignalDetail(ticker).catch(() => null),
         getPrice(ticker).catch(() => null),
+        getTechnicals(ticker).catch(() => null),
       ]);
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
+      if (techData && techData.indicatorCount > 0) setTechnicals(techData);
     } finally {
       setLoading(false);
     }
@@ -258,6 +262,62 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
+        {/* Section 4: Technical Analysis */}
+        {technicals && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Technical Analysis</Text>
+            <View style={styles.techScoreRow}>
+              <View style={styles.techScoreBadge}>
+                <Text style={styles.techScoreValue}>{safeNum(technicals.technicalScore).toFixed(1)}</Text>
+                <Text style={styles.techScoreLabel}>Tech Score</Text>
+              </View>
+              <View style={styles.techSignals}>
+                {technicals.signals?.trend && (
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.trend.includes('bullish') ? 'rgba(16,185,129,0.15)' : technicals.signals.trend.includes('bearish') ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="trending-up-outline" size={12} color={technicals.signals.trend.includes('bullish') ? '#10B981' : technicals.signals.trend.includes('bearish') ? '#EF4444' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.trend.includes('bullish') ? '#10B981' : technicals.signals.trend.includes('bearish') ? '#EF4444' : '#94A3B8' }]}>
+                      {technicals.signals.trend}
+                    </Text>
+                  </View>
+                )}
+                {technicals.signals?.momentum && (
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.momentum === 'oversold' ? 'rgba(16,185,129,0.15)' : technicals.signals.momentum === 'overbought' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="speedometer-outline" size={12} color={technicals.signals.momentum === 'oversold' ? '#10B981' : technicals.signals.momentum === 'overbought' ? '#EF4444' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.momentum === 'oversold' ? '#10B981' : technicals.signals.momentum === 'overbought' ? '#EF4444' : '#94A3B8' }]}>
+                      {technicals.signals.momentum}
+                    </Text>
+                  </View>
+                )}
+                {technicals.signals?.volatility && (
+                  <View style={[styles.techPill, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="pulse-outline" size={12} color="#94A3B8" />
+                    <Text style={[styles.techPillText, { color: '#94A3B8' }]}>
+                      Vol: {technicals.signals.volatility}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+            <View style={styles.dataTable}>
+              {[
+                { label: 'RSI (14)', value: technicals.rsi != null ? safeNum(technicals.rsi).toFixed(1) : 'N/A' },
+                { label: 'MACD', value: technicals.macd?.value != null ? safeNum(technicals.macd.value).toFixed(2) : 'N/A' },
+                { label: 'SMA 20', value: technicals.sma20 != null ? `$${safeNum(technicals.sma20).toFixed(2)}` : 'N/A' },
+                { label: 'SMA 50', value: technicals.sma50 != null ? `$${safeNum(technicals.sma50).toFixed(2)}` : 'N/A' },
+                { label: 'SMA 200', value: technicals.sma200 != null ? `$${safeNum(technicals.sma200).toFixed(2)}` : 'N/A' },
+                { label: 'ATR (14)', value: technicals.atr != null ? safeNum(technicals.atr).toFixed(2) : 'N/A' },
+                { label: 'Bollinger Upper', value: technicals.bollingerBands?.upper != null ? `$${safeNum(technicals.bollingerBands.upper).toFixed(2)}` : 'N/A' },
+                { label: 'Bollinger Lower', value: technicals.bollingerBands?.lower != null ? `$${safeNum(technicals.bollingerBands.lower).toFixed(2)}` : 'N/A' },
+              ].map((row) => (
+                <View key={row.label} style={styles.dataRow}>
+                  <Text style={styles.dataLabel}>{row.label}</Text>
+                  <Text style={styles.dataValue}>{row.value}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Section 5: Alternatives */}
         {showAlternatives && (
           <View style={styles.section}>
@@ -360,6 +420,16 @@ const styles = StyleSheet.create({
   },
   dataLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
   dataValue: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  techScoreRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 16 },
+  techScoreBadge: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(96,165,250,0.15)',
+    borderWidth: 2, borderColor: 'rgba(96,165,250,0.3)', justifyContent: 'center', alignItems: 'center',
+  },
+  techScoreValue: { color: '#60A5FA', fontSize: 22, fontWeight: '800' },
+  techScoreLabel: { color: 'rgba(96,165,250,0.7)', fontSize: 10, fontWeight: '600', marginTop: 2 },
+  techSignals: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  techPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 },
+  techPillText: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
   disclaimer: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 16,
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)',

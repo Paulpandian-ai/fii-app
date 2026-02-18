@@ -13,6 +13,10 @@ Parameters:
   FredApiKeyArn:
     Type: String
     Description: ARN of the Secrets Manager secret for FRED API key
+  FinnhubApiKeyArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret for Finnhub API key
+    Default: ''
   GoogleClientId:
     Type: String
     Description: Google OAuth Client ID for Cognito
@@ -54,6 +58,7 @@ Globals:
         BUCKET_NAME: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
         CLAUDE_API_KEY_ARN: !Ref ClaudeApiKeyArn
         FRED_API_KEY_ARN: !Ref FredApiKeyArn
+        FINNHUB_API_KEY_ARN: !Ref FinnhubApiKeyArn
     Layers:
       - !Ref SharedLayer
 
@@ -242,8 +247,8 @@ Resources:
     Properties:
       LayerName: !Sub fii-shared-${Stage}
       Description: >-
-        Shared dependencies (anthropic, fredapi, yfinance, pydantic, numpy,
-        pandas) and Python modules. edgartools replaced with direct SEC API calls.
+        Shared dependencies (anthropic, fredapi, pydantic, numpy, pandas)
+        and Python modules. Uses Finnhub API (via urllib) for market data.
       ContentUri: shared_layer/
       CompatibleRuntimes:
         - python3.12
@@ -291,6 +296,14 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /price/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetTechnicals:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /technicals/{ticker}
             Method: GET
             Auth:
               Authorizer: NONE
@@ -656,6 +669,36 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /strategy/{proxy+}
             Method: POST
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - S3CrudPolicy:
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
+
+  DataRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-data-refresh-${Stage}
+      Handler: handler.lambda_handler
+      CodeUri: functions/data_refresh/
+      Description: Scheduled price & technical data refresh via Finnhub
+      Timeout: 900
+      MemorySize: 1024
+      Events:
+        MarketHoursRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0/30 14-21 ? * MON-FRI *)
+            Description: Refresh prices every 30 min during market hours (9:30AM-4PM ET)
+            Enabled: true
+            Input: '{"mode": "prices"}'
+        DailyTechnicalsRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 22 ? * MON-FRI *)
+            Description: Refresh technicals daily after market close (5PM ET)
+            Enabled: true
+            Input: '{"mode": "full"}'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]

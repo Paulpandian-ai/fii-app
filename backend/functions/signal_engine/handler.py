@@ -24,6 +24,8 @@ import db
 import s3
 import claude_client
 import market_data
+import finnhub_client
+import technical_engine
 import sec_edgar
 from models import (
     COMPANY_NAMES,
@@ -179,9 +181,15 @@ def analyze_ticker(ticker: str) -> dict:
     logger.info(f"[{ticker}] Step 2: FRED macro data")
     macro_data = market_data.get_fred_macro_data()
 
-    # ── Step 3: Yahoo Finance Market Data ──
-    logger.info(f"[{ticker}] Step 3: Yahoo Finance data")
-    yf_data = market_data.get_yahoo_finance_data(ticker)
+    # ── Step 3: Finnhub Market Data ──
+    logger.info(f"[{ticker}] Step 3: Finnhub market data")
+    yf_data = finnhub_client.get_market_data_for_signal(ticker)
+
+    # ── Step 3b: Technical Indicators ──
+    logger.info(f"[{ticker}] Step 3b: Technical indicators")
+    candles = finnhub_client.get_candles(ticker, resolution="D")
+    tech_data = technical_engine.compute_indicators(candles) if candles else {}
+    technical_score = tech_data.get("technicalScore", 5.0)
 
     # ── Step 4: Correlation Matrix ──
     logger.info(f"[{ticker}] Step 4: Correlation matrix")
@@ -200,9 +208,12 @@ def analyze_ticker(ticker: str) -> dict:
     # Merge pre-computed scores from data fetchers
     _merge_precomputed_scores(factor_details, macro_data, correlations, yf_data)
 
-    # ── Step 5b: Compute Composite Score ──
+    # ── Step 5b: Compute Composite Score (blended with technical score) ──
     scores_only = {fid: d["score"] for fid, d in factor_details.items()}
-    composite_score = compute_composite_score(scores_only)
+    factor_composite = compute_composite_score(scores_only)
+    # Blend: 60% factor analysis + 40% technical score (normalized to same 1-10 scale)
+    composite_score = round(factor_composite * 0.6 + technical_score * 0.4, 1)
+    composite_score = max(1.0, min(10.0, composite_score))
     signal = determine_signal(composite_score)
     confidence = determine_confidence(scores_only)
 
@@ -270,6 +281,18 @@ def analyze_ticker(ticker: str) -> dict:
             "beta": yf_data.get("beta", 1.0),
             "forwardPE": yf_data.get("forward_pe", 0),
             "earningsSurprise": yf_data.get("earnings_surprise_pct", 0),
+        },
+        "technicalAnalysis": {
+            "technicalScore": technical_score,
+            "rsi": tech_data.get("rsi"),
+            "macd": tech_data.get("macd", {}),
+            "sma20": tech_data.get("sma20"),
+            "sma50": tech_data.get("sma50"),
+            "sma200": tech_data.get("sma200"),
+            "bollingerBands": tech_data.get("bollingerBands", {}),
+            "atr": tech_data.get("atr"),
+            "signals": tech_data.get("signals", {}),
+            "indicatorCount": tech_data.get("indicatorCount", 0),
         },
         "macroSnapshot": {
             k: v.get("current", 0)
@@ -380,6 +403,7 @@ def _store_signal(ticker: str, result: dict) -> None:
         "insight": result["insight"],
         "reasoning": result["reasoning"],
         "topFactors": json.dumps(result["topFactors"]),
+        "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
         "lastUpdated": now,
     })
 

@@ -61,6 +61,13 @@ export const getPrice = async (ticker: string) => {
   return data;
 };
 
+// ─── Technicals ───
+
+export const getTechnicals = async (ticker: string) => {
+  const { data } = await api.get(`/technicals/${ticker}`);
+  return data;
+};
+
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {
