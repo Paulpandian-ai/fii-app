@@ -36,9 +36,15 @@ import os
 import sys
 import traceback
 
-# Lambda adds /opt/python to sys.path for layers automatically.
-# This explicit insert ensures it works in all execution contexts.
-sys.path.insert(0, "/opt/python")
+# Ensure the function's own directory is searched FIRST for local modules
+# (finnhub_client.py, technical_engine.py), then the Lambda layer.
+_fn_dir = os.path.dirname(os.path.abspath(__file__))
+if _fn_dir not in sys.path:
+    sys.path.insert(0, _fn_dir)
+
+# Lambda layer path for shared modules (db, s3, models, etc.)
+if "/opt/python" not in sys.path:
+    sys.path.insert(1, "/opt/python")
 
 import db
 import s3
