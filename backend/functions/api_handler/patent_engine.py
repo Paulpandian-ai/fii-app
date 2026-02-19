@@ -7,104 +7,106 @@ Computes Patent Innovation Score (1-10):
   Breadth (20%): Distinct CPC technology classes
   Recency (10%): Patents filed in last 6 months / total
 
-API: https://search.patentsview.org/api/v1/patent/ (free, no key)
+API: https://search.patentsview.org/api/v1/patent/
+Uses _text_any for partial assignee matching, date range syntax,
+and JSON array for field selection.
 Pure Python — no numpy/pandas.
 """
 
 import json
 import logging
-import math
 from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 from urllib.error import URLError, HTTPError
 
 logger = logging.getLogger(__name__)
 
-# Ticker → PatentsView assignee_organization name mapping
+# Ticker → short assignee name for PatentsView _text_any matching.
+# Use concise, distinctive names so partial matching works reliably.
 TICKER_TO_ASSIGNEE = {
-    "AAPL": "Apple Inc.",
-    "MSFT": "Microsoft Corporation",
-    "GOOG": "Alphabet Inc.",
-    "GOOGL": "Alphabet Inc.",
-    "AMZN": "Amazon Technologies, Inc.",
-    "META": "Meta Platforms, Inc.",
-    "NVDA": "NVIDIA Corporation",
-    "TSM": "Taiwan Semiconductor Manufacturing",
-    "AVGO": "Broadcom Inc.",
-    "ORCL": "Oracle International Corporation",
-    "CRM": "Salesforce, Inc.",
-    "ADBE": "Adobe Inc.",
-    "AMD": "Advanced Micro Devices, Inc.",
-    "INTC": "Intel Corporation",
-    "IBM": "International Business Machines Corporation",
-    "QCOM": "Qualcomm Incorporated",
-    "TXN": "Texas Instruments Incorporated",
-    "NOW": "ServiceNow, Inc.",
-    "INTU": "Intuit Inc.",
-    "AMAT": "Applied Materials, Inc.",
-    "MU": "Micron Technology, Inc.",
-    "LRCX": "Lam Research Corporation",
-    "KLAC": "KLA Corporation",
-    "SNPS": "Synopsys, Inc.",
-    "CDNS": "Cadence Design Systems, Inc.",
-    "PANW": "Palo Alto Networks, Inc.",
-    "CRWD": "CrowdStrike, Inc.",
-    "PLTR": "Palantir Technologies Inc.",
-    "SNOW": "Snowflake Inc.",
-    "NET": "Cloudflare, Inc.",
-    "TSLA": "Tesla, Inc.",
-    "BA": "The Boeing Company",
-    "LMT": "Lockheed Martin Corporation",
-    "RTX": "Raytheon Technologies Corporation",
-    "GD": "General Dynamics Corporation",
-    "NOC": "Northrop Grumman Corporation",
-    "GE": "General Electric Company",
-    "HON": "Honeywell International Inc.",
-    "MMM": "3M Company",
-    "CAT": "Caterpillar Inc.",
-    "DE": "Deere & Company",
+    "AAPL": "Apple",
+    "MSFT": "Microsoft",
+    "GOOG": "Alphabet",
+    "GOOGL": "Alphabet",
+    "AMZN": "Amazon",
+    "META": "Meta Platforms",
+    "NVDA": "NVIDIA",
+    "TSM": "Taiwan Semiconductor",
+    "AVGO": "Broadcom",
+    "ORCL": "Oracle",
+    "CRM": "Salesforce",
+    "ADBE": "Adobe",
+    "AMD": "Advanced Micro Devices",
+    "INTC": "Intel",
+    "IBM": "International Business Machines",
+    "QCOM": "Qualcomm",
+    "TXN": "Texas Instruments",
+    "NOW": "ServiceNow",
+    "INTU": "Intuit",
+    "AMAT": "Applied Materials",
+    "MU": "Micron Technology",
+    "LRCX": "Lam Research",
+    "KLAC": "KLA",
+    "SNPS": "Synopsys",
+    "CDNS": "Cadence Design Systems",
+    "PANW": "Palo Alto Networks",
+    "CRWD": "CrowdStrike",
+    "PLTR": "Palantir Technologies",
+    "SNOW": "Snowflake",
+    "NET": "Cloudflare",
+    "TSLA": "Tesla",
+    "BA": "Boeing",
+    "LMT": "Lockheed Martin",
+    "RTX": "Raytheon",
+    "GD": "General Dynamics",
+    "NOC": "Northrop Grumman",
+    "GE": "General Electric",
+    "HON": "Honeywell",
+    "MMM": "3M",
+    "CAT": "Caterpillar",
+    "DE": "Deere",
     "JNJ": "Johnson & Johnson",
-    "PFE": "Pfizer Inc.",
-    "MRK": "Merck & Co., Inc.",
-    "ABBV": "AbbVie Inc.",
-    "LLY": "Eli Lilly and Company",
-    "BMY": "Bristol-Myers Squibb Company",
-    "AMGN": "Amgen Inc.",
-    "GILD": "Gilead Sciences, Inc.",
-    "REGN": "Regeneron Pharmaceuticals, Inc.",
-    "VRTX": "Vertex Pharmaceuticals Incorporated",
-    "MRNA": "ModernaTX, Inc.",
-    "BIIB": "Biogen Inc.",
-    "F": "Ford Motor Company",
-    "GM": "General Motors LLC",
-    "DIS": "The Walt Disney Company",
-    "NFLX": "Netflix, Inc.",
-    "UBER": "Uber Technologies, Inc.",
-    "ABNB": "Airbnb, Inc.",
-    "SQ": "Block, Inc.",
-    "PYPL": "PayPal, Inc.",
-    "V": "Visa International Service Association",
-    "MA": "Mastercard International Incorporated",
-    "JPM": "JPMorgan Chase Bank",
-    "GS": "The Goldman Sachs Group, Inc.",
+    "PFE": "Pfizer",
+    "MRK": "Merck",
+    "ABBV": "AbbVie",
+    "LLY": "Eli Lilly",
+    "BMY": "Bristol-Myers Squibb",
+    "AMGN": "Amgen",
+    "GILD": "Gilead Sciences",
+    "REGN": "Regeneron Pharmaceuticals",
+    "VRTX": "Vertex Pharmaceuticals",
+    "MRNA": "ModernaTX",
+    "BIIB": "Biogen",
+    "F": "Ford Motor",
+    "GM": "General Motors",
+    "DIS": "Disney",
+    "NFLX": "Netflix",
+    "UBER": "Uber Technologies",
+    "ABNB": "Airbnb",
+    "SQ": "Block",
+    "PYPL": "PayPal",
+    "V": "Visa",
+    "MA": "Mastercard",
+    "JPM": "JPMorgan Chase",
+    "GS": "Goldman Sachs",
     "MS": "Morgan Stanley",
-    "WMT": "Walmart Inc.",
-    "COST": "Costco Wholesale Corporation",
-    "HD": "The Home Depot, Inc.",
-    "PG": "The Procter & Gamble Company",
-    "KO": "The Coca-Cola Company",
-    "PEP": "PepsiCo, Inc.",
-    "NKE": "Nike, Inc.",
-    "UNH": "UnitedHealth Group Incorporated",
-    "CVS": "CVS Pharmacy, Inc.",
-    "CI": "Cigna Corporation",
-    "T": "AT&T Inc.",
-    "VZ": "Verizon Communications Inc.",
-    "TMUS": "T-Mobile USA, Inc.",
-    "CSCO": "Cisco Technology, Inc.",
-    "HPE": "Hewlett Packard Enterprise Development LP",
-    "DELL": "Dell Technologies Inc.",
+    "WMT": "Walmart",
+    "COST": "Costco",
+    "HD": "Home Depot",
+    "PG": "Procter & Gamble",
+    "KO": "Coca-Cola",
+    "PEP": "PepsiCo",
+    "NKE": "Nike",
+    "UNH": "UnitedHealth Group",
+    "CVS": "CVS Pharmacy",
+    "CI": "Cigna",
+    "T": "AT&T",
+    "VZ": "Verizon",
+    "TMUS": "T-Mobile",
+    "CSCO": "Cisco",
+    "HPE": "Hewlett Packard Enterprise",
+    "DELL": "Dell Technologies",
 }
 
 # CPC section descriptions
@@ -130,47 +132,77 @@ def _api_request(url, timeout=15):
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (URLError, HTTPError) as e:
-        logger.warning(f"PatentsView API error: {e}")
+            raw = resp.read().decode("utf-8")
+            data = json.loads(raw)
+            logger.info(
+                "PatentsView response: total=%s, patents=%d",
+                data.get("total_patent_count", "N/A"),
+                len(data.get("patents", [])),
+            )
+            return data
+    except HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8")[:500]
+        except Exception:
+            pass
+        logger.warning("PatentsView HTTP %s: %s | body: %s", e.code, e.reason, body)
+        return None
+    except URLError as e:
+        logger.warning("PatentsView URL error: %s", e)
         return None
     except Exception as e:
-        logger.warning(f"PatentsView request failed: {e}")
+        logger.warning("PatentsView request failed: %s", e)
         return None
 
 
-def _query_patents(assignee_name, date_from, date_to, size=100):
+# Fields to request from the API (JSON array format)
+_PATENT_FIELDS = [
+    "patent_id",
+    "patent_date",
+    "patent_title",
+    "patent_abstract",
+    "patent_num_combined_citations",
+    "assignees.assignee_organization",
+    "cpcs.cpc_section_id",
+    "cpcs.cpc_group_id",
+]
+
+
+def _query_patents(assignee_name, date_from, date_to, per_page=100):
     """Query PatentsView API for patents by assignee in date range.
 
-    Uses the v1 search API with query parameters.
+    Uses the v1 search API with:
+      - _text_any for partial assignee name matching
+      - patent_date range syntax "YYYY-MM-DD:YYYY-MM-DD"
+      - f as JSON array of field names
+      - o with per_page for pagination
     """
     base_url = "https://search.patentsview.org/api/v1/patent/"
 
-    # Build query filter
+    # Build query: partial text match on assignee + date range
     q = json.dumps({
         "_and": [
-            {"assignees.assignee_organization": assignee_name},
-            {"_gte": {"patent_date": date_from}},
-            {"_lte": {"patent_date": date_to}},
+            {"_text_any": {"assignees.assignee_organization": assignee_name}},
+            {"patent_date": f"{date_from}:{date_to}"},
         ]
     })
 
-    fields = "patent_id,patent_date,patent_title,patent_abstract,patent_num_combined_citations,assignees.assignee_organization,cpcs.cpc_section_id,cpcs.cpc_group_id"
-
     params = urlencode({
         "q": q,
-        "f": fields,
+        "f": json.dumps(_PATENT_FIELDS),
         "s": json.dumps([{"patent_date": "desc"}]),
-        "o": json.dumps({"size": size}),
+        "o": json.dumps({"per_page": per_page}),
     })
 
     url = f"{base_url}?{params}"
+    logger.info("PatentsView query: assignee=%s, dates=%s:%s", assignee_name, date_from, date_to)
     return _api_request(url, timeout=20)
 
 
 def _count_patents(assignee_name, date_from, date_to):
     """Get patent count for an assignee in date range."""
-    result = _query_patents(assignee_name, date_from, date_to, size=1)
+    result = _query_patents(assignee_name, date_from, date_to, per_page=1)
     if result and "total_patent_count" in result:
         return result["total_patent_count"]
     if result and "patents" in result:
@@ -204,7 +236,7 @@ def analyze(ticker):
     five_yr_str = five_years_ago.strftime(date_format)
 
     # Query recent patents (last 12 months, full details)
-    recent_result = _query_patents(assignee, one_yr_str, now_str, size=100)
+    recent_result = _query_patents(assignee, one_yr_str, now_str, per_page=100)
     patents_last_12mo = []
     total_last_12mo = 0
     if recent_result:
@@ -225,10 +257,13 @@ def analyze(ticker):
     recent_6mo_count = 0
 
     for p in patents_last_12mo:
-        # Citations
+        # Citations — API may return int, string, or None
         citations = p.get("patent_num_combined_citations")
         if citations is not None:
-            citation_counts.append(int(citations))
+            try:
+                citation_counts.append(int(citations))
+            except (ValueError, TypeError):
+                pass
 
         # CPC categories
         cpcs = p.get("cpcs", [])
