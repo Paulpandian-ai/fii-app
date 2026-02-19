@@ -16,9 +16,10 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory } from '../services/api';
 import { StockChart } from '../components/StockChart';
 import type { ChartData } from '../components/StockChart';
+import type { StockEvent, SignalHistoryPoint } from '../types';
 import type {
   FullAnalysis,
   PriceData,
@@ -73,6 +74,24 @@ const formatLargeNumber = (n: unknown): string => {
   return `$${v.toLocaleString()}`;
 };
 
+function _formatTimeAgo(ts: string): string {
+  try {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHrs = Math.floor(diffMin / 60);
+    if (diffHrs < 24) return `${diffHrs}h ago`;
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
 interface SignalDetailScreenProps {
   route: { params: { ticker: string } };
   navigation: any;
@@ -92,6 +111,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [showAllFactors, setShowAllFactors] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [recentEvents, setRecentEvents] = useState<StockEvent[]>([]);
+  const [signalHistory, setSignalHistory] = useState<SignalHistoryPoint[]>([]);
 
   useEffect(() => {
     loadData();
@@ -116,6 +137,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       if (factorData && factorData.dimensionScores) setFactors(factorData);
       if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
       if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult);
+
+      // Load events and signal history (non-blocking)
+      getEventsForTicker(ticker, { limit: '5' })
+        .then((d) => setRecentEvents(d.events || []))
+        .catch(() => {});
+      getSignalHistory(ticker, 30)
+        .then((d) => setSignalHistory(d.history || []))
+        .catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -593,6 +622,84 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
+        {/* Signal History */}
+        {signalHistory.length > 1 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Signal History (30 Days)</Text>
+            <View style={styles.historyCard}>
+              <View style={styles.historyDots}>
+                {signalHistory.map((point, idx) => {
+                  const scoreNorm = Math.max(0, Math.min(1, ((point.score ?? 0) - 1) / 9));
+                  const color = (point.score ?? 0) >= 7 ? '#34D399' : (point.score ?? 0) <= 3.5 ? '#EF4444' : '#FBBF24';
+                  return (
+                    <View key={`${point.date}-${idx}`} style={styles.historyDotCol}>
+                      <View style={[styles.historyDot, { backgroundColor: color, bottom: scoreNorm * 40 }]} />
+                      {idx % Math.ceil(signalHistory.length / 5) === 0 && (
+                        <Text style={styles.historyDate}>{point.date.slice(5)}</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={styles.historyLegend}>
+                <Text style={styles.historyLegendText}>Score range: 1-10</Text>
+                <Text style={styles.historyLegendText}>
+                  Latest: {(signalHistory[signalHistory.length - 1]?.score ?? 0).toFixed(1)}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Recent Events */}
+        {recentEvents.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.recentEventsHeader}>
+              <Text style={styles.sectionTitle}>Recent Events</Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('EventTimeline', { ticker })}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewAllLink}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            {recentEvents.slice(0, 5).map((event, idx) => {
+              const impactColor = event.impact === 'high' ? '#EF4444' : event.impact === 'medium' ? '#FBBF24' : '#6B7280';
+              const dirIcon = event.direction === 'positive' ? 'trending-up' : event.direction === 'negative' ? 'trending-down' : 'remove';
+              const dirColor = event.direction === 'positive' ? '#34D399' : event.direction === 'negative' ? '#EF4444' : '#9CA3AF';
+              return (
+                <TouchableOpacity
+                  key={`${event.timestamp}-${idx}`}
+                  style={styles.recentEventRow}
+                  onPress={() => navigation.navigate('EventTimeline', { ticker })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.recentEventDot, { backgroundColor: impactColor }]} />
+                  <View style={styles.recentEventContent}>
+                    <Text style={styles.recentEventSummary} numberOfLines={2}>
+                      {event.summary || event.headline}
+                    </Text>
+                    <View style={styles.recentEventMeta}>
+                      <Text style={styles.recentEventType}>{event.type}</Text>
+                      <Ionicons name={dirIcon as any} size={12} color={dirColor} />
+                      <Text style={styles.recentEventTime}>
+                        {_formatTimeAgo(event.timestamp)}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Last updated */}
+        {analysis?.analyzedAt && (
+          <Text style={styles.lastUpdatedText}>
+            Last updated: {_formatTimeAgo(analysis.analyzedAt)}
+          </Text>
+        )}
+
         {/* Disclaimer */}
         <DisclaimerBanner />
         <View style={{ height: 40 }} />
@@ -730,4 +837,44 @@ const styles = StyleSheet.create({
   altDataIcons: { flexDirection: 'row', gap: 4 },
   altDataTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   altDataInsight: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
+
+  // Signal History
+  historyCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16,
+  },
+  historyDots: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
+    height: 60, marginBottom: 8,
+  },
+  historyDotCol: { alignItems: 'center', flex: 1 },
+  historyDot: { width: 8, height: 8, borderRadius: 4, position: 'absolute' },
+  historyDate: { color: 'rgba(255,255,255,0.3)', fontSize: 9, marginTop: 50 },
+  historyLegend: {
+    flexDirection: 'row', justifyContent: 'space-between', marginTop: 4,
+  },
+  historyLegendText: { color: 'rgba(255,255,255,0.3)', fontSize: 11 },
+
+  // Recent Events
+  recentEventsHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  viewAllLink: { color: '#60A5FA', fontSize: 14, fontWeight: '600' },
+  recentEventRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12,
+    padding: 12, marginBottom: 8,
+  },
+  recentEventDot: { width: 8, height: 8, borderRadius: 4, marginTop: 6 },
+  recentEventContent: { flex: 1 },
+  recentEventSummary: { color: 'rgba(255,255,255,0.8)', fontSize: 13, lineHeight: 18 },
+  recentEventMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  recentEventType: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  recentEventTime: { color: 'rgba(255,255,255,0.3)', fontSize: 11 },
+  lastUpdatedText: {
+    color: 'rgba(255,255,255,0.3)', fontSize: 12, textAlign: 'center',
+    marginTop: 8, marginBottom: 12,
+  },
 });

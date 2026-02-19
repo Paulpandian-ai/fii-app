@@ -640,6 +640,63 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Event & notification endpoints (public for dev)
+        GetEventsTicker:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /events/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetEventsFeed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /events/feed
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetSignalHistory:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /events/signal-history/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetAlerts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /alerts
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetNotificationPrefs:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /notifications/preferences
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostNotificationPrefs:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /notifications/preferences
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        PostNotificationRegister:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /notifications/register
+            Method: POST
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
@@ -660,6 +717,119 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+        - Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref EventAlertsTopic
+
+  # ─── SNS Topic for Push Notifications ───
+
+  EventAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub fii-event-alerts-${Stage}
+      DisplayName: FII Event Alerts
+
+  # ─── Event Engine Lambda Functions ───
+
+  NewsMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-news-monitor-${Stage}
+      Handler: event_engine.news_monitor_handler
+      CodeUri: functions/api_handler/
+      Description: Monitors company news via Finnhub every 15 min during market hours
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref EventAlertsTopic
+      Events:
+        NewsMonitorSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0/15 14-23 ? * MON-FRI *)
+            Description: Monitor news every 15 min during market hours (9AM-6PM ET)
+            Enabled: true
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref ClaudeApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+        - Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref EventAlertsTopic
+
+  SecFilingMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-sec-monitor-${Stage}
+      Handler: event_engine.sec_monitor_handler
+      CodeUri: functions/api_handler/
+      Description: Monitors SEC filings (8-K, Form 4, SC 13D/G) every 5 min during market hours
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref EventAlertsTopic
+      Events:
+        SecMonitorSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0/5 14-23 ? * MON-FRI *)
+            Description: Monitor SEC filings every 5 min during market hours
+            Enabled: true
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref ClaudeApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+        - Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref EventAlertsTopic
+
+  MacroMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-macro-monitor-${Stage}
+      Handler: event_engine.macro_monitor_handler
+      CodeUri: functions/api_handler/
+      Description: Monitors macro economic releases and computes surprise scores
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref EventAlertsTopic
+      Events:
+        MacroMonitorSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0/15 13-22 ? * MON-FRI *)
+            Description: Monitor macro events every 15 min during market hours
+            Enabled: true
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref FredApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+        - Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref EventAlertsTopic
 
   SignalEngineFunction:
     Type: AWS::Serverless::Function
@@ -786,3 +956,6 @@ Outputs:
   BucketName:
     Description: S3 Data Bucket Name
     Value: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
+  EventAlertsTopicArn:
+    Description: SNS Topic ARN for event alerts
+    Value: !Ref EventAlertsTopic

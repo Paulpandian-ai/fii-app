@@ -8,6 +8,7 @@ import {
   StatusBar,
   TouchableOpacity,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import type { ViewToken } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { SwipeHint } from '../components/SwipeHint';
 import { Skeleton } from '../components/Skeleton';
 import { useFeedStore } from '../store/feedStore';
 import { usePortfolioStore } from '../store/portfolioStore';
+import { useEventStore } from '../store/eventStore';
 import { getFeed } from '../services/api';
 import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
@@ -85,15 +87,36 @@ const PLACEHOLDER_FEED: FeedItem[] = [
 export const FeedScreen: React.FC = () => {
   const { setItems, setCurrentIndex, isLoading, setLoading, setError } = useFeedStore();
   const portfolioTickers = usePortfolioStore((s) => s.getPortfolioTickers)();
+  const liveBannerEvent = useEventStore((s) => s.liveBannerEvent);
+  const showLiveBanner = useEventStore((s) => s.showLiveBanner);
+  const dismissLiveBanner = useEventStore((s) => s.dismissLiveBanner);
+  const loadEventsFeed = useEventStore((s) => s.loadEventsFeed);
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   useEffect(() => {
     loadFeed();
+    loadEventsFeed();
   }, []);
+
+  // Animate live event banner
+  useEffect(() => {
+    if (showLiveBanner && liveBannerEvent) {
+      Animated.spring(bannerAnim, { toValue: 0, useNativeDriver: true }).start();
+      const timer = setTimeout(() => {
+        Animated.timing(bannerAnim, { toValue: -80, duration: 300, useNativeDriver: true }).start(() => {
+          dismissLiveBanner();
+        });
+      }, 10000);
+      return () => clearTimeout(timer);
+    } else {
+      bannerAnim.setValue(-80);
+    }
+  }, [showLiveBanner, liveBannerEvent, bannerAnim, dismissLiveBanner]);
 
   const usePlaceholder = () => {
     setItems(PLACEHOLDER_FEED);
@@ -270,6 +293,36 @@ export const FeedScreen: React.FC = () => {
         <Ionicons name="search" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
+      {/* Live event banner */}
+      {showLiveBanner && liveBannerEvent && (
+        <Animated.View style={[styles.liveBanner, { transform: [{ translateY: bannerAnim }] }]}>
+          <TouchableOpacity
+            style={styles.liveBannerInner}
+            onPress={() => {
+              dismissLiveBanner();
+              navigation.navigate('SignalDetail', {
+                ticker: liveBannerEvent.ticker,
+                feedItemId: liveBannerEvent.ticker,
+              });
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={styles.liveBannerDot} />
+            <View style={styles.liveBannerContent}>
+              <Text style={styles.liveBannerTitle} numberOfLines={1}>
+                {liveBannerEvent.ticker} Signal Alert
+              </Text>
+              <Text style={styles.liveBannerText} numberOfLines={1}>
+                {liveBannerEvent.summary}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={dismissLiveBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       <FlatList
         ref={flatListRef}
         data={feed}
@@ -386,4 +439,31 @@ const styles = StyleSheet.create({
     bottom: 40,
     alignSelf: 'center',
   },
+  liveBanner: {
+    position: 'absolute',
+    top: 100,
+    left: 12,
+    right: 12,
+    zIndex: 20,
+  },
+  liveBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  liveBannerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+  },
+  liveBannerContent: { flex: 1 },
+  liveBannerTitle: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
+  liveBannerText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
 });

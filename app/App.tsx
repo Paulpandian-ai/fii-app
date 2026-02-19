@@ -22,7 +22,10 @@ import { AlternativeDataScreen } from './src/screens/AlternativeDataScreen';
 import { ScreenerScreen } from './src/screens/ScreenerScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { EventTimelineScreen } from './src/screens/EventTimelineScreen';
 import { useCoachStore } from './src/store/coachStore';
+import { useEventStore } from './src/store/eventStore';
+import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
 const WrappedFeed = () => (
@@ -66,6 +69,9 @@ const WrappedScreener = () => (
 );
 const WrappedSettings = () => (
   <ErrorBoundary screenName="SettingsScreen"><SettingsScreen /></ErrorBoundary>
+);
+const WrappedEventTimeline = (props: any) => (
+  <ErrorBoundary screenName="EventTimelineScreen"><EventTimelineScreen {...props} /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -128,14 +134,44 @@ function MainTabs() {
   );
 }
 
+async function setupPushNotifications() {
+  try {
+    // Dynamically import expo-notifications (optional dependency)
+    const Notifications = await import('expo-notifications').catch(() => null);
+    if (!Notifications) return;
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync();
+    const token = tokenData.data;
+    if (token) {
+      await registerDeviceToken(token, 'expo').catch(() => {});
+      await AsyncStorage.setItem('@fii_push_token', token);
+    }
+  } catch {
+    // Push notifications not available (e.g. simulator)
+  }
+}
+
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  const loadEventsFeed = useEventStore((s) => s.loadEventsFeed);
 
   useEffect(() => {
     AsyncStorage.getItem('@fii_onboarding_complete').then((val) => {
       setShowOnboarding(val !== 'true');
     });
-  }, []);
+
+    // Setup push notifications & load events
+    setupPushNotifications();
+    loadEventsFeed();
+  }, [loadEventsFeed]);
 
   // Wait for onboarding check
   if (showOnboarding === null) return null;
@@ -200,6 +236,11 @@ export default function App() {
         <Stack.Screen
           name="Backtest"
           component={WrappedBacktest}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="EventTimeline"
+          component={WrappedEventTimeline}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

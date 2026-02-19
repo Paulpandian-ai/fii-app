@@ -320,4 +320,43 @@ export const getCoachWeekly = async () => {
   return data;
 };
 
+// ─── Events ───
+
+export const getEventsForTicker = async (ticker: string, params: Record<string, string> = {}) => {
+  const { data } = await api.get(`/events/${ticker}`, { params });
+  return data;
+};
+
+export const getEventsFeed = async (limit: number = 50) => {
+  const { data } = await api.get('/events/feed', { params: { limit: String(limit) } });
+  return data;
+};
+
+export const getSignalHistory = async (ticker: string, days: number = 30) => {
+  const { data } = await api.get(`/events/signal-history/${ticker}`, { params: { days: String(days) } });
+  return data;
+};
+
+export const getAlerts = async (limit: number = 20) => {
+  const { data } = await api.get('/alerts', { params: { limit: String(limit) } });
+  return data;
+};
+
+// ─── Notifications ───
+
+export const getNotificationPreferences = async () => {
+  const { data } = await api.get('/notifications/preferences');
+  return data;
+};
+
+export const saveNotificationPreferences = async (prefs: Record<string, any>) => {
+  const { data } = await api.post('/notifications/preferences', prefs);
+  return data;
+};
+
+export const registerDeviceToken = async (token: string, platform: string = 'expo') => {
+  const { data } = await api.post('/notifications/register', { token, platform });
+  return data;
+};
+
 export default api;

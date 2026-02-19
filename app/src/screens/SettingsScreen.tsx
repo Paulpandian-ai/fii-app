@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { DisclaimerFull } from '../components/DisclaimerBanner';
+import { useEventStore } from '../store/eventStore';
 
 const TAX_BRACKETS = [10, 12, 22, 24, 32, 35, 37];
 const RISK_PROFILES = [
@@ -32,6 +33,11 @@ export const SettingsScreen: React.FC = () => {
   const [dailyBriefing, setDailyBriefing] = useState(true);
   const [weeklyRecap, setWeeklyRecap] = useState(true);
   const [volatilityAlerts, setVolatilityAlerts] = useState(true);
+
+  // Event alert preferences
+  const preferences = useEventStore((s) => s.preferences);
+  const updatePreferences = useEventStore((s) => s.updatePreferences);
+  const loadPreferences = useEventStore((s) => s.loadPreferences);
 
   // Load settings
   useEffect(() => {
@@ -52,7 +58,8 @@ export const SettingsScreen: React.FC = () => {
       }
     };
     load();
-  }, []);
+    loadPreferences();
+  }, [loadPreferences]);
 
   const saveProfile = useCallback(async (profile: string) => {
     setRiskProfile(profile);
@@ -214,6 +221,66 @@ export const SettingsScreen: React.FC = () => {
           />
         </View>
 
+        {/* Event Alert Preferences */}
+        <Text style={styles.sectionHeader}>Event Alert Preferences</Text>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>P0 Critical</Text>
+            <Text style={styles.toggleSublabel}>Signal changes, extreme earnings surprises</Text>
+          </View>
+          <Switch
+            value={preferences.p0Critical}
+            onValueChange={(v) => updatePreferences({ p0Critical: v })}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(239,68,68,0.3)' }}
+            thumbColor={preferences.p0Critical ? '#EF4444' : '#888'}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>P1 High</Text>
+            <Text style={styles.toggleSublabel}>SEC filings, insider cluster buying, FDA decisions</Text>
+          </View>
+          <Switch
+            value={preferences.p1High}
+            onValueChange={(v) => updatePreferences({ p1High: v })}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(251,191,36,0.3)' }}
+            thumbColor={preferences.p1High ? '#FBBF24' : '#888'}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>P2 Medium</Text>
+            <Text style={styles.toggleSublabel}>Earnings reminders, macro impacts, analyst changes</Text>
+          </View>
+          <Switch
+            value={preferences.p2Medium}
+            onValueChange={(v) => updatePreferences({ p2Medium: v })}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(96,165,250,0.3)' }}
+            thumbColor={preferences.p2Medium ? '#60A5FA' : '#888'}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>P3 Low</Text>
+            <Text style={styles.toggleSublabel}>Medium-impact news, technical triggers, weekly summary</Text>
+          </View>
+          <Switch
+            value={preferences.p3Low}
+            onValueChange={(v) => updatePreferences({ p3Low: v })}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(107,114,128,0.3)' }}
+            thumbColor={preferences.p3Low ? '#6B7280' : '#888'}
+          />
+        </View>
+
+        {/* Quiet Hours */}
+        <Text style={styles.sectionHeader}>Quiet Hours</Text>
+        <View style={styles.quietHoursRow}>
+          <Ionicons name="moon-outline" size={18} color="rgba(255,255,255,0.5)" />
+          <Text style={styles.quietHoursText}>
+            No push notifications between {preferences.quietHoursStart}:00 – {preferences.quietHoursEnd}:00
+          </Text>
+        </View>
+
         {/* Data */}
         <Text style={styles.sectionHeader}>Data</Text>
         <TouchableOpacity style={styles.actionRow} onPress={handleExportData} activeOpacity={0.7}>
@@ -305,4 +372,10 @@ const styles = StyleSheet.create({
   },
   aboutLabel: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   aboutValue: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 2 },
+  toggleSublabel: { color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 2 },
+  quietHoursRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 14, marginBottom: 8,
+  },
+  quietHoursText: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '500' },
 });

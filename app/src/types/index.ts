@@ -852,6 +852,59 @@ export interface WeeklyRecapData {
   updatedAt: string;
 }
 
+// ─── Event & Alert Types ───
+
+export type EventType = 'news' | 'filing' | 'macro';
+export type EventImpact = 'high' | 'medium' | 'low' | 'none';
+export type EventDirection = 'positive' | 'negative' | 'neutral';
+export type AlertPriority = 'P0_CRITICAL' | 'P1_HIGH' | 'P2_MEDIUM' | 'P3_LOW';
+
+export interface StockEvent {
+  ticker: string;
+  type: EventType;
+  headline: string;
+  summary: string;
+  impact: EventImpact;
+  direction: EventDirection;
+  category: string;
+  sourceUrl: string;
+  formType: string;
+  indicator: string;
+  surpriseScore: number | null;
+  sectorImpacts: Record<string, number>;
+  factorsAffected: string[];
+  timestamp: string;
+}
+
+export interface EventAlert {
+  ticker: string;
+  priority: AlertPriority;
+  title: string;
+  body: string;
+  eventType: string;
+  impact: string;
+  direction: string;
+  timestamp: string;
+  read: boolean;
+}
+
+export interface SignalHistoryPoint {
+  date: string;
+  score: number;
+  signal: Signal;
+}
+
+export interface NotificationPreferences {
+  p0Critical: boolean;
+  p1High: boolean;
+  p2Medium: boolean;
+  p3Low: boolean;
+  quietHoursStart: number;
+  quietHoursEnd: number;
+  watchedTickers: string[];
+  mutedTickers: string[];
+}
+
 // ─── Navigation Types ───
 
 export type RootTabParamList = {
@@ -866,6 +919,7 @@ export type RootStackParamList = {
   SignalDetail: { ticker: string; feedItemId: string };
   FinancialHealth: { ticker: string };
   AlternativeData: { ticker: string };
+  EventTimeline: { ticker: string };
   Screener: undefined;
   Profile: undefined;
   WealthSimulator: undefined;
