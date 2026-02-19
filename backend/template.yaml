@@ -658,83 +658,6 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
-        # Track record endpoints
-        GetTrackRecord:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /track-record
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        GetTrackRecordTicker:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /track-record/{ticker}
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        # Discussion endpoints
-        GetDiscuss:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /discuss/{ticker}
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        PostDiscuss:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /discuss/{ticker}
-            Method: POST
-            Auth:
-              Authorizer: NONE
-        # Profile endpoints
-        GetProfileMe:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /profile/me
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        PutProfileMe:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /profile/me
-            Method: PUT
-            Auth:
-              Authorizer: NONE
-        GetProfile:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /profile/{userId}
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        # Leaderboard endpoint
-        GetLeaderboard:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /leaderboard
-            Method: GET
-            Auth:
-              Authorizer: NONE
-        # AI Chat endpoint
-        PostChat:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /chat
-            Method: POST
-            Auth:
-              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
@@ -819,6 +742,98 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /notifications/register
+            Method: POST
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref ClaudeApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+
+  # ─── Social Handler Function (social/community API routes) ───
+
+  SocialHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-social-handler-${Stage}
+      Handler: handler.lambda_handler
+      CodeUri: functions/social_handler/
+      Description: Social and community routes — track record, discuss, profile, leaderboard, chat
+      Events:
+        GetTrackRecord:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /track-record
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetTrackRecordTicker:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /track-record/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetDiscuss:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /discuss/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostDiscuss:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /discuss/{ticker}
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        GetProfileMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/me
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PutProfileMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/me
+            Method: PUT
+            Auth:
+              Authorizer: NONE
+        GetProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/{userId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetLeaderboard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /leaderboard
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostChat:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /chat
             Method: POST
             Auth:
               Authorizer: NONE
