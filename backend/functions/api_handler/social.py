@@ -373,21 +373,38 @@ def handle_chat(user_id, message, context=None):
     session_id = context.get("sessionId", "default")
     history = _get_chat_history(user_id, session_id)
 
-    # Call Claude API
+    # Call Claude API directly with chat-optimised prompt
     try:
-        import claude_client
-        prompt = f"""You are FII's AI stock analysis assistant. Answer the user's question about stocks
-using the real FII analysis data provided below. Be conversational, helpful, and specific.
-Reference actual score values, factor names, and data points in your response.
-Keep responses concise (2-4 paragraphs max). Never give specific buy/sell recommendations.
-{data_context}
+        import anthropic
+
+        api_key_arn = os.environ.get("CLAUDE_API_KEY_ARN", "")
+        import boto3
+        _sec = boto3.client("secretsmanager")
+        api_key = _sec.get_secret_value(SecretId=api_key_arn)["SecretString"]
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        system_prompt = (
+            "You are FII's AI stock assistant. Give concise 2-3 sentence answers about stocks "
+            "using FII's factor scores and signals. Cite specific data points. "
+            "End with a disclaimer that this is not investment advice."
+        )
+
+        user_content = f"""{data_context}
 
 Recent conversation:
 {_format_history(history)}
 
 User question: {message}"""
 
-        response_text = claude_client.generate_reasoning(prompt, max_tokens=500)
+        resp = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=300,
+            temperature=0.3,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        response_text = resp.content[0].text
     except Exception as e:
         # Fallback response using available data
         response_text = _generate_fallback_response(message, current_ticker, signal_data, price_data)

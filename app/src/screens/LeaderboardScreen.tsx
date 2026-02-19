@@ -60,7 +60,7 @@ export const LeaderboardScreen: React.FC = () => {
     try {
       setError(null);
       const data = await getLeaderboard();
-      setEntries(data.leaderboard ?? data ?? []);
+      setEntries(data?.entries ?? data?.leaderboard ?? []);
     } catch (e: any) {
       setError(e.message || 'Failed to load leaderboard');
     } finally {
