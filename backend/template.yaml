@@ -640,7 +640,37 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
-        # Event & notification endpoints (public for dev)
+        # Catch-all for any remaining routes
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - S3CrudPolicy:
+            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref ClaudeApiKeyArn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+
+  # ─── Event Handler Function (event/notification API routes) ───
+
+  EventHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-event-handler-${Stage}
+      Handler: handler.lambda_handler
+      CodeUri: functions/event_handler/
+      Description: Event timeline, alerts, and notification preference routes
+      Events:
         GetEventsTicker:
           Type: HttpApi
           Properties:
@@ -697,30 +727,15 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
-        # Catch-all for any remaining routes
-        CatchAll:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /{proxy+}
-            Method: ANY
-            Auth:
-              Authorizer: NONE
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
-        - S3CrudPolicy:
-            BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Ref ClaudeApiKeyArn
         - Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
-        - Statement:
-            - Effect: Allow
-              Action: sns:Publish
-              Resource: !Ref EventAlertsTopic
 
   # ─── SNS Topic for Push Notifications ───
 
