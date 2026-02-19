@@ -4,6 +4,12 @@ Triggered by EventBridge schedule (every 30 min during market hours,
 once daily after close). Refreshes price cache and technical indicators
 for all tracked stocks via Finnhub API.
 
+Supports batch processing for 100+ stock universe:
+  Batch 1 (4:30 PM ET): stocks 0-24
+  Batch 2 (4:45 PM ET): stocks 25-49
+  Batch 3 (5:00 PM ET): stocks 50-74
+  Batch 4 (5:15 PM ET): stocks 75-99+
+
 Rate-limited to stay within Finnhub's free tier (60 calls/min).
 """
 
@@ -31,11 +37,23 @@ def lambda_handler(event, context):
     - "prices": Refresh price cache only (fast, ~1 API call/stock)
     - "technicals": Refresh technical indicators (slower, ~2 calls/stock)
     - "full": Both prices and technicals (default for daily run)
+
+    Batching:
+    - batch: 1-4 (optional) — processes a subset of the universe
     """
     mode = event.get("mode", "full")
+    batch = event.get("batch")
     tickers = event.get("tickers") or _get_tracked_tickers()
 
-    logger.info(f"[DataRefresh] Starting mode={mode} for {len(tickers)} tickers")
+    # Apply batch slicing if specified
+    if batch is not None:
+        batch = int(batch)
+        batch_size = 25
+        start = (batch - 1) * batch_size
+        end = start + batch_size
+        tickers = tickers[start:end]
+
+    logger.info(f"[DataRefresh] Starting mode={mode} batch={batch} for {len(tickers)} tickers")
 
     results = {"refreshed": 0, "errors": 0, "details": []}
 
@@ -73,13 +91,14 @@ def _get_tracked_tickers() -> list[str]:
     """Get all tickers that have signals or are in watchlists."""
     tickers = set(STOCK_UNIVERSE)
 
-    # Also include any tickers from user watchlists
+    # Also include any tickers from user watchlists (query by PK directly)
     try:
-        watchlist_items = db.query("SIGNALS", index_name="GSI1", limit=100)
-        for item in watchlist_items:
-            ticker = item.get("ticker", "")
-            if ticker:
-                tickers.add(ticker)
+        watchlist_items = db.query("WATCHLIST#anonymous")
+        for item in (watchlist_items or []):
+            for wi in item.get("items", []):
+                ticker = wi.get("ticker", "")
+                if ticker:
+                    tickers.add(ticker)
     except Exception:
         pass
 

@@ -320,6 +320,27 @@ export const getCoachWeekly = async () => {
   return data;
 };
 
+// ─── Earnings Calendar ───
+
+export const getEarningsCalendar = async () => {
+  const { data } = await api.get('/earnings/calendar');
+  return data;
+};
+
+// ─── Market Movers ───
+
+export const getMarketMovers = async () => {
+  const { data } = await api.get('/market/movers');
+  _cacheSignals([
+    ...(data.gainers || []),
+    ...(data.losers || []),
+    ...(data.mostActive || []),
+    ...(data.aiUpgrades || []),
+    ...(data.aiDowngrades || []),
+  ]);
+  return data;
+};
+
 // ─── Events ───
 
 export const getEventsForTicker = async (ticker: string, params: Record<string, string> = {}) => {

@@ -295,7 +295,7 @@ export const PortfolioScreen: React.FC = () => {
         );
 
       case 'baskets':
-        return <BasketCarousel />;
+        return <BasketCarousel onBrowseAll={() => navigation.navigate('BasketList')} />;
 
       case 'watchlists':
         return <WatchlistTabs onOpenSearch={openWatchlistSearch} />;

@@ -905,6 +905,62 @@ export interface NotificationPreferences {
   mutedTickers: string[];
 }
 
+// ─── Earnings Calendar Types ───
+
+export interface EarningsEntry {
+  ticker: string;
+  companyName: string;
+  date: string;
+  timeOfDay: 'BMO' | 'AMC' | 'TBD';
+  estimatedEPS: number | null;
+  actualEPS: number | null;
+  revenueEstimate: number | null;
+  revenueActual: number | null;
+  surprise: number | null;
+  surprisePercent: number | null;
+  aiScore: number | null;
+  signal: Signal | null;
+  historicalSurprises: ('beat' | 'miss')[];
+  beatStreak: number;
+  quarter: number | null;
+  year: number | null;
+}
+
+// ─── Market Movers Types ───
+
+export interface MarketMover {
+  ticker: string;
+  companyName: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  marketCap: number;
+  sector: string;
+  aiScore: number | null;
+  signal: Signal | null;
+  scoreChange?: number;
+  prevScore?: number;
+}
+
+export interface MarketSummaryIndex {
+  name: string;
+  changePercent: number;
+}
+
+export interface MarketMoversData {
+  gainers: MarketMover[];
+  losers: MarketMover[];
+  mostActive: MarketMover[];
+  aiUpgrades: MarketMover[];
+  aiDowngrades: MarketMover[];
+  marketSummary: {
+    sp500: MarketSummaryIndex;
+    nasdaq: MarketSummaryIndex;
+    dow: MarketSummaryIndex;
+  };
+  totalStocks: number;
+}
+
 // ─── Navigation Types ───
 
 export type RootTabParamList = {
@@ -928,4 +984,7 @@ export type RootStackParamList = {
   AIAdvisor: undefined;
   Backtest: undefined;
   Settings: undefined;
+  EarningsCalendar: undefined;
+  MarketDashboard: undefined;
+  BasketList: undefined;
 };

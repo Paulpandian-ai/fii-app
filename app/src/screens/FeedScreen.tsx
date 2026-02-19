@@ -288,6 +288,11 @@ export const FeedScreen: React.FC = () => {
         <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
+      {/* Market Dashboard button */}
+      <TouchableOpacity style={styles.dashboardBtn} onPress={() => navigation.navigate('MarketDashboard')}>
+        <Ionicons name="stats-chart" size={22} color="rgba(255,255,255,0.7)" />
+      </TouchableOpacity>
+
       {/* Search button */}
       <TouchableOpacity style={styles.searchBtn} onPress={() => setSearchVisible(true)}>
         <Ionicons name="search" size={22} color="rgba(255,255,255,0.7)" />
@@ -380,10 +385,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  searchBtn: {
+  dashboardBtn: {
     position: 'absolute',
     top: 54,
     right: 60,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchBtn: {
+    position: 'absolute',
+    top: 54,
+    right: 104,
     zIndex: 10,
     width: 40,
     height: 40,

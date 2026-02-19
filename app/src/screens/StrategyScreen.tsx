@@ -166,6 +166,15 @@ export const StrategyScreen: React.FC = () => {
       grade: '',
       screen: 'Backtest',
     },
+    {
+      id: 'earnings',
+      title: 'Earnings Calendar',
+      icon: 'calendar',
+      iconColor: '#3B82F6',
+      subtitle: 'Upcoming reports & analysis',
+      grade: '',
+      screen: 'EarningsCalendar',
+    },
   ];
 
   return (

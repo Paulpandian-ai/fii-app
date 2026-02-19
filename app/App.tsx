@@ -23,6 +23,9 @@ import { ScreenerScreen } from './src/screens/ScreenerScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { EventTimelineScreen } from './src/screens/EventTimelineScreen';
+import { EarningsCalendarScreen } from './src/screens/EarningsCalendarScreen';
+import { MarketDashboardScreen } from './src/screens/MarketDashboardScreen';
+import { BasketListScreen } from './src/screens/BasketListScreen';
 import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
@@ -72,6 +75,15 @@ const WrappedSettings = () => (
 );
 const WrappedEventTimeline = (props: any) => (
   <ErrorBoundary screenName="EventTimelineScreen"><EventTimelineScreen {...props} /></ErrorBoundary>
+);
+const WrappedEarningsCalendar = () => (
+  <ErrorBoundary screenName="EarningsCalendarScreen"><EarningsCalendarScreen /></ErrorBoundary>
+);
+const WrappedMarketDashboard = () => (
+  <ErrorBoundary screenName="MarketDashboardScreen"><MarketDashboardScreen /></ErrorBoundary>
+);
+const WrappedBasketList = () => (
+  <ErrorBoundary screenName="BasketListScreen"><BasketListScreen /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -241,6 +253,21 @@ export default function App() {
         <Stack.Screen
           name="EventTimeline"
           component={WrappedEventTimeline}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="EarningsCalendar"
+          component={WrappedEarningsCalendar}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="MarketDashboard"
+          component={WrappedMarketDashboard}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="BasketList"
+          component={WrappedBasketList}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

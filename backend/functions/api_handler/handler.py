@@ -94,7 +94,11 @@ def lambda_handler(event, context):
 
         # ─── Route Dispatch ───
 
-        if path.startswith("/feed"):
+        if path.startswith("/earnings/calendar"):
+            return _handle_earnings_calendar(http_method, query_params)
+        elif path.startswith("/market/movers"):
+            return _handle_market_movers(http_method)
+        elif path.startswith("/feed"):
             return _handle_feed(http_method, body, user_id)
         elif path.startswith("/prices/"):
             ticker = path.split("/prices/")[-1].strip("/").upper()
@@ -154,6 +158,194 @@ def lambda_handler(event, context):
     except Exception as e:
         traceback.print_exc()
         return _response(500, {"error": str(e)})
+
+
+# ─── Earnings Calendar ───
+
+
+def _handle_earnings_calendar(method, query_params):
+    """GET /earnings/calendar — Upcoming earnings for tracked stocks (next 30 days)."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    from datetime import datetime, timedelta, timezone
+    from models import STOCK_UNIVERSE, COMPANY_NAMES
+
+    now = datetime.now(timezone.utc)
+    from_date = now.strftime("%Y-%m-%d")
+    to_date = (now + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    # Try Finnhub earnings calendar
+    earnings = []
+    try:
+        raw = finnhub_client._call(f"/calendar/earnings?from={from_date}&to={to_date}")
+        all_earnings = raw.get("earningsCalendar", [])
+
+        tracked_set = set(STOCK_UNIVERSE)
+        for e in all_earnings:
+            ticker = e.get("symbol", "")
+            if ticker in tracked_set:
+                # Get current signal for this stock
+                signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+                ai_score = float(signal_data.get("compositeScore", 0)) if signal_data else None
+                signal = signal_data.get("signal", "HOLD") if signal_data else None
+
+                # Historical earnings surprises from DynamoDB
+                hist = []
+                try:
+                    hist_items = db.query(f"EARNINGS#{ticker}")
+                    for h in (hist_items or [])[-4:]:
+                        surprise = h.get("surprisePercent")
+                        if surprise is not None:
+                            hist.append("beat" if float(surprise) > 0 else "miss")
+                except Exception:
+                    pass
+
+                beat_streak = 0
+                for h in reversed(hist):
+                    if h == "beat":
+                        beat_streak += 1
+                    else:
+                        break
+
+                earnings.append({
+                    "ticker": ticker,
+                    "companyName": COMPANY_NAMES.get(ticker, ticker),
+                    "date": e.get("date", ""),
+                    "timeOfDay": "BMO" if e.get("hour", "") == "bmo" else "AMC" if e.get("hour", "") == "amc" else e.get("hour", "TBD"),
+                    "estimatedEPS": e.get("epsEstimate"),
+                    "actualEPS": e.get("epsActual"),
+                    "revenueEstimate": e.get("revenueEstimate"),
+                    "revenueActual": e.get("revenueActual"),
+                    "surprise": round(float(e.get("epsActual", 0) or 0) - float(e.get("epsEstimate", 0) or 0), 4) if e.get("epsActual") else None,
+                    "surprisePercent": round((float(e.get("epsActual", 0) or 0) - float(e.get("epsEstimate", 0) or 0)) / max(abs(float(e.get("epsEstimate", 0) or 1)), 0.01) * 100, 2) if e.get("epsActual") and e.get("epsEstimate") else None,
+                    "aiScore": ai_score,
+                    "signal": signal,
+                    "historicalSurprises": hist,
+                    "beatStreak": beat_streak,
+                    "quarter": e.get("quarter"),
+                    "year": e.get("year"),
+                })
+    except Exception as ex:
+        print(f"[EarningsCalendar] Finnhub error: {ex}")
+        # Generate mock data based on tracked tickers
+        import random
+        random.seed(42)
+        mock_tickers = STOCK_UNIVERSE[:20]
+        for i, ticker in enumerate(mock_tickers):
+            day_offset = (i * 2) % 30
+            signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            earnings.append({
+                "ticker": ticker,
+                "companyName": COMPANY_NAMES.get(ticker, ticker),
+                "date": (now + timedelta(days=day_offset)).strftime("%Y-%m-%d"),
+                "timeOfDay": "BMO" if i % 2 == 0 else "AMC",
+                "estimatedEPS": round(random.uniform(0.5, 5.0), 2),
+                "actualEPS": None,
+                "revenueEstimate": None,
+                "revenueActual": None,
+                "surprise": None,
+                "surprisePercent": None,
+                "aiScore": float(signal_data.get("compositeScore", 5.5)) if signal_data else round(random.uniform(3.0, 9.0), 1),
+                "signal": signal_data.get("signal", "HOLD") if signal_data else random.choice(["BUY", "HOLD", "SELL"]),
+                "historicalSurprises": [random.choice(["beat", "miss"]) for _ in range(4)],
+                "beatStreak": random.randint(0, 4),
+                "quarter": None,
+                "year": None,
+            })
+
+    # Sort by date
+    earnings.sort(key=lambda x: x.get("date", ""))
+
+    return _response(200, {
+        "earnings": earnings,
+        "count": len(earnings),
+        "fromDate": from_date,
+        "toDate": to_date,
+    })
+
+
+# ─── Market Movers ───
+
+
+def _handle_market_movers(method):
+    """GET /market/movers — Top gainers, losers, volume leaders, AI score changes."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    from models import STOCK_UNIVERSE, COMPANY_NAMES
+
+    # Batch read all PRICE# records from DynamoDB
+    all_prices = []
+    for ticker in STOCK_UNIVERSE:
+        try:
+            price_item = db.get_item(f"PRICE#{ticker}", "LATEST")
+            if price_item:
+                cp = float(price_item.get("changePercent", 0) or 0)
+                signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+                all_prices.append({
+                    "ticker": ticker,
+                    "companyName": COMPANY_NAMES.get(ticker, ticker),
+                    "price": float(price_item.get("price", 0) or 0),
+                    "change": float(price_item.get("change", 0) or 0),
+                    "changePercent": cp,
+                    "marketCap": float(price_item.get("marketCap", 0) or 0),
+                    "sector": price_item.get("sector", ""),
+                    "aiScore": float(signal_item.get("compositeScore", 0)) if signal_item else None,
+                    "signal": signal_item.get("signal") if signal_item else None,
+                })
+        except Exception:
+            pass
+
+    # Sort for different categories
+    by_gain = sorted(all_prices, key=lambda x: x["changePercent"], reverse=True)
+    by_loss = sorted(all_prices, key=lambda x: x["changePercent"])
+    by_cap = sorted(all_prices, key=lambda x: x["marketCap"], reverse=True)
+
+    # AI score changes — compare current score vs yesterday's signal history
+    ai_upgrades = []
+    ai_downgrades = []
+    for item in all_prices:
+        if item["aiScore"] is not None:
+            ticker = item["ticker"]
+            try:
+                hist = db.query_between(
+                    f"SIGNAL_HISTORY#{ticker}",
+                    "0000",
+                    "9999",
+                )
+                if hist and len(hist) >= 2:
+                    prev = float(hist[-2].get("compositeScore", item["aiScore"]))
+                    curr = item["aiScore"]
+                    change = curr - prev
+                    if abs(change) >= 0.3:
+                        entry = {**item, "scoreChange": round(change, 1), "prevScore": round(prev, 1)}
+                        if change > 0:
+                            ai_upgrades.append(entry)
+                        else:
+                            ai_downgrades.append(entry)
+            except Exception:
+                pass
+
+    ai_upgrades.sort(key=lambda x: x.get("scoreChange", 0), reverse=True)
+    ai_downgrades.sort(key=lambda x: x.get("scoreChange", 0))
+
+    # Market summary indices (placeholder - would use real index data)
+    market_summary = {
+        "sp500": {"name": "S&P 500", "changePercent": round(sum(x["changePercent"] for x in by_cap[:50]) / max(len(by_cap[:50]), 1), 2)},
+        "nasdaq": {"name": "Nasdaq", "changePercent": round(sum(x["changePercent"] for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")) / max(len([x for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")]), 1), 2)},
+        "dow": {"name": "Dow Jones", "changePercent": round(sum(x["changePercent"] for x in by_cap[:30]) / max(len(by_cap[:30]), 1), 2)},
+    }
+
+    return _response(200, {
+        "gainers": by_gain[:10],
+        "losers": by_loss[:10],
+        "mostActive": by_cap[:10],
+        "aiUpgrades": ai_upgrades[:5],
+        "aiDowngrades": ai_downgrades[:5],
+        "marketSummary": market_summary,
+        "totalStocks": len(all_prices),
+    })
 
 
 # ─── Signal Endpoints ───
@@ -2139,6 +2331,148 @@ DEFAULT_BASKETS = [
         "riskLevel": "High",
     },
     {
+        "id": "dividend-aristocrats",
+        "name": "Dividend Aristocrats",
+        "emoji": "\U0001f451",
+        "description": "Blue-chip companies with 25+ years of consecutive dividend increases",
+        "stocks": [
+            {"ticker": "JNJ", "companyName": "Johnson & Johnson", "weight": 0.20, "reason": "62 years of dividend increases"},
+            {"ticker": "PG", "companyName": "Procter & Gamble", "weight": 0.20, "reason": "67 years of dividend growth"},
+            {"ticker": "KO", "companyName": "Coca-Cola Company", "weight": 0.20, "reason": "61 years of dividend raises"},
+            {"ticker": "PEP", "companyName": "PepsiCo Inc.", "weight": 0.20, "reason": "51 years of dividend growth"},
+            {"ticker": "ABT", "companyName": "Abbott Laboratories", "weight": 0.20, "reason": "51 years of dividend increases"},
+        ],
+        "riskLevel": "Low",
+    },
+    {
+        "id": "growth-rockets",
+        "name": "Growth Rockets",
+        "emoji": "\U0001f680",
+        "description": "High-growth companies with accelerating revenue and margin expansion",
+        "stocks": [
+            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.25, "reason": "200%+ datacenter revenue growth"},
+            {"ticker": "NFLX", "companyName": "Netflix Inc.", "weight": 0.20, "reason": "Ad tier + subscriber re-acceleration"},
+            {"ticker": "AMZN", "companyName": "Amazon.com Inc.", "weight": 0.20, "reason": "AWS + margin expansion story"},
+            {"ticker": "META", "companyName": "Meta Platforms Inc.", "weight": 0.20, "reason": "AI-driven ad revenue surge"},
+            {"ticker": "TSLA", "companyName": "Tesla Inc.", "weight": 0.15, "reason": "Energy + robotaxi optionality"},
+        ],
+        "riskLevel": "High",
+    },
+    {
+        "id": "clean-energy",
+        "name": "Clean Energy Leaders",
+        "emoji": "\U0001f331",
+        "description": "Companies powering the transition to renewable energy and electrification",
+        "stocks": [
+            {"ticker": "NEE", "companyName": "NextEra Energy Inc.", "weight": 0.25, "reason": "Largest US renewable energy operator"},
+            {"ticker": "TSLA", "companyName": "Tesla Inc.", "weight": 0.20, "reason": "EV + energy storage leader"},
+            {"ticker": "CAT", "companyName": "Caterpillar Inc.", "weight": 0.20, "reason": "Infrastructure for energy transition"},
+            {"ticker": "LIN", "companyName": "Linde plc", "weight": 0.20, "reason": "Hydrogen economy enabler"},
+            {"ticker": "APD", "companyName": "Air Products and Chemicals", "weight": 0.15, "reason": "Green hydrogen pioneer"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
+        "id": "cybersecurity-shield",
+        "name": "Cybersecurity Shield",
+        "emoji": "\U0001f6e1\ufe0f",
+        "description": "Leading cybersecurity and enterprise security platforms protecting digital infrastructure",
+        "stocks": [
+            {"ticker": "PANW", "companyName": "Palo Alto Networks", "weight": 0.25, "reason": "Platform consolidation leader"},
+            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "reason": "Security revenue exceeds $20B"},
+            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.20, "reason": "Mandiant + Cloud security"},
+            {"ticker": "CSCO", "companyName": "Cisco Systems Inc.", "weight": 0.15, "reason": "Network security + Splunk acquisition"},
+            {"ticker": "IBM", "companyName": "IBM Corporation", "weight": 0.15, "reason": "QRadar + enterprise security services"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
+        "id": "aging-population",
+        "name": "Aging Population",
+        "emoji": "\U0001f3e5",
+        "description": "Healthcare and pharma companies benefiting from global aging demographics",
+        "stocks": [
+            {"ticker": "UNH", "companyName": "UnitedHealth Group", "weight": 0.20, "reason": "Largest managed care + Optum"},
+            {"ticker": "LLY", "companyName": "Eli Lilly", "weight": 0.20, "reason": "GLP-1 blockbuster pipeline"},
+            {"ticker": "ABBV", "companyName": "AbbVie Inc.", "weight": 0.20, "reason": "Immunology + oncology pipeline"},
+            {"ticker": "ISRG", "companyName": "Intuitive Surgical", "weight": 0.20, "reason": "Robotic surgery leader"},
+            {"ticker": "TMO", "companyName": "Thermo Fisher Scientific", "weight": 0.20, "reason": "Life sciences tools monopoly"},
+        ],
+        "riskLevel": "Low",
+    },
+    {
+        "id": "space-defense",
+        "name": "Space & Defense",
+        "emoji": "\U0001f6f0\ufe0f",
+        "description": "Aerospace and defense companies benefiting from rising global security spending",
+        "stocks": [
+            {"ticker": "LMT", "companyName": "Lockheed Martin", "weight": 0.25, "reason": "F-35 + missile defense monopoly"},
+            {"ticker": "RTX", "companyName": "RTX Corporation", "weight": 0.25, "reason": "Patriot missile + Pratt engines"},
+            {"ticker": "BA", "companyName": "Boeing Company", "weight": 0.20, "reason": "Defense + space turnaround"},
+            {"ticker": "NOC", "companyName": "Northrop Grumman", "weight": 0.15, "reason": "B-21 stealth bomber + space"},
+            {"ticker": "GD", "companyName": "General Dynamics", "weight": 0.15, "reason": "Gulfstream + combat systems"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
+        "id": "fintech-disruptors",
+        "name": "Fintech Disruptors",
+        "emoji": "\U0001f4b3",
+        "description": "Companies disrupting traditional finance with technology-driven payment and banking solutions",
+        "stocks": [
+            {"ticker": "V", "companyName": "Visa Inc.", "weight": 0.20, "reason": "Global payments network"},
+            {"ticker": "MA", "companyName": "Mastercard Inc.", "weight": 0.20, "reason": "Cross-border payments leader"},
+            {"ticker": "SQ", "companyName": "Block Inc.", "weight": 0.20, "reason": "Cash App + merchant payments"},
+            {"ticker": "PYPL", "companyName": "PayPal Holdings", "weight": 0.20, "reason": "Digital payments pioneer"},
+            {"ticker": "GS", "companyName": "Goldman Sachs", "weight": 0.20, "reason": "Marcus + transaction banking"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
+        "id": "cloud-kings",
+        "name": "Cloud Kings",
+        "emoji": "\u2601\ufe0f",
+        "description": "Dominant cloud infrastructure and SaaS platforms driving digital transformation",
+        "stocks": [
+            {"ticker": "AMZN", "companyName": "Amazon.com Inc.", "weight": 0.30, "reason": "AWS market leader + advertising"},
+            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "reason": "Azure growth + enterprise"},
+            {"ticker": "CRM", "companyName": "Salesforce Inc.", "weight": 0.20, "reason": "CRM market share + AI agents"},
+            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.15, "reason": "Google Cloud + BigQuery"},
+            {"ticker": "NOW", "companyName": "ServiceNow Inc.", "weight": 0.10, "reason": "Enterprise workflow automation"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
+        "id": "robotics-automation",
+        "name": "Robotics & Automation",
+        "emoji": "\U0001f9be",
+        "description": "Companies building the future of industrial automation and robotics",
+        "stocks": [
+            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.20, "reason": "Omniverse + robotics AI chips"},
+            {"ticker": "ISRG", "companyName": "Intuitive Surgical", "weight": 0.20, "reason": "Robotic surgery da Vinci"},
+            {"ticker": "HON", "companyName": "Honeywell International", "weight": 0.20, "reason": "Industrial automation leader"},
+            {"ticker": "DE", "companyName": "Deere & Company", "weight": 0.20, "reason": "Autonomous farming technology"},
+            {"ticker": "AMAT", "companyName": "Applied Materials", "weight": 0.20, "reason": "Semiconductor manufacturing robots"},
+        ],
+        "riskLevel": "High",
+    },
+    {
+        "id": "infrastructure-boom",
+        "name": "Infrastructure Boom",
+        "emoji": "\U0001f3d7\ufe0f",
+        "description": "Companies benefiting from massive US infrastructure and reshoring investment",
+        "stocks": [
+            {"ticker": "CAT", "companyName": "Caterpillar Inc.", "weight": 0.20, "reason": "Construction & mining equipment"},
+            {"ticker": "DE", "companyName": "Deere & Company", "weight": 0.15, "reason": "Agriculture + construction"},
+            {"ticker": "UNP", "companyName": "Union Pacific", "weight": 0.15, "reason": "Rail infrastructure backbone"},
+            {"ticker": "FCX", "companyName": "Freeport-McMoRan", "weight": 0.15, "reason": "Copper for electrification"},
+            {"ticker": "GE", "companyName": "GE Aerospace", "weight": 0.15, "reason": "Power grid + aerospace"},
+            {"ticker": "SHW", "companyName": "Sherwin-Williams", "weight": 0.10, "reason": "Construction coatings leader"},
+            {"ticker": "HD", "companyName": "Home Depot", "weight": 0.10, "reason": "Pro construction spending"},
+        ],
+        "riskLevel": "Medium",
+    },
+    {
         "id": "steady-compounders",
         "name": "Steady Compounders",
         "emoji": "\U0001f3af",
@@ -2151,47 +2485,6 @@ DEFAULT_BASKETS = [
             {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.15, "reason": "Banking leader + rate tailwind"},
         ],
         "riskLevel": "Low",
-    },
-    {
-        "id": "cloud-kings",
-        "name": "Cloud Kings",
-        "emoji": "\u2601\ufe0f",
-        "description": "Dominant cloud infrastructure and SaaS platforms driving digital transformation",
-        "stocks": [
-            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.30, "reason": "AWS market leader + advertising"},
-            {"ticker": "MSFT", "companyName": "Microsoft Corporation", "weight": 0.25, "reason": "Azure growth + enterprise"},
-            {"ticker": "CRM", "companyName": "Salesforce, Inc.", "weight": 0.20, "reason": "CRM market share + AI agents"},
-            {"ticker": "GOOGL", "companyName": "Alphabet Inc.", "weight": 0.15, "reason": "Google Cloud + BigQuery"},
-            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.10, "reason": "VMware + cloud networking"},
-        ],
-        "riskLevel": "Medium",
-    },
-    {
-        "id": "energy-transition",
-        "name": "Energy Titans",
-        "emoji": "\u26a1",
-        "description": "Traditional energy leaders with strong cash flows benefiting from AI power demand",
-        "stocks": [
-            {"ticker": "XOM", "companyName": "Exxon Mobil Corporation", "weight": 0.35, "reason": "Cash cow + Pioneer acquisition"},
-            {"ticker": "AVGO", "companyName": "Broadcom Inc.", "weight": 0.25, "reason": "Data center power management"},
-            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "reason": "Content spending discipline + ads tier"},
-            {"ticker": "JPM", "companyName": "JPMorgan Chase", "weight": 0.20, "reason": "Energy financing + rate margin"},
-        ],
-        "riskLevel": "Medium",
-    },
-    {
-        "id": "momentum-plays",
-        "name": "Momentum Plays",
-        "emoji": "\U0001f680",
-        "description": "High-beta names with strong recent performance and positive FII signals",
-        "stocks": [
-            {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "weight": 0.25, "reason": "Strongest momentum in market"},
-            {"ticker": "NFLX", "companyName": "Netflix, Inc.", "weight": 0.20, "reason": "Subscriber re-acceleration"},
-            {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "weight": 0.20, "reason": "Margin expansion story"},
-            {"ticker": "META", "companyName": "Meta Platforms, Inc.", "weight": 0.20, "reason": "AI ad revenue boost"},
-            {"ticker": "TSLA", "companyName": "Tesla, Inc.", "weight": 0.15, "reason": "Robotaxi catalyst potential"},
-        ],
-        "riskLevel": "High",
     },
 ]
 

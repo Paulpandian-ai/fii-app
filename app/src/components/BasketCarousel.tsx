@@ -24,9 +24,10 @@ const SIGNAL_COLORS: Record<Signal, string> = {
 
 interface BasketCarouselProps {
   onSelectBasket?: (basket: Basket) => void;
+  onBrowseAll?: () => void;
 }
 
-export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket }) => {
+export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket, onBrowseAll }) => {
   const [baskets, setBaskets] = useState<Basket[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -75,8 +76,16 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket }
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>AI Baskets</Text>
-        <Text style={styles.sectionSubtitle}>Curated by FII signals</Text>
+        <View>
+          <Text style={styles.sectionTitle}>AI Baskets</Text>
+          <Text style={styles.sectionSubtitle}>Curated by FII signals</Text>
+        </View>
+        {onBrowseAll && (
+          <TouchableOpacity onPress={onBrowseAll} style={styles.browseAllBtn}>
+            <Text style={styles.browseAllText}>Browse All</Text>
+            <Ionicons name="arrow-forward" size={14} color="#60A5FA" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -154,7 +163,9 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket }
 
 const styles = StyleSheet.create({
   section: { marginTop: 8 },
-  sectionHeader: { paddingHorizontal: 20, marginBottom: 12 },
+  sectionHeader: { paddingHorizontal: 20, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  browseAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  browseAllText: { color: '#60A5FA', fontSize: 13, fontWeight: '600' },
   sectionTitle: { color: '#FFF', fontSize: 20, fontWeight: '800' },
   sectionSubtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 2 },
   loadingContainer: { height: 160, justifyContent: 'center', alignItems: 'center' },
