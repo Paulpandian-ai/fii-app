@@ -359,6 +359,15 @@ export const FeedScreen: React.FC = () => {
         onClose={() => setSearchVisible(false)}
         onSelectTicker={handleSearchSelect}
       />
+
+      {/* Floating AI Chat Bubble */}
+      <TouchableOpacity
+        style={styles.chatFab}
+        onPress={() => navigation.navigate('AIChat', {})}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="sparkles" size={22} color="#FFFFFF" />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -483,4 +492,12 @@ const styles = StyleSheet.create({
   liveBannerContent: { flex: 1 },
   liveBannerTitle: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
   liveBannerText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
+  chatFab: {
+    position: 'absolute', bottom: 24, right: 20, zIndex: 100,
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#60A5FA',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#60A5FA', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
+  },
 });

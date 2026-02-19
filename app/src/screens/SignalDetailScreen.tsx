@@ -693,6 +693,35 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
+        {/* Discussion / Community */}
+        <View style={styles.section}>
+          <View style={styles.recentEventsHeader}>
+            <Text style={styles.sectionTitle}>Community</Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Discussion', { ticker })}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.viewAllLink}>View All</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={styles.discussionCard}
+            onPress={() => navigation.navigate('Discussion', { ticker })}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chatbubbles-outline" size={20} color="#60A5FA" />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
+                Join the {ticker} Discussion
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 2 }}>
+                Share your thesis, see community sentiment
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+          </TouchableOpacity>
+        </View>
+
         {/* Last updated */}
         {analysis?.analyzedAt && (
           <Text style={styles.lastUpdatedText}>
@@ -704,6 +733,15 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <DisclaimerBanner />
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Floating AI Chat Bubble */}
+      <TouchableOpacity
+        style={styles.chatFab}
+        onPress={() => navigation.navigate('AIChat', { ticker })}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="sparkles" size={22} color="#FFFFFF" />
+      </TouchableOpacity>
     </LinearGradient>
   );
 };
@@ -876,5 +914,18 @@ const styles = StyleSheet.create({
   lastUpdatedText: {
     color: 'rgba(255,255,255,0.3)', fontSize: 12, textAlign: 'center',
     marginTop: 8, marginBottom: 12,
+  },
+  discussionCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(96,165,250,0.06)', borderRadius: 12,
+    padding: 14, borderWidth: 1, borderColor: 'rgba(96,165,250,0.12)',
+  },
+  chatFab: {
+    position: 'absolute', bottom: 24, right: 20, zIndex: 100,
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#60A5FA',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#60A5FA', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
 });

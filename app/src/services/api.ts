@@ -341,6 +341,66 @@ export const getMarketMovers = async () => {
   return data;
 };
 
+// ─── Track Record ───
+
+export const getTrackRecord = async () => {
+  const { data } = await api.get('/track-record');
+  return data;
+};
+
+export const getTrackRecordTicker = async (ticker: string) => {
+  const { data } = await api.get(`/track-record/${ticker}`);
+  return data;
+};
+
+// ─── Discussion ───
+
+export const getDiscussion = async (ticker: string, limit: number = 20) => {
+  const { data } = await api.get(`/discuss/${ticker}`, { params: { limit: String(limit) } });
+  return data;
+};
+
+export const createPost = async (ticker: string, content: string, sentiment: string, displayName?: string) => {
+  const { data } = await api.post(`/discuss/${ticker}`, { content, sentiment, displayName });
+  return data;
+};
+
+export const reactToPost = async (ticker: string, postId: string, reaction: string) => {
+  const { data } = await api.post(`/discuss/${ticker}/${postId}/react`, { reaction });
+  return data;
+};
+
+// ─── Profile ───
+
+export const getMyProfile = async () => {
+  const { data } = await api.get('/profile/me');
+  return data;
+};
+
+export const updateMyProfile = async (updates: Record<string, string>) => {
+  const { data } = await api.put('/profile/me', updates);
+  return data;
+};
+
+export const getPublicProfile = async (userId: string) => {
+  const { data } = await api.get(`/profile/${userId}`);
+  return data;
+};
+
+// ─── Leaderboard ───
+
+export const getLeaderboard = async () => {
+  const { data } = await api.get('/leaderboard');
+  return data;
+};
+
+// ─── AI Chat ───
+
+export const sendChatMessage = async (message: string, context?: { currentTicker?: string; sessionId?: string }) => {
+  const { data } = await api.post('/chat', { message, context });
+  return data;
+};
+
 // ─── Events ───
 
 export const getEventsForTicker = async (ticker: string, params: Record<string, string> = {}) => {

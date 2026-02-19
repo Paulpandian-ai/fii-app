@@ -658,6 +658,83 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Track record endpoints
+        GetTrackRecord:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /track-record
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetTrackRecordTicker:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /track-record/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        # Discussion endpoints
+        GetDiscuss:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /discuss/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostDiscuss:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /discuss/{ticker}
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        # Profile endpoints
+        GetProfileMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/me
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PutProfileMe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/me
+            Method: PUT
+            Auth:
+              Authorizer: NONE
+        GetProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /profile/{userId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        # Leaderboard endpoint
+        GetLeaderboard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /leaderboard
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        # AI Chat endpoint
+        PostChat:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /chat
+            Method: POST
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi

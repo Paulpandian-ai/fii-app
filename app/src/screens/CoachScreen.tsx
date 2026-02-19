@@ -95,6 +95,9 @@ export const CoachScreen: React.FC = () => {
         <Text style={styles.topBarTitle}>Coach</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {isLoading && <ActivityIndicator color="#60A5FA" size="small" />}
+          <TouchableOpacity onPress={() => navigation.getParent<any>()?.navigate('Leaderboard')}>
+            <Ionicons name="podium-outline" size={22} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.getParent<any>()?.navigate('Settings')}>
             <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
           </TouchableOpacity>

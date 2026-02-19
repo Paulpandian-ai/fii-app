@@ -961,6 +961,97 @@ export interface MarketMoversData {
   totalStocks: number;
 }
 
+// ─── Track Record Types ───
+
+export interface SignalPerformance {
+  count: number;
+  avgReturn3M: number;
+  hitRate: number;
+}
+
+export interface ScoreBand {
+  count: number;
+  avgReturn3M: number;
+}
+
+export interface TickerPerformance {
+  ticker: string;
+  companyName: string;
+  totalSignals: number;
+  buySignals: number;
+  avgReturn3M: number;
+  hitRate: number;
+}
+
+export interface TrackRecordData {
+  overallHitRate: number;
+  totalSignals: number;
+  signalPerformance: Record<string, SignalPerformance>;
+  scoreBands: Record<string, ScoreBand>;
+  tickerPerformance: TickerPerformance[];
+  methodology: {
+    version: string;
+    factorModel: string;
+    dimensions: string[];
+    weights: Record<string, number>;
+    dataSources: string[];
+    scoringRange: string;
+    signalThresholds: Record<string, string>;
+    backtestPeriod: string;
+    disclaimer: string;
+  };
+  disclaimer?: string;
+  updatedAt: string;
+}
+
+// ─── Discussion Types ───
+
+export interface DiscussionPost {
+  postId: string;
+  ticker: string;
+  userId: string;
+  displayName: string;
+  content: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  bulls: number;
+  bears: number;
+  timestamp: string;
+}
+
+// ─── Profile Types ───
+
+export interface UserProfile {
+  userId: string;
+  displayName: string;
+  joinDate: string;
+  riskProfile: string;
+  badgeCount: number;
+  postCount: number;
+  disciplineScore: number;
+  streakDays: number;
+  level: string;
+}
+
+// ─── Leaderboard Types ───
+
+export interface LeaderboardEntry {
+  rank: number;
+  displayName: string;
+  disciplineScore: number;
+  level: string;
+  streakDays: number;
+  badgeCount: number;
+}
+
+// ─── Chat Types ───
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
 // ─── Navigation Types ───
 
 export type RootTabParamList = {
@@ -976,6 +1067,11 @@ export type RootStackParamList = {
   FinancialHealth: { ticker: string };
   AlternativeData: { ticker: string };
   EventTimeline: { ticker: string };
+  Discussion: { ticker: string };
+  TrackRecord: undefined;
+  ProfileScreen: undefined;
+  Leaderboard: undefined;
+  AIChat: { ticker?: string };
   Screener: undefined;
   Profile: undefined;
   WealthSimulator: undefined;

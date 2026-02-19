@@ -26,6 +26,11 @@ import { EventTimelineScreen } from './src/screens/EventTimelineScreen';
 import { EarningsCalendarScreen } from './src/screens/EarningsCalendarScreen';
 import { MarketDashboardScreen } from './src/screens/MarketDashboardScreen';
 import { BasketListScreen } from './src/screens/BasketListScreen';
+import { TrackRecordScreen } from './src/screens/TrackRecordScreen';
+import { DiscussionScreen } from './src/screens/DiscussionScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
+import { LeaderboardScreen } from './src/screens/LeaderboardScreen';
+import { AIChatScreen } from './src/screens/AIChatScreen';
 import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
@@ -84,6 +89,21 @@ const WrappedMarketDashboard = () => (
 );
 const WrappedBasketList = () => (
   <ErrorBoundary screenName="BasketListScreen"><BasketListScreen /></ErrorBoundary>
+);
+const WrappedTrackRecord = () => (
+  <ErrorBoundary screenName="TrackRecordScreen"><TrackRecordScreen /></ErrorBoundary>
+);
+const WrappedDiscussion = (props: any) => (
+  <ErrorBoundary screenName="DiscussionScreen"><DiscussionScreen {...props} /></ErrorBoundary>
+);
+const WrappedProfile = () => (
+  <ErrorBoundary screenName="ProfileScreen"><ProfileScreen /></ErrorBoundary>
+);
+const WrappedLeaderboard = () => (
+  <ErrorBoundary screenName="LeaderboardScreen"><LeaderboardScreen /></ErrorBoundary>
+);
+const WrappedAIChat = (props: any) => (
+  <ErrorBoundary screenName="AIChatScreen"><AIChatScreen {...props} /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -268,6 +288,31 @@ export default function App() {
         <Stack.Screen
           name="BasketList"
           component={WrappedBasketList}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="TrackRecord"
+          component={WrappedTrackRecord}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Discussion"
+          component={WrappedDiscussion}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ProfileScreen"
+          component={WrappedProfile}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Leaderboard"
+          component={WrappedLeaderboard}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="AIChat"
+          component={WrappedAIChat}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

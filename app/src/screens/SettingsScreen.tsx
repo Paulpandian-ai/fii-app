@@ -281,6 +281,29 @@ export const SettingsScreen: React.FC = () => {
           </Text>
         </View>
 
+        {/* Community */}
+        <Text style={styles.sectionHeader}>Community</Text>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('TrackRecord')} activeOpacity={0.7}>
+          <Ionicons name="trophy-outline" size={20} color="#34D399" />
+          <Text style={styles.actionText}>Our Track Record</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('ProfileScreen')} activeOpacity={0.7}>
+          <Ionicons name="person-outline" size={20} color="#60A5FA" />
+          <Text style={styles.actionText}>My Profile</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('Leaderboard')} activeOpacity={0.7}>
+          <Ionicons name="podium-outline" size={20} color="#FBBF24" />
+          <Text style={styles.actionText}>Leaderboard</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('AIChat', {})} activeOpacity={0.7}>
+          <Ionicons name="sparkles-outline" size={20} color="#A78BFA" />
+          <Text style={styles.actionText}>AI Chat Assistant</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
+
         {/* Data */}
         <Text style={styles.sectionHeader}>Data</Text>
         <TouchableOpacity style={styles.actionRow} onPress={handleExportData} activeOpacity={0.7}>
