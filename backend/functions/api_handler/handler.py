@@ -704,7 +704,7 @@ def _handle_factors(method, ticker):
         except Exception:
             pass
 
-    # 2) Gather input data from existing caches/APIs
+    # 2) Gather input data — try DynamoDB cache first, then fetch live
     signal_data = None
     technicals_data = None
     fundamentals_data = None
@@ -721,7 +721,7 @@ def _handle_factors(method, ticker):
     except Exception:
         pass
 
-    # Get technicals from cache
+    # Get technicals — try cache first, then compute live
     try:
         tech_cached = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
         if tech_cached:
@@ -729,13 +729,73 @@ def _handle_factors(method, ticker):
     except Exception:
         pass
 
-    # Get fundamentals from cache
+    if not technicals_data or not technicals_data.get("rsi"):
+        # Fetch live candles and compute technical indicators
+        try:
+            candles = finnhub_client.get_candles(ticker, resolution="D")
+            if candles and len(candles) >= 50:
+                technicals_data = technical_engine.compute_indicators(candles)
+                # Cache for next time
+                try:
+                    cache_item = {
+                        "PK": f"TECHNICALS#{ticker}",
+                        "SK": "LATEST",
+                        "indicators": technicals_data,
+                        "cachedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                    db.put_item(cache_item)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[Factors] Failed to fetch live technicals for {ticker}: {e}")
+
+    # Get fundamentals — try cache first, then compute live
     try:
         fund_cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
         if fund_cached:
             fundamentals_data = fund_cached.get("analysis", {})
     except Exception:
         pass
+
+    if not fundamentals_data or not fundamentals_data.get("zScore"):
+        # Fetch live fundamental analysis
+        try:
+            market_cap = None
+            beta = 1.0
+            current_price = None
+            shares_outstanding = None
+            try:
+                quote = finnhub_client.get_quote(ticker)
+                current_price = quote.get("price")
+                profile = finnhub_client.get_company_profile(ticker)
+                market_cap = profile.get("marketCap")
+                fin = finnhub_client.get_basic_financials(ticker)
+                beta = fin.get("beta") or 1.0
+                if market_cap and current_price and current_price > 0:
+                    shares_outstanding = market_cap / current_price
+            except Exception:
+                pass
+            fundamentals_data = fundamentals_engine.analyze(
+                ticker,
+                market_cap=market_cap,
+                beta=beta,
+                current_price=current_price,
+                shares_outstanding=shares_outstanding,
+            )
+            # Cache for next time
+            if fundamentals_data and fundamentals_data.get("grade"):
+                try:
+                    cache_item = {
+                        "PK": f"HEALTH#{ticker}",
+                        "SK": "LATEST",
+                        "analysis": fundamentals_data,
+                        "cachedAt": datetime.now(timezone.utc).isoformat(),
+                    }
+                    db.put_item(cache_item)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[Factors] Failed to fetch live fundamentals for {ticker}: {e}")
 
     # 3) Compute enhanced factors
     try:

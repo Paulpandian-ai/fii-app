@@ -293,9 +293,16 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   const isPos = f.normalizedScore >= 0;
                   return (
                     <View key={`all-${f.factorId}-${i}`} style={styles.factorBarRow}>
-                      <Text style={styles.factorBarName} numberOfLines={1}>
-                        {f.factorName}
-                      </Text>
+                      <View style={styles.factorBarNameCol}>
+                        <Text style={styles.factorBarName} numberOfLines={1}>
+                          {f.factorName}
+                        </Text>
+                        {f.dataSource && (
+                          <Text style={styles.factorBarSource} numberOfLines={1}>
+                            {f.dataSource}
+                          </Text>
+                        )}
+                      </View>
                       <View style={styles.factorBarTrack}>
                         <View style={[
                           styles.factorBarFill,
@@ -629,7 +636,9 @@ const styles = StyleSheet.create({
   factorBarRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8,
   },
-  factorBarName: { color: 'rgba(255,255,255,0.7)', fontSize: 11, width: 100 },
+  factorBarNameCol: { width: 100 },
+  factorBarName: { color: 'rgba(255,255,255,0.7)', fontSize: 11 },
+  factorBarSource: { color: 'rgba(96,165,250,0.45)', fontSize: 9, marginTop: 1 },
   factorBarTrack: {
     flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',

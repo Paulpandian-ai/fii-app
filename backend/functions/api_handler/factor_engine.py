@@ -140,19 +140,20 @@ def _score_technical_factors(technicals):
         "explanation": f"SMA alignment is {explanation}" + (f", ADX={round(adx, 1)} confirms trend" if adx else ""),
     })
 
-    # TE2: Momentum — RSI + Stochastic
+    # TE2: Momentum — RSI + Stochastic (continuous linear scale)
     rsi = technicals.get("rsi")
     stochK = (technicals.get("stochastic") or {}).get("k")
     mom_score = 0.0
     if rsi is not None:
+        # Continuous scale: RSI 30→+1.5, RSI 50→0, RSI 70→-1.5
+        # Oversold = bullish opportunity, overbought = caution
+        clamped_rsi = max(30, min(70, rsi))
+        mom_score = 1.5 - ((clamped_rsi - 30) / 40) * 3.0
+        # Extremes beyond 30/70 cap at ±1.5
         if rsi < 30:
-            mom_score = 1.5  # oversold = bullish
-        elif rsi < 40:
-            mom_score = 0.5
+            mom_score = 1.5
         elif rsi > 70:
-            mom_score = -1.5  # overbought = bearish
-        elif rsi > 60:
-            mom_score = -0.5
+            mom_score = -1.5
     if stochK is not None:
         if stochK < 20:
             mom_score += 0.3
@@ -167,22 +168,32 @@ def _score_technical_factors(technicals):
         "explanation": f"RSI={round(rsi, 1) if rsi else 'N/A'}" + (f", Stoch K={round(stochK, 1)}" if stochK else ""),
     })
 
-    # TE3: Volume Confirmation — OBV trend
+    # TE3: Volume Confirmation — OBV direction vs price trend
     obv = technicals.get("obv")
     vol_score = 0.0
-    vol_signal = (technicals.get("signals") or {}).get("volume", "")
-    if vol_signal:
-        if "rising" in vol_signal.lower() or "accumulation" in vol_signal.lower():
-            vol_score = 1.0
-        elif "falling" in vol_signal.lower() or "distribution" in vol_signal.lower():
-            vol_score = -1.0
+    if obv is not None and obv != 0:
+        is_bullish = "bullish" in trend_signal.lower() if trend_signal else False
+        is_bearish = "bearish" in trend_signal.lower() if trend_signal else False
+        if obv > 0 and is_bullish:
+            vol_score = 1.2   # volume confirms bullish trend
+        elif obv < 0 and is_bearish:
+            vol_score = -1.2  # volume confirms bearish trend
+        elif obv > 0 and is_bearish:
+            vol_score = 0.5   # divergence: accumulation despite bearish price
+        elif obv < 0 and is_bullish:
+            vol_score = -0.5  # divergence: distribution despite bullish price
+        elif obv > 0:
+            vol_score = 0.4   # net accumulation, no clear trend
+        else:
+            vol_score = -0.4  # net distribution, no clear trend
     vol_score = _clamp(vol_score)
+    vol_label = "confirms" if (vol_score > 0 and "bullish" in (trend_signal or "")) or (vol_score < 0 and "bearish" in (trend_signal or "")) else "diverges from" if vol_score != 0 else "neutral to"
     results.append({
         "factorId": "TE3", "rawValue": vol_score,
         "normalizedScore": round(vol_score, 2),
         "direction": "positive" if vol_score > 0.3 else "negative" if vol_score < -0.3 else "neutral",
         "dataSource": "OBV",
-        "explanation": f"Volume {'confirms' if vol_score > 0 else 'diverges from' if vol_score < 0 else 'neutral to'} price trend",
+        "explanation": f"OBV {'positive' if (obv or 0) > 0 else 'negative'}, volume {vol_label} price trend",
     })
 
     # TE4: Volatility Regime — Bollinger + ATR
@@ -195,10 +206,23 @@ def _score_technical_factors(technicals):
     vol_text = (technicals.get("signals") or {}).get("volatility", "")
     if bb_upper and bb_lower and bb_middle and bb_middle > 0:
         bb_width = (bb_upper - bb_lower) / bb_middle
-        if bb_width < 0.05:
-            vol_regime_score = 0.5  # squeeze = potential breakout
-        elif bb_width > 0.15:
-            vol_regime_score = -0.5  # wide = high vol
+        if bb_width < 0.04:
+            vol_regime_score = 0.8   # tight squeeze = potential breakout
+        elif bb_width < 0.08:
+            vol_regime_score = 0.4   # low vol = favorable
+        elif bb_width < 0.15:
+            vol_regime_score = 0.0   # moderate vol = neutral
+        elif bb_width < 0.25:
+            vol_regime_score = -0.5  # elevated vol = caution
+        else:
+            vol_regime_score = -1.0  # extreme vol = risk
+    # ATR as percentage of price adds confirmation
+    if atr is not None and bb_middle and bb_middle > 0:
+        atr_pct = atr / bb_middle
+        if atr_pct < 0.01:
+            vol_regime_score += 0.3   # very low daily range
+        elif atr_pct > 0.04:
+            vol_regime_score -= 0.3   # high daily range
     vol_regime_score = _clamp(vol_regime_score)
     results.append({
         "factorId": "TE4", "rawValue": vol_regime_score,
