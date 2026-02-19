@@ -871,19 +871,40 @@ def get_events_for_ticker(ticker, event_type=None, impact=None, limit=50):
 
 
 def get_events_feed(limit=50):
-    """Get all recent events across all stocks (for main feed)."""
+    """Get all recent events across all stocks (for main feed).
+
+    Queries each tracked ticker's events and merges results, sorted by
+    timestamp descending.  This avoids requiring a GSI on the table.
+    """
     now = _utc_now().isoformat()
     thirty_days_ago = (_utc_now() - timedelta(days=30)).isoformat()
 
-    result = db.query_between(
-        "EVENTS#ALL",
-        thirty_days_ago,
-        f"{now}~",
-        index_name="GSI1",
-    )
-    events = result or []
-    events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    return events[:limit]
+    tickers = _get_tracked_tickers()
+    all_events = []
+    for ticker in tickers:
+        try:
+            items = db.query_between(
+                f"EVENT#{ticker}",
+                thirty_days_ago,
+                f"{now}~",
+            )
+            if items:
+                all_events.extend(items)
+        except Exception:
+            pass
+
+    # Also include macro events
+    try:
+        for day_offset in range(7):
+            day = (_utc_now() - timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            macro = db.query(f"EVENT#MACRO#{day}")
+            if macro:
+                all_events.extend(macro)
+    except Exception:
+        pass
+
+    all_events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return all_events[:limit]
 
 
 def get_alerts(limit=20):
@@ -992,9 +1013,9 @@ def _get_tracked_tickers():
     ]
     tickers.update(defaults)
 
-    # Try to get portfolio tickers from DynamoDB
+    # Try to get portfolio tickers from DynamoDB (query by PK directly)
     try:
-        result = db.query("PORTFOLIO#ALL", index_name="GSI1")
+        result = db.query("PORTFOLIO#DEFAULT")
         if result:
             for item in result:
                 holdings = item.get("holdings", [])
