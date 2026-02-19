@@ -75,6 +75,13 @@ export const getFundamentals = async (ticker: string) => {
   return data;
 };
 
+// ─── Factors ───
+
+export const getFactors = async (ticker: string) => {
+  const { data } = await api.get(`/factors/${ticker}`);
+  return data;
+};
+
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {

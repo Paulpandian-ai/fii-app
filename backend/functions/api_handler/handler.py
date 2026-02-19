@@ -52,6 +52,7 @@ import s3
 import finnhub_client
 import technical_engine
 import fundamentals_engine
+import factor_engine
 
 
 def lambda_handler(event, context):
@@ -100,6 +101,9 @@ def lambda_handler(event, context):
         elif path.startswith("/fundamentals/"):
             ticker = path.split("/fundamentals/")[-1].strip("/").upper()
             return _handle_fundamentals(http_method, ticker)
+        elif path.startswith("/factors/"):
+            ticker = path.split("/factors/")[-1].strip("/").upper()
+            return _handle_factors(http_method, ticker)
         elif path.startswith("/search"):
             return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
@@ -242,6 +246,20 @@ def _handle_signal(method, ticker, user_id):
                 m = analysis.get("mScore")
                 if m:
                     result["mScore"] = m.get("value")
+        except Exception:
+            pass
+
+    # Enrich with enhanced factor dimensions from cache
+    if "dimensionScores" not in result:
+        try:
+            factor_cached = db.get_item(f"FACTORS#{ticker}", "LATEST")
+            if factor_cached:
+                factors = factor_cached.get("factors", {})
+                result["dimensionScores"] = factors.get("dimensionScores", {})
+                result["topPositive"] = factors.get("topPositive", [])
+                result["topNegative"] = factors.get("topNegative", [])
+                result["factorCount"] = factors.get("factorCount", 0)
+                result["scoringMethodology"] = factors.get("scoringMethodology", {})
         except Exception:
             pass
 
@@ -656,6 +674,104 @@ def _handle_fundamentals(method, ticker):
             "error": f"Fundamental analysis unavailable: {str(e)}",
             "grade": "N/A",
             "gradeScore": 0,
+        })
+
+
+# ─── Factors Endpoint ───
+
+
+def _handle_factors(method, ticker):
+    """GET /factors/<ticker> — Enhanced factor analysis with 25 sub-factors."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    from datetime import datetime, timezone
+
+    # 1) Check DynamoDB cache (1-hour TTL)
+    cached = db.get_item(f"FACTORS#{ticker}", "LATEST")
+    if cached:
+        cached_at = cached.get("cachedAt", "")
+        try:
+            ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds < 3600:
+                data = cached.get("factors", {})
+                data["source"] = "cache"
+                return _response(200, data)
+        except Exception:
+            pass
+
+    # 2) Gather input data from existing caches/APIs
+    signal_data = None
+    technicals_data = None
+    fundamentals_data = None
+
+    # Get existing signal data (has factorDetails from Claude AI)
+    try:
+        full_signal = s3.read_json(f"signals/{ticker}.json")
+        if full_signal:
+            signal_data = full_signal
+        else:
+            summary = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if summary:
+                signal_data = summary
+    except Exception:
+        pass
+
+    # Get technicals from cache
+    try:
+        tech_cached = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
+        if tech_cached:
+            technicals_data = tech_cached.get("indicators", {})
+    except Exception:
+        pass
+
+    # Get fundamentals from cache
+    try:
+        fund_cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
+        if fund_cached:
+            fundamentals_data = fund_cached.get("analysis", {})
+    except Exception:
+        pass
+
+    # 3) Compute enhanced factors
+    try:
+        result = factor_engine.compute_factors(
+            ticker,
+            signal_data=signal_data,
+            technicals=technicals_data,
+            fundamentals=fundamentals_data,
+        )
+
+        # 4) Cache to DynamoDB
+        try:
+            cache_item = {
+                "PK": f"FACTORS#{ticker}",
+                "SK": "LATEST",
+                "factors": result,
+                "cachedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            db.put_item(cache_item)
+        except Exception:
+            pass
+
+        result["source"] = "live"
+        return _response(200, result)
+
+    except Exception as e:
+        if cached:
+            data = cached.get("factors", {})
+            data["source"] = "stale_cache"
+            return _response(200, data)
+
+        return _response(200, {
+            "ticker": ticker,
+            "error": f"Factor analysis unavailable: {str(e)}",
+            "dimensionScores": {},
+            "factorContributions": [],
         })
 
 

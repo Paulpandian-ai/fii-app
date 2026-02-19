@@ -323,6 +323,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetFactors:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /factors/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetSearch:
           Type: HttpApi
           Properties:

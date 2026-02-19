@@ -587,6 +587,50 @@ export interface FundamentalAnalysis {
   error?: string;
 }
 
+// ─── Factor Engine Types ───
+
+export interface FactorContribution {
+  factorId: string;
+  factorName: string;
+  dimension: string;
+  rawValue: number;
+  normalizedScore: number;  // -2 to +2
+  weight: number;
+  contribution: number;     // weight * score
+  direction: 'positive' | 'negative' | 'neutral';
+  dataSource: string;
+  explanation: string;
+}
+
+export interface DimensionScores {
+  supplyChain: number;      // 0-10
+  macroGeo: number;
+  technical: number;
+  fundamental: number;
+  sentiment: number;
+}
+
+export interface ScoringMethodology {
+  version: string;
+  factorCount: number;
+  dimensions: number;
+  lastUpdated: string;
+}
+
+export interface FactorAnalysis {
+  ticker: string;
+  dimensionScores: DimensionScores;
+  compositeScore: number;   // 1-10
+  factorContributions: FactorContribution[];
+  topPositive: FactorContribution[];
+  topNegative: FactorContribution[];
+  factorCount: number;
+  scoringMethodology: ScoringMethodology;
+  analyzedAt: string;
+  source?: string;
+  error?: string;
+}
+
 // ─── Auth Types ───
 
 export interface User {

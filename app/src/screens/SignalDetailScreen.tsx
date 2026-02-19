@@ -10,17 +10,21 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ScoreRing } from '../components/ScoreRing';
+import { RadarScore } from '../components/RadarScore';
 import { SignalBadge } from '../components/SignalBadge';
 import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors } from '../services/api';
 import type {
   FullAnalysis,
   PriceData,
   TechnicalAnalysis,
   FundamentalAnalysis,
+  FactorAnalysis,
+  FactorContribution,
+  DimensionScores,
   FactorCategory,
   Confidence,
   Signal,
@@ -77,6 +81,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [priceData, setPriceData] = useState<PriceData | null>(null);
   const [technicals, setTechnicals] = useState<TechnicalAnalysis | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalAnalysis | null>(null);
+  const [factors, setFactors] = useState<FactorAnalysis | null>(null);
+  const [showAllFactors, setShowAllFactors] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
@@ -87,16 +93,18 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const loadData = async () => {
     setLoading(true);
     try {
-      const [signalData, price, techData, fundData] = await Promise.all([
+      const [signalData, price, techData, fundData, factorData] = await Promise.all([
         getSignalDetail(ticker).catch(() => null),
         getPrice(ticker).catch(() => null),
         getTechnicals(ticker).catch(() => null),
         getFundamentals(ticker).catch(() => null),
+        getFactors(ticker).catch(() => null),
       ]);
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
       if (techData && techData.indicatorCount > 0) setTechnicals(techData);
       if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData);
+      if (factorData && factorData.dimensionScores) setFactors(factorData);
     } finally {
       setLoading(false);
     }
@@ -179,9 +187,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Section 1: Header */}
+        {/* Section 1: Header with Radar Chart */}
         <View style={styles.header}>
-          <ScoreRing score={safeNum(analysis.compositeScore)} size={100} />
+          {factors?.dimensionScores ? (
+            <RadarScore
+              scores={factors.dimensionScores}
+              size={200}
+              signal={analysis.signal as 'BUY' | 'HOLD' | 'SELL'}
+            />
+          ) : (
+            <ScoreRing score={safeNum(analysis.compositeScore)} size={100} />
+          )}
           <Text style={styles.ticker}>{analysis.ticker}</Text>
           <Text style={styles.companyName}>{analysis.companyName}</Text>
           {hasPriceToShow && (
@@ -202,16 +218,106 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         </View>
 
-        {/* Section 2: The Analysis */}
+        {/* Section 2: AI Analysis */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>The Analysis</Text>
-          <View style={styles.reasoningCard}>
-            <View style={styles.reasoningAccent} />
+          <View style={styles.aiCard}>
+            <View style={styles.aiHeader}>
+              <Ionicons name="sparkles" size={16} color="#60A5FA" />
+              <Text style={styles.aiHeaderText}>AI Analysis</Text>
+            </View>
             <Text style={styles.reasoningText}>
               {analysis.reasoning || analysis.insight}
             </Text>
+            <Text style={styles.aiTimestamp}>
+              Based on {(analysis as any).dataSources?.length || 4} data sources
+            </Text>
           </View>
         </View>
+
+        {/* Section 2.5: What Drove This Score (Alpha Signals) */}
+        {factors && (factors.topPositive?.length > 0 || factors.topNegative?.length > 0) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>What Drove This Score</Text>
+            {/* Top Positive */}
+            {(factors.topPositive || []).map((f: FactorContribution, i: number) => (
+              <View key={`pos-${f.factorId}-${i}`} style={styles.alphaCard}>
+                <View style={[styles.alphaAccent, { backgroundColor: '#10B981' }]} />
+                <View style={styles.alphaContent}>
+                  <View style={styles.alphaRow}>
+                    <Text style={styles.alphaName}>{f.factorName}</Text>
+                    <Text style={[styles.alphaScore, { color: '#10B981' }]}>
+                      +{safeNum(f.normalizedScore).toFixed(1)}
+                    </Text>
+                  </View>
+                  <Text style={styles.alphaExplain}>{f.explanation}</Text>
+                  <Text style={styles.alphaSource}>{f.dataSource}</Text>
+                </View>
+              </View>
+            ))}
+            {/* Top Negative */}
+            {(factors.topNegative || []).map((f: FactorContribution, i: number) => (
+              <View key={`neg-${f.factorId}-${i}`} style={styles.alphaCard}>
+                <View style={[styles.alphaAccent, { backgroundColor: '#EF4444' }]} />
+                <View style={styles.alphaContent}>
+                  <View style={styles.alphaRow}>
+                    <Text style={styles.alphaName}>{f.factorName}</Text>
+                    <Text style={[styles.alphaScore, { color: '#EF4444' }]}>
+                      {safeNum(f.normalizedScore).toFixed(1)}
+                    </Text>
+                  </View>
+                  <Text style={styles.alphaExplain}>{f.explanation}</Text>
+                  <Text style={styles.alphaSource}>{f.dataSource}</Text>
+                </View>
+              </View>
+            ))}
+
+            {/* Expandable all factors */}
+            <TouchableOpacity
+              style={styles.seeAllBtn}
+              onPress={() => setShowAllFactors(!showAllFactors)}
+            >
+              <Text style={styles.seeAllText}>
+                {showAllFactors ? 'Hide All Factors' : `See All ${factors.factorCount || 25} Factors`}
+              </Text>
+              <Ionicons
+                name={showAllFactors ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color="#60A5FA"
+              />
+            </TouchableOpacity>
+
+            {showAllFactors && (
+              <View style={styles.allFactorsList}>
+                {(factors.factorContributions || []).map((f: FactorContribution, i: number) => {
+                  const barWidth = Math.abs(safeNum(f.normalizedScore)) / 2 * 100;
+                  const isPos = f.normalizedScore >= 0;
+                  return (
+                    <View key={`all-${f.factorId}-${i}`} style={styles.factorBarRow}>
+                      <Text style={styles.factorBarName} numberOfLines={1}>
+                        {f.factorName}
+                      </Text>
+                      <View style={styles.factorBarTrack}>
+                        <View style={[
+                          styles.factorBarFill,
+                          {
+                            width: `${Math.min(100, barWidth)}%`,
+                            backgroundColor: isPos ? '#10B981' : '#EF4444',
+                            alignSelf: isPos ? 'flex-start' : 'flex-end',
+                          },
+                        ]} />
+                      </View>
+                      <Text style={[styles.factorBarValue, {
+                        color: isPos ? '#10B981' : f.normalizedScore < 0 ? '#EF4444' : 'rgba(255,255,255,0.5)',
+                      }]}>
+                        {isPos ? '+' : ''}{safeNum(f.normalizedScore).toFixed(1)}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Section 3: Factor Breakdown */}
         {categories.length > 0 && (
@@ -491,4 +597,43 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)',
   },
   disclaimerText: { color: 'rgba(255,255,255,0.3)', fontSize: 11, flex: 1 },
+  // AI Card
+  aiCard: {
+    backgroundColor: 'rgba(96,165,250,0.06)', borderRadius: 12,
+    padding: 16, borderWidth: 1, borderColor: 'rgba(96,165,250,0.15)',
+  },
+  aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  aiHeaderText: { color: '#60A5FA', fontSize: 13, fontWeight: '700' },
+  aiTimestamp: { color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 8 },
+  // Alpha Signals
+  alphaCard: {
+    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 10, overflow: 'hidden', marginBottom: 8,
+  },
+  alphaAccent: { width: 4 },
+  alphaContent: { flex: 1, padding: 12 },
+  alphaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  alphaName: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', flex: 1 },
+  alphaScore: { fontSize: 15, fontWeight: '800', marginLeft: 8 },
+  alphaExplain: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 4, lineHeight: 17 },
+  alphaSource: { color: 'rgba(96,165,250,0.6)', fontSize: 10, fontWeight: '600', marginTop: 4 },
+  seeAllBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 10,
+  },
+  seeAllText: { color: '#60A5FA', fontSize: 13, fontWeight: '700' },
+  // All factors bar list
+  allFactorsList: {
+    backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 12, marginTop: 4,
+  },
+  factorBarRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8,
+  },
+  factorBarName: { color: 'rgba(255,255,255,0.7)', fontSize: 11, width: 100 },
+  factorBarTrack: {
+    flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  factorBarFill: { height: 6, borderRadius: 3 },
+  factorBarValue: { fontSize: 11, fontWeight: '800', width: 36, textAlign: 'right' },
 });
