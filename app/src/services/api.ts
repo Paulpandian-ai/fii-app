@@ -197,19 +197,6 @@ export const getDiscoveryCards = async () => {
   return data;
 };
 
-// ─── Screener ───
-
-export const getScreener = async (params: Record<string, any> = {}) => {
-  const { data } = await api.get('/screener', { params });
-  _cacheSignals(data.results || data.items || []);
-  return data;
-};
-
-export const getScreenerTemplates = async () => {
-  const { data } = await api.get('/screener/templates');
-  return data;
-};
-
 // ─── Watchlist ───
 
 export const getWatchlists = async () => {
