@@ -185,12 +185,12 @@ def monitor_news(tickers):
 
                 # Check if already seen
                 seen_key = f"NEWS_SEEN#{today}"
-                existing = db.get_item(TABLE_NAME, {"PK": seen_key, "SK": h_hash})
+                existing = db.get_item(seen_key, h_hash)
                 if existing:
                     continue
 
                 # Mark as seen
-                db.put_item(TABLE_NAME, {
+                db.put_item({
                     "PK": seen_key,
                     "SK": h_hash,
                     "headline": headline[:200],
@@ -223,7 +223,7 @@ def monitor_news(tickers):
                     "timestamp": timestamp,
                     "ttl": int((_utc_now() + timedelta(days=30)).timestamp()),
                 }
-                db.put_item(TABLE_NAME, event)
+                db.put_item(event)
                 new_events.append(event)
 
         except Exception as e:
@@ -325,9 +325,9 @@ def monitor_sec_filings(tickers):
                     # Dedup check
                     filing_hash = _headline_hash(f"{ticker}{form_type}{filed_date}")
                     seen_key = f"FILING_SEEN#{_utc_now().strftime('%Y-%m-%d')}"
-                    if db.get_item(TABLE_NAME, {"PK": seen_key, "SK": filing_hash}):
+                    if db.get_item(seen_key, filing_hash):
                         continue
-                    db.put_item(TABLE_NAME, {
+                    db.put_item({
                         "PK": seen_key, "SK": filing_hash,
                         "ticker": ticker, "seenAt": _utc_now().isoformat(),
                         "ttl": int((_utc_now() + timedelta(days=7)).timestamp()),
@@ -375,7 +375,7 @@ def monitor_sec_filings(tickers):
                         "timestamp": timestamp,
                         "ttl": int((_utc_now() + timedelta(days=30)).timestamp()),
                     }
-                    db.put_item(TABLE_NAME, event)
+                    db.put_item(event)
                     new_events.append(event)
                 continue
 
@@ -389,9 +389,9 @@ def monitor_sec_filings(tickers):
 
                 filing_hash = _headline_hash(f"{ticker}{form_type}{filed_date}")
                 seen_key = f"FILING_SEEN#{_utc_now().strftime('%Y-%m-%d')}"
-                if db.get_item(TABLE_NAME, {"PK": seen_key, "SK": filing_hash}):
+                if db.get_item(seen_key, filing_hash):
                     continue
-                db.put_item(TABLE_NAME, {
+                db.put_item({
                     "PK": seen_key, "SK": filing_hash,
                     "ticker": ticker, "seenAt": _utc_now().isoformat(),
                     "ttl": int((_utc_now() + timedelta(days=7)).timestamp()),
@@ -428,7 +428,7 @@ def monitor_sec_filings(tickers):
                     "timestamp": timestamp,
                     "ttl": int((_utc_now() + timedelta(days=30)).timestamp()),
                 }
-                db.put_item(TABLE_NAME, event)
+                db.put_item(event)
                 new_events.append(event)
 
         except Exception as e:
@@ -446,14 +446,10 @@ def _check_insider_clusters(tickers, events):
     for ticker in tickers:
         try:
             thirty_days_ago = (_utc_now() - timedelta(days=30)).isoformat()
-            result = db.query_items(
-                TABLE_NAME,
-                "PK = :pk AND SK BETWEEN :start AND :end",
-                {
-                    ":pk": f"EVENT#{ticker}",
-                    ":start": f"{thirty_days_ago}#FILING",
-                    ":end": f"{_utc_now().isoformat()}#FILING~",
-                },
+            result = db.query_between(
+                f"EVENT#{ticker}",
+                f"{thirty_days_ago}#FILING",
+                f"{_utc_now().isoformat()}#FILING~",
             )
             insider_buys = [
                 r for r in (result or [])
@@ -476,7 +472,7 @@ def _check_insider_clusters(tickers, events):
                     "timestamp": timestamp,
                     "ttl": int((_utc_now() + timedelta(days=30)).timestamp()),
                 }
-                db.put_item(TABLE_NAME, cluster_event)
+                db.put_item(cluster_event)
                 events.append(cluster_event)
         except Exception as e:
             print(f"[EventEngine] Cluster check error for {ticker}: {e}")
@@ -567,9 +563,9 @@ def monitor_macro_events():
             # Dedup
             event_hash = _headline_hash(f"MACRO#{matched_indicator}#{today}")
             seen_key = f"MACRO_SEEN#{today}"
-            if db.get_item(TABLE_NAME, {"PK": seen_key, "SK": event_hash}):
+            if db.get_item(seen_key, event_hash):
                 continue
-            db.put_item(TABLE_NAME, {
+            db.put_item({
                 "PK": seen_key, "SK": event_hash,
                 "indicator": matched_indicator, "seenAt": _utc_now().isoformat(),
                 "ttl": int((_utc_now() + timedelta(days=7)).timestamp()),
@@ -625,7 +621,7 @@ def monitor_macro_events():
                 "timestamp": timestamp,
                 "ttl": int((_utc_now() + timedelta(days=90)).timestamp()),
             }
-            db.put_item(TABLE_NAME, event)
+            db.put_item(event)
             new_events.append(event)
 
     except Exception as e:
@@ -648,7 +644,7 @@ def rescore_signal_on_event(ticker, event):
     try:
         # Rate limit check: max 1 rescore/hour
         rescore_key = f"RESCORE#{ticker}"
-        last_rescore = db.get_item(TABLE_NAME, {"PK": rescore_key, "SK": "LATEST"})
+        last_rescore = db.get_item(rescore_key, "LATEST")
         if last_rescore:
             last_time = last_rescore.get("timestamp", "")
             if last_time:
@@ -661,7 +657,7 @@ def rescore_signal_on_event(ticker, event):
                     pass
 
         # Fetch current signal
-        current = db.get_item(TABLE_NAME, {"PK": f"SIGNAL#{ticker}", "SK": "LATEST"})
+        current = db.get_item(f"SIGNAL#{ticker}", "LATEST")
         if not current:
             print(f"[EventEngine] No existing signal for {ticker}")
             return None
@@ -701,7 +697,7 @@ def rescore_signal_on_event(ticker, event):
         archive_sk = current.get("analyzedAt", _utc_now().isoformat())
         current["SK"] = archive_sk
         current["PK"] = f"SIGNAL#{ticker}"
-        db.put_item(TABLE_NAME, current)
+        db.put_item(current)
 
         # Store updated signal
         timestamp = _utc_now().isoformat()
@@ -716,10 +712,10 @@ def rescore_signal_on_event(ticker, event):
         updated["rescoreEvent"] = event.get("type", ""),
         updated["analyzedAt"] = timestamp
         updated["updatedAt"] = timestamp
-        db.put_item(TABLE_NAME, updated)
+        db.put_item(updated)
 
         # Record rescore timestamp for rate limiting
-        db.put_item(TABLE_NAME, {
+        db.put_item({
             "PK": rescore_key,
             "SK": "LATEST",
             "ticker": ticker,
@@ -816,7 +812,7 @@ def send_alert(event, rescore_result=None):
         "read": False,
         "ttl": int((_utc_now() + timedelta(days=30)).timestamp()),
     }
-    db.put_item(TABLE_NAME, notification)
+    db.put_item(notification)
 
     # Send via SNS if configured and priority is P0 or P1
     if SNS_TOPIC_ARN and priority in (PRIORITY_P0, PRIORITY_P1):
@@ -856,14 +852,10 @@ def get_events_for_ticker(ticker, event_type=None, impact=None, limit=50):
     thirty_days_ago = (_utc_now() - timedelta(days=30)).isoformat()
     now = _utc_now().isoformat()
 
-    result = db.query_items(
-        TABLE_NAME,
-        "PK = :pk AND SK BETWEEN :start AND :end",
-        {
-            ":pk": f"EVENT#{ticker}",
-            ":start": thirty_days_ago,
-            ":end": f"{now}~",
-        },
+    result = db.query_between(
+        f"EVENT#{ticker}",
+        thirty_days_ago,
+        f"{now}~",
     )
     events = result or []
 
@@ -883,14 +875,10 @@ def get_events_feed(limit=50):
     now = _utc_now().isoformat()
     thirty_days_ago = (_utc_now() - timedelta(days=30)).isoformat()
 
-    result = db.query_items(
-        TABLE_NAME,
-        "GSI1PK = :pk AND GSI1SK BETWEEN :start AND :end",
-        {
-            ":pk": "EVENTS#ALL",
-            ":start": thirty_days_ago,
-            ":end": f"{now}~",
-        },
+    result = db.query_between(
+        "EVENTS#ALL",
+        thirty_days_ago,
+        f"{now}~",
         index_name="GSI1",
     )
     events = result or []
@@ -901,11 +889,7 @@ def get_events_feed(limit=50):
 def get_alerts(limit=20):
     """Get recent alerts."""
     today = _utc_now().strftime("%Y-%m-%d")
-    result = db.query_items(
-        TABLE_NAME,
-        "PK = :pk",
-        {":pk": f"ALERT#{today}"},
-    )
+    result = db.query(f"ALERT#{today}")
     alerts = result or []
     alerts.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return alerts[:limit]
@@ -916,19 +900,15 @@ def get_signal_history(ticker, days=30):
     cutoff = (_utc_now() - timedelta(days=days)).isoformat()
     now = _utc_now().isoformat()
 
-    result = db.query_items(
-        TABLE_NAME,
-        "PK = :pk AND SK BETWEEN :start AND :end",
-        {
-            ":pk": f"SIGNAL#{ticker}",
-            ":start": cutoff,
-            ":end": f"{now}~",
-        },
+    result = db.query_between(
+        f"SIGNAL#{ticker}",
+        cutoff,
+        f"{now}~",
     )
     history = result or []
 
     # Also include current LATEST
-    latest = db.get_item(TABLE_NAME, {"PK": f"SIGNAL#{ticker}", "SK": "LATEST"})
+    latest = db.get_item(f"SIGNAL#{ticker}", "LATEST")
     if latest:
         history.append(latest)
 
@@ -955,7 +935,7 @@ def get_signal_history(ticker, days=30):
 
 def get_user_prefs(user_id):
     """Get notification preferences for a user."""
-    item = db.get_item(TABLE_NAME, {"PK": f"PREFS#{user_id}", "SK": "NOTIFICATIONS"})
+    item = db.get_item(f"PREFS#{user_id}", "NOTIFICATIONS")
     if item:
         return item
     # Default preferences
@@ -979,7 +959,7 @@ def save_user_prefs(user_id, prefs):
         **prefs,
         "updatedAt": _utc_now().isoformat(),
     }
-    db.put_item(TABLE_NAME, item)
+    db.put_item(item)
     return item
 
 
@@ -993,7 +973,7 @@ def register_device_token(user_id, token, platform="expo"):
         "platform": platform,
         "registeredAt": _utc_now().isoformat(),
     }
-    db.put_item(TABLE_NAME, item)
+    db.put_item(item)
     return item
 
 
@@ -1014,12 +994,7 @@ def _get_tracked_tickers():
 
     # Try to get portfolio tickers from DynamoDB
     try:
-        result = db.query_items(
-            TABLE_NAME,
-            "GSI1PK = :pk",
-            {":pk": "PORTFOLIO#ALL"},
-            index_name="GSI1",
-        )
+        result = db.query("PORTFOLIO#ALL", index_name="GSI1")
         if result:
             for item in result:
                 holdings = item.get("holdings", [])

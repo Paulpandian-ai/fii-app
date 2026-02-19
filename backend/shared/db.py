@@ -105,3 +105,39 @@ def batch_get(keys: list[dict]) -> list[dict]:
         RequestItems={_table_name: {"Keys": formatted_keys}}
     )
     return response.get("Responses", {}).get(_table_name, [])
+
+
+def query_between(
+    pk: str,
+    sk_start: str,
+    sk_end: str,
+    index_name: Optional[str] = None,
+    limit: Optional[int] = None,
+    scan_forward: bool = True,
+) -> list[dict]:
+    """Query items by partition key with a sort key BETWEEN range.
+
+    Args:
+        pk: Partition key value.
+        sk_start: Sort key range start (inclusive).
+        sk_end: Sort key range end (inclusive).
+        index_name: Optional GSI name (e.g., "GSI1").
+        limit: Max number of items to return.
+        scan_forward: True for ascending, False for descending.
+    """
+    pk_attr = "GSI1PK" if index_name == "GSI1" else "PK"
+    sk_attr = "GSI1SK" if index_name == "GSI1" else "SK"
+
+    key_condition = Key(pk_attr).eq(pk) & Key(sk_attr).between(sk_start, sk_end)
+
+    kwargs: dict[str, Any] = {
+        "KeyConditionExpression": key_condition,
+        "ScanIndexForward": scan_forward,
+    }
+    if index_name:
+        kwargs["IndexName"] = index_name
+    if limit:
+        kwargs["Limit"] = limit
+
+    response = _table.query(**kwargs)
+    return response.get("Items", [])
