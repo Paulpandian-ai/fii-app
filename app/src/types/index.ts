@@ -744,6 +744,41 @@ export interface AlternativeData {
   fda?: FDAData;
 }
 
+// ─── Screener Types ───
+
+export interface ScreenerResult {
+  ticker: string;
+  companyName: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  aiScore: number;
+  signal: Signal;
+  confidence: string;
+  technicalScore: number | null;
+  fundamentalGrade: string;
+  rsi: number | null;
+  sector: string;
+  marketCap: number;
+  marketCapLabel: string;
+  peRatio: number | null;
+}
+
+export interface ScreenerTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  filters: Record<string, string>;
+}
+
+export interface SectorData {
+  sector: string;
+  marketCap: number;
+  changePercent: number;
+  stockCount: number;
+}
+
 // ─── Auth Types ───
 
 export interface User {
@@ -831,6 +866,7 @@ export type RootStackParamList = {
   SignalDetail: { ticker: string; feedItemId: string };
   FinancialHealth: { ticker: string };
   AlternativeData: { ticker: string };
+  Screener: undefined;
   Profile: undefined;
   WealthSimulator: undefined;
   TaxStrategy: undefined;

@@ -87,6 +87,26 @@ export const getAltData = async (ticker: string) => {
   return data;
 };
 
+// ─── Charts ───
+
+export const getChartData = async (ticker: string, resolution: string = 'D', range: string = '6M') => {
+  const { data } = await api.get(`/charts/${ticker}`, { params: { resolution, range } });
+  return data;
+};
+
+// ─── Screener ───
+
+export const getScreener = async (params: Record<string, string> = {}) => {
+  const { data } = await api.get('/screener', { params });
+  _cacheSignals(data.results || []);
+  return data;
+};
+
+export const getScreenerTemplates = async () => {
+  const { data } = await api.get('/screener/templates');
+  return data;
+};
+
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {
@@ -174,6 +194,19 @@ export const getTrending = async () => {
 export const getDiscoveryCards = async () => {
   const { data } = await api.get('/discovery');
   _cacheSignals(data.cards || []);
+  return data;
+};
+
+// ─── Screener ───
+
+export const getScreener = async (params: Record<string, any> = {}) => {
+  const { data } = await api.get('/screener', { params });
+  _cacheSignals(data.results || data.items || []);
+  return data;
+};
+
+export const getScreenerTemplates = async () => {
+  const { data } = await api.get('/screener/templates');
   return data;
 };
 

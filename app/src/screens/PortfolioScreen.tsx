@@ -225,6 +225,7 @@ export const PortfolioScreen: React.FC = () => {
     | { type: 'holdings_header' }
     | { type: 'holding'; data: Holding }
     | { type: 'add_buttons' }
+    | { type: 'screener_cta' }
     | { type: 'discovery' }
     | { type: 'trending' }
     | { type: 'spacer' };
@@ -256,7 +257,10 @@ export const PortfolioScreen: React.FC = () => {
   // 6. Add / CSV buttons
   sections.push({ type: 'add_buttons' });
 
-  // 7. Tinder-style Discovery
+  // 7a. Stock Screener CTA
+  sections.push({ type: 'screener_cta' });
+
+  // 7b. Tinder-style Discovery
   sections.push({ type: 'discovery' });
 
   // 8. Trending
@@ -330,6 +334,30 @@ export const PortfolioScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
+        );
+
+      case 'screener_cta':
+        return (
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              backgroundColor: 'rgba(96,165,250,0.08)', borderRadius: 14, padding: 16,
+              marginHorizontal: 20, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(96,165,250,0.15)',
+            }}
+            onPress={() => navigation.navigate('Screener')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Ionicons name="search" size={22} color="#60A5FA" />
+              <View>
+                <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700' }}>Stock Screener</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 }}>
+                  Filter by AI score, technicals, fundamentals
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
         );
 
       case 'discovery':

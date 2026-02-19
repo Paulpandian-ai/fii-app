@@ -19,6 +19,7 @@ import { AIAdvisorScreen } from './src/screens/AIAdvisorScreen';
 import { BacktestScreen } from './src/screens/BacktestScreen';
 import { FinancialHealthScreen } from './src/screens/FinancialHealthScreen';
 import { AlternativeDataScreen } from './src/screens/AlternativeDataScreen';
+import { ScreenerScreen } from './src/screens/ScreenerScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { useCoachStore } from './src/store/coachStore';
@@ -59,6 +60,9 @@ const WrappedFinancialHealth = (props: any) => (
 );
 const WrappedAlternativeData = (props: any) => (
   <ErrorBoundary screenName="AlternativeDataScreen"><AlternativeDataScreen {...props} /></ErrorBoundary>
+);
+const WrappedScreener = () => (
+  <ErrorBoundary screenName="ScreenerScreen"><ScreenerScreen /></ErrorBoundary>
 );
 const WrappedSettings = () => (
   <ErrorBoundary screenName="SettingsScreen"><SettingsScreen /></ErrorBoundary>
@@ -166,6 +170,11 @@ export default function App() {
         <Stack.Screen
           name="AlternativeData"
           component={WrappedAlternativeData}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Screener"
+          component={WrappedScreener}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

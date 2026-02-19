@@ -16,7 +16,9 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData } from '../services/api';
+import { StockChart } from '../components/StockChart';
+import type { ChartData } from '../components/StockChart';
 import type {
   FullAnalysis,
   PriceData,
@@ -84,6 +86,9 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [fundamentals, setFundamentals] = useState<FundamentalAnalysis | null>(null);
   const [factors, setFactors] = useState<FactorAnalysis | null>(null);
   const [altData, setAltData] = useState<AlternativeData | null>(null);
+  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [chartRange, setChartRange] = useState('6M');
+  const [chartLoading, setChartLoading] = useState(false);
   const [showAllFactors, setShowAllFactors] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -95,13 +100,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const loadData = async () => {
     setLoading(true);
     try {
-      const [signalData, price, techData, fundData, factorData, altResult] = await Promise.all([
+      const [signalData, price, techData, fundData, factorData, altResult, chartResult] = await Promise.all([
         getSignalDetail(ticker).catch(() => null),
         getPrice(ticker).catch(() => null),
         getTechnicals(ticker).catch(() => null),
         getFundamentals(ticker).catch(() => null),
         getFactors(ticker).catch(() => null),
         getAltData(ticker).catch(() => null),
+        getChartData(ticker, 'D', '6M').catch(() => null),
       ]);
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
@@ -109,6 +115,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData);
       if (factorData && factorData.dimensionScores) setFactors(factorData);
       if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
+      if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult);
     } finally {
       setLoading(false);
     }
@@ -172,6 +179,21 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       </LinearGradient>
     );
   }
+
+  const handleChartRangeChange = async (range: string) => {
+    setChartRange(range);
+    setChartLoading(true);
+    try {
+      const result = await getChartData(ticker, 'D', range);
+      if (result && result.candles && result.candles.length > 0) {
+        setChartData(result);
+      }
+    } catch {
+      // keep existing data
+    } finally {
+      setChartLoading(false);
+    }
+  };
 
   const categories = buildCategories();
   const priceChange = safeNum(priceData?.change);
@@ -329,6 +351,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             )}
           </View>
         )}
+
+        {/* Section 2.8: Interactive Chart */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Price Chart</Text>
+          <StockChart
+            ticker={ticker}
+            chartData={chartData}
+            loading={chartLoading}
+            onRangeChange={handleChartRangeChange}
+          />
+        </View>
 
         {/* Section 3: Factor Breakdown */}
         {categories.length > 0 && (

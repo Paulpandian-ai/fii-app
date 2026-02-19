@@ -18,6 +18,9 @@ Routes:
   GET  /technicals/<ticker>          — Technical indicators (15 indicators)
   GET  /fundamentals/<ticker>        — Financial health + DCF valuation
   GET  /altdata/<ticker>             — Alternative data (patents, contracts, FDA)
+  GET  /charts/<ticker>              — Chart data with overlays + indicators
+  GET  /screener                     — Multi-factor stock screener
+  GET  /screener/templates           — Pre-built screener templates
   GET  /trending                     — Social proof / trending stocks
   GET  /discovery                    — Tinder-style discovery cards
   GET  /watchlist                    — User watchlists
@@ -111,6 +114,13 @@ def lambda_handler(event, context):
         elif path.startswith("/altdata/"):
             ticker = path.split("/altdata/")[-1].strip("/").upper()
             return _handle_altdata(http_method, ticker)
+        elif path.startswith("/charts/"):
+            ticker = path.split("/charts/")[-1].strip("/").upper()
+            return _handle_charts(http_method, ticker, query_params)
+        elif path.startswith("/screener/templates"):
+            return _handle_screener_templates(http_method)
+        elif path.startswith("/screener"):
+            return _handle_screener(http_method, query_params)
         elif path.startswith("/search"):
             return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
@@ -980,6 +990,476 @@ def _handle_altdata(method, ticker):
         "contracts": alt_data.get("contracts"),
         "fda": alt_data.get("fda"),
     })
+
+
+# ─── Chart Data Endpoint ───
+
+def _sma_series(closes, period):
+    """Compute rolling SMA series. Returns list of (index, value) pairs."""
+    if len(closes) < period:
+        return []
+    result = []
+    window_sum = sum(closes[:period])
+    result.append((period - 1, window_sum / period))
+    for i in range(period, len(closes)):
+        window_sum += closes[i] - closes[i - period]
+        result.append((i, window_sum / period))
+    return result
+
+
+def _ema_full_series(data, period):
+    """Return full EMA series as list of (index, value) pairs."""
+    if len(data) < period:
+        return []
+    multiplier = 2.0 / (period + 1)
+    ema = sum(data[:period]) / period
+    result = [(period - 1, ema)]
+    for i in range(period, len(data)):
+        ema = (data[i] - ema) * multiplier + ema
+        result.append((i, ema))
+    return result
+
+
+def _rsi_series(closes, period=14):
+    """Compute RSI at each valid point. Returns list of (index, value)."""
+    if len(closes) < period + 1:
+        return []
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0 for d in deltas[:period]]
+    losses = [-d if d < 0 else 0 for d in deltas[:period]]
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    result = []
+    if avg_loss == 0:
+        result.append((period, 100.0))
+    else:
+        rs = avg_gain / avg_loss
+        result.append((period, 100.0 - (100.0 / (1.0 + rs))))
+
+    for j in range(period, len(deltas)):
+        g = deltas[j] if deltas[j] > 0 else 0
+        l = -deltas[j] if deltas[j] < 0 else 0
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l) / period
+        if avg_loss == 0:
+            result.append((j + 1, 100.0))
+        else:
+            rs = avg_gain / avg_loss
+            result.append((j + 1, round(100.0 - (100.0 / (1.0 + rs)), 2)))
+    return result
+
+
+def _macd_series(closes, fast=12, slow=26, signal_period=9):
+    """Compute MACD line, signal, histogram series."""
+    if len(closes) < slow + signal_period:
+        return []
+    ema_fast = _ema_full_series(closes, fast)
+    ema_slow = _ema_full_series(closes, slow)
+    if not ema_fast or not ema_slow:
+        return []
+
+    # Build dict for fast lookup
+    fast_map = {idx: val for idx, val in ema_fast}
+    slow_map = {idx: val for idx, val in ema_slow}
+
+    macd_vals = []
+    for idx, slow_val in ema_slow:
+        if idx in fast_map:
+            macd_vals.append((idx, fast_map[idx] - slow_val))
+
+    if len(macd_vals) < signal_period:
+        return []
+
+    # Signal line = EMA of MACD values
+    macd_only = [v for _, v in macd_vals]
+    multiplier = 2.0 / (signal_period + 1)
+    sig = sum(macd_only[:signal_period]) / signal_period
+    result = []
+    idx0 = macd_vals[signal_period - 1][0]
+    result.append((idx0, macd_only[signal_period - 1], sig, macd_only[signal_period - 1] - sig))
+
+    for k in range(signal_period, len(macd_only)):
+        sig = (macd_only[k] - sig) * multiplier + sig
+        idx_k = macd_vals[k][0]
+        result.append((idx_k, round(macd_only[k], 4), round(sig, 4), round(macd_only[k] - sig, 4)))
+    return result
+
+
+def _bollinger_series(closes, period=20, num_std=2):
+    """Compute Bollinger Band series."""
+    import math
+    if len(closes) < period:
+        return []
+    result = []
+    for i in range(period - 1, len(closes)):
+        window = closes[i - period + 1: i + 1]
+        middle = sum(window) / period
+        variance = sum((x - middle) ** 2 for x in window) / period
+        std = math.sqrt(variance)
+        result.append((i, round(middle + num_std * std, 2), round(middle, 2), round(middle - num_std * std, 2)))
+    return result
+
+
+def _handle_charts(method, ticker, query_params):
+    """GET /charts/<ticker> — Chart data with OHLCV candles, overlays, and indicators."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    from datetime import datetime, timezone
+
+    resolution = query_params.get("resolution", "D")
+    time_range = query_params.get("range", "6M")
+
+    # Convert range to from_ts
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    range_days = {"1M": 30, "3M": 91, "6M": 183, "1Y": 365, "2Y": 730}.get(time_range, 183)
+    from_ts = now_ts - (range_days * 24 * 3600)
+
+    try:
+        candles = finnhub_client.get_candles(ticker, resolution, from_ts, now_ts)
+    except Exception as e:
+        print(f"[Charts] Candle fetch error for {ticker}: {e}")
+        candles = []
+
+    if not candles:
+        return _response(200, {
+            "candles": [],
+            "overlays": {},
+            "indicators": {},
+            "events": [],
+            "meta": {"ticker": ticker, "resolution": resolution, "range": time_range, "candleCount": 0},
+        })
+
+    # Convert candles to chart format with timestamps
+    chart_candles = []
+    dates = []
+    closes = []
+    for c in candles:
+        try:
+            dt = datetime.strptime(c["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            ts = int(dt.timestamp())
+        except (ValueError, KeyError):
+            continue
+        chart_candles.append({
+            "t": ts,
+            "o": round(c.get("open", 0), 2),
+            "h": round(c.get("high", 0), 2),
+            "l": round(c.get("low", 0), 2),
+            "c": round(c.get("close", 0), 2),
+            "v": c.get("volume", 0),
+        })
+        dates.append(ts)
+        closes.append(c.get("close", 0))
+
+    if not closes:
+        return _response(200, {
+            "candles": [],
+            "overlays": {},
+            "indicators": {},
+            "events": [],
+            "meta": {"ticker": ticker, "resolution": resolution, "range": time_range, "candleCount": 0},
+        })
+
+    # Compute overlays
+    overlays = {}
+    for period, key in [(20, "sma20"), (50, "sma50"), (200, "sma200")]:
+        sma = _sma_series(closes, period)
+        overlays[key] = [{"t": dates[idx], "v": round(val, 2)} for idx, val in sma if idx < len(dates)]
+
+    bb = _bollinger_series(closes, 20, 2)
+    overlays["bollingerBands"] = [
+        {"t": dates[idx], "upper": u, "middle": m, "lower": lo}
+        for idx, u, m, lo in bb if idx < len(dates)
+    ]
+
+    # Compute indicators
+    indicators = {}
+    rsi = _rsi_series(closes, 14)
+    indicators["rsi"] = [{"t": dates[idx], "v": round(val, 1)} for idx, val in rsi if idx < len(dates)]
+
+    macd = _macd_series(closes, 12, 26, 9)
+    indicators["macd"] = [
+        {"t": dates[idx], "value": v, "signal": s, "histogram": h}
+        for idx, v, s, h in macd if idx < len(dates)
+    ]
+
+    # Events: signal change date
+    events = []
+    try:
+        signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+        if signal_data and signal_data.get("lastUpdated"):
+            try:
+                evt_dt = datetime.fromisoformat(signal_data["lastUpdated"].replace("Z", "+00:00"))
+                events.append({
+                    "t": int(evt_dt.timestamp()),
+                    "type": "signal",
+                    "label": f"{signal_data.get('signal', 'HOLD')} signal",
+                })
+            except (ValueError, TypeError):
+                pass
+    except Exception:
+        pass
+
+    return _response(200, {
+        "candles": chart_candles,
+        "overlays": overlays,
+        "indicators": indicators,
+        "events": events,
+        "meta": {
+            "ticker": ticker,
+            "resolution": resolution,
+            "range": time_range,
+            "candleCount": len(chart_candles),
+        },
+    })
+
+
+# ─── Screener Endpoints ───
+
+# 15 core tracked tickers
+_SCREENER_UNIVERSE = [
+    "NVDA", "AAPL", "MSFT", "AMD", "GOOGL", "AMZN", "META",
+    "TSLA", "AVGO", "CRM", "NFLX", "JPM", "V", "UNH", "XOM",
+]
+
+_MCAP_LABELS = [
+    (300_000_000, "nano"),
+    (2_000_000_000, "micro"),
+    (10_000_000_000, "small"),
+    (50_000_000_000, "mid"),
+    (200_000_000_000, "large"),
+]
+
+
+def _mcap_label(market_cap):
+    if market_cap is None:
+        return "unknown"
+    for threshold, label in _MCAP_LABELS:
+        if market_cap < threshold:
+            return label
+    return "mega"
+
+
+_SCREENER_TEMPLATES = [
+    {
+        "id": "ai_top_picks",
+        "name": "AI Top Picks",
+        "description": "Stocks with highest AI confidence scores",
+        "icon": "sparkles",
+        "filters": {"aiScore": "8,10"},
+    },
+    {
+        "id": "value_plays",
+        "name": "Value Plays",
+        "description": "Strong fundamentals at reasonable valuations",
+        "icon": "diamond",
+        "filters": {"fundamentalGrade": "A,B", "aiScore": "5,10"},
+    },
+    {
+        "id": "momentum_leaders",
+        "name": "Momentum Leaders",
+        "description": "Strong technical momentum with bullish signals",
+        "icon": "trending-up",
+        "filters": {"technicalScore": "7,10", "signal": "BUY"},
+    },
+    {
+        "id": "dividend_stars",
+        "name": "Dividend Stars",
+        "description": "Reliable income with strong fundamentals",
+        "icon": "star",
+        "filters": {"fundamentalGrade": "A,B"},
+    },
+    {
+        "id": "undervalued_ai",
+        "name": "Undervalued by AI",
+        "description": "AI sees upside the market hasn't priced in",
+        "icon": "eye",
+        "filters": {"aiScore": "7,10"},
+    },
+    {
+        "id": "risk_alerts",
+        "name": "Risk Alerts",
+        "description": "Stocks with warning signals from AI analysis",
+        "icon": "warning",
+        "filters": {"aiScore": "1,3"},
+    },
+]
+
+
+def _handle_screener_templates(method):
+    """GET /screener/templates — Pre-built screener filter presets."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    return _response(200, {"templates": _SCREENER_TEMPLATES})
+
+
+def _handle_screener(method, query_params):
+    """GET /screener — Multi-factor stock screener.
+
+    Fetches signal, price, technical, and fundamental data for tracked stocks,
+    applies filters from query params, sorts, and returns matching results.
+    """
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    # Parse filter params
+    ai_range = _parse_range(query_params.get("aiScore"))
+    tech_range = _parse_range(query_params.get("technicalScore"))
+    rsi_range = _parse_range(query_params.get("rsi"))
+    pe_range = _parse_range(query_params.get("peRatio"))
+
+    signal_filter = [s.strip().upper() for s in query_params.get("signal", "").split(",") if s.strip()] or None
+    sector_filter = [s.strip() for s in query_params.get("sector", "").split(",") if s.strip()] or None
+    grade_filter = [g.strip().upper() for g in query_params.get("fundamentalGrade", "").split(",") if g.strip()] or None
+    mcap_filter = [m.strip().lower() for m in query_params.get("marketCap", "").split(",") if m.strip()] or None
+
+    sort_by = query_params.get("sortBy", "aiScore")
+    sort_dir = query_params.get("sortDir", "desc")
+    limit = min(int(query_params.get("limit", "50")), 100)
+
+    # Gather data for all tracked stocks
+    results = []
+    for t in _SCREENER_UNIVERSE:
+        signal = db.get_item(f"SIGNAL#{t}", "LATEST")
+        if not signal:
+            continue
+
+        price_data = db.get_item(f"PRICE#{t}", "LATEST")
+        tech_data = db.get_item(f"TECHNICALS#{t}", "LATEST")
+        health_data = db.get_item(f"HEALTH#{t}", "LATEST")
+
+        ai_score = _safe_float(signal.get("compositeScore", 5.0))
+        sig = signal.get("signal", "HOLD")
+        conf = signal.get("confidence", "MEDIUM")
+        company = signal.get("companyName", t)
+
+        price = _safe_float((price_data or {}).get("price"))
+        change = _safe_float((price_data or {}).get("change"))
+        change_pct = _safe_float((price_data or {}).get("changePercent"))
+        sector = (price_data or {}).get("sector", "")
+        market_cap = _safe_float((price_data or {}).get("marketCap"))
+        mcap_lbl = _mcap_label(market_cap) if market_cap else "unknown"
+
+        tech_score = _safe_float((tech_data or {}).get("technicalScore"))
+        indicators = (tech_data or {}).get("indicators") or {}
+        if isinstance(indicators, str):
+            try:
+                indicators = json.loads(indicators)
+            except Exception:
+                indicators = {}
+        rsi = _safe_float(indicators.get("rsi"))
+
+        analysis = (health_data or {}).get("analysis") or {}
+        if isinstance(analysis, str):
+            try:
+                analysis = json.loads(analysis)
+            except Exception:
+                analysis = {}
+        grade = analysis.get("grade", "N/A")
+        ratios = analysis.get("ratios") or {}
+        if isinstance(ratios, str):
+            try:
+                ratios = json.loads(ratios)
+            except Exception:
+                ratios = {}
+        pe = _safe_float(ratios.get("peRatio"))
+
+        # Apply filters
+        if ai_range and not _in_range(ai_score, ai_range):
+            continue
+        if tech_range and not _in_range(tech_score, tech_range):
+            continue
+        if rsi_range and rsi and not _in_range(rsi, rsi_range):
+            continue
+        if pe_range and pe and not _in_range(pe, pe_range):
+            continue
+        if signal_filter and sig not in signal_filter:
+            continue
+        if sector_filter and not any(s.lower() in sector.lower() for s in sector_filter):
+            continue
+        if grade_filter and grade not in grade_filter:
+            continue
+        if mcap_filter and mcap_lbl not in mcap_filter:
+            continue
+
+        results.append({
+            "ticker": t,
+            "companyName": company,
+            "price": price,
+            "change": round(change, 2),
+            "changePercent": round(change_pct, 2),
+            "aiScore": round(ai_score, 1),
+            "signal": sig,
+            "confidence": conf,
+            "technicalScore": round(tech_score, 1) if tech_score else None,
+            "fundamentalGrade": grade,
+            "rsi": round(rsi, 1) if rsi else None,
+            "sector": sector,
+            "marketCap": market_cap,
+            "marketCapLabel": mcap_lbl,
+            "peRatio": round(pe, 1) if pe else None,
+        })
+
+    # Sort
+    sort_key_map = {
+        "aiScore": lambda x: x.get("aiScore") or 0,
+        "technicalScore": lambda x: x.get("technicalScore") or 0,
+        "price": lambda x: x.get("price") or 0,
+        "changePercent": lambda x: x.get("changePercent") or 0,
+        "volume": lambda x: x.get("marketCap") or 0,
+    }
+    key_fn = sort_key_map.get(sort_by, sort_key_map["aiScore"])
+    results.sort(key=key_fn, reverse=(sort_dir == "desc"))
+
+    total = len(results)
+    results = results[:limit]
+
+    return _response(200, {
+        "results": results,
+        "total": total,
+        "sortBy": sort_by,
+        "sortDir": sort_dir,
+    })
+
+
+def _parse_range(val):
+    """Parse 'min,max' range string into (min, max) floats."""
+    if not val:
+        return None
+    parts = val.split(",")
+    try:
+        lo = float(parts[0]) if len(parts) > 0 and parts[0].strip() else None
+        hi = float(parts[1]) if len(parts) > 1 and parts[1].strip() else None
+        return (lo, hi)
+    except (ValueError, IndexError):
+        return None
+
+
+def _in_range(value, range_tuple):
+    """Check if value is within (min, max) range."""
+    if value is None:
+        return False
+    lo, hi = range_tuple
+    if lo is not None and value < lo:
+        return False
+    if hi is not None and value > hi:
+        return False
+    return True
+
+
+def _safe_float(v, default=0.0):
+    """Safely convert value to float."""
+    if v is None:
+        return default
+    try:
+        f = float(v)
+        return f if f == f else default  # NaN check
+    except (ValueError, TypeError):
+        return default
 
 
 # ─── Search Endpoint ───

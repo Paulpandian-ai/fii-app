@@ -339,6 +339,30 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetCharts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /charts/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetScreener:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /screener
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetScreenerTemplates:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /screener/templates
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetSearch:
           Type: HttpApi
           Properties:
