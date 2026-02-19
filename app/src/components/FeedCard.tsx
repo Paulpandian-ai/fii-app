@@ -9,7 +9,7 @@ import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { DisclaimerBanner } from './DisclaimerBanner';
-import { getPrice, getTechnicals, getFundamentals, getFactors } from '../services/api';
+import { getPrice, getTechnicals, getFundamentals, getFactors, getAltData } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -72,6 +72,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [techTrend, setTechTrend] = useState<string | null>(null);
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
   const [dimScores, setDimScores] = useState<DimensionScores | null>(null);
+  const [altDataTypes, setAltDataTypes] = useState<string[]>([]);
+  const [altInsight, setAltInsight] = useState<string | null>(null);
 
   useEffect(() => {
     getPrice(item.ticker)
@@ -103,6 +105,23 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       .then((data) => {
         if (data && data.dimensionScores) {
           setDimScores(data.dimensionScores);
+        }
+      })
+      .catch(() => {});
+    getAltData(item.ticker)
+      .then((data) => {
+        if (data && data.available && data.available.length > 0) {
+          setAltDataTypes(data.available);
+          // Build one-line insight
+          if (data.patents && data.patents.score > 0) {
+            const v = safeNum(data.patents.velocity);
+            setAltInsight(`Patents ${v >= 0 ? '+' : ''}${v.toFixed(0)}% YoY`);
+          } else if (data.fda && data.fda.score > 0) {
+            setAltInsight(`${data.fda.pdufaWithin90Days || 0} PDUFA <90d`);
+          } else if (data.contracts && data.contracts.score > 0) {
+            const g = safeNum(data.contracts.awardGrowth);
+            setAltInsight(`Contracts ${g >= 0 ? '+' : ''}${g.toFixed(0)}%`);
+          }
         }
       })
       .catch(() => {});
@@ -241,6 +260,30 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
               {healthGrade}
             </Text>
             <Text style={styles.healthBadgeLabel}>Health</Text>
+          </View>
+        )}
+
+        {/* Alt Data Badges */}
+        {altDataTypes.length > 0 && (
+          <View style={styles.altBadgeRow}>
+            {altDataTypes.includes('patents') && (
+              <View style={[styles.altBadge, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
+                <Ionicons name="bulb-outline" size={11} color="#F59E0B" />
+              </View>
+            )}
+            {altDataTypes.includes('contracts') && (
+              <View style={[styles.altBadge, { backgroundColor: 'rgba(96,165,250,0.12)' }]}>
+                <Ionicons name="business-outline" size={11} color="#60A5FA" />
+              </View>
+            )}
+            {altDataTypes.includes('fda') && (
+              <View style={[styles.altBadge, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
+                <Ionicons name="medical-outline" size={11} color="#8B5CF6" />
+              </View>
+            )}
+            {altInsight && (
+              <Text style={styles.altInsightText} numberOfLines={1}>{altInsight}</Text>
+            )}
           </View>
         )}
 
@@ -466,5 +509,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'capitalize',
+  },
+  altBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  altBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  altInsightText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 2,
   },
 });

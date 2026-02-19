@@ -79,6 +79,34 @@ DIMENSIONS = {
             {"id": "SE4", "name": "Sector Sympathy", "weight": 0.20},
         ],
     },
+    "altData": {
+        "name": "Alternative Data",
+        "weight": 0.10,
+        "factors": [
+            {"id": "AD1", "name": "Patent Innovation", "weight": 0.34},
+            {"id": "AD2", "name": "Gov Contract Pipeline", "weight": 0.33},
+            {"id": "AD3", "name": "FDA Catalyst Strength", "weight": 0.33},
+        ],
+    },
+}
+
+# Weights when alt data IS available (6 dimensions)
+WEIGHTS_WITH_ALT = {
+    "supplyChain": 0.18,
+    "macroGeo": 0.13,
+    "technical": 0.23,
+    "fundamental": 0.23,
+    "sentiment": 0.13,
+    "altData": 0.10,
+}
+
+# Weights when alt data is NOT available (5 dimensions, original)
+WEIGHTS_WITHOUT_ALT = {
+    "supplyChain": 0.20,
+    "macroGeo": 0.15,
+    "technical": 0.25,
+    "fundamental": 0.25,
+    "sentiment": 0.15,
 }
 
 
@@ -493,6 +521,81 @@ def _score_sentiment_factors(signal_data):
     return results
 
 
+# ─── Alternative Data Factor Scoring ───
+
+
+def _score_alt_data_factors(alt_data):
+    """Score 3 alternative data sub-factors from patent/contract/FDA engines.
+
+    Args:
+        alt_data: Dict with optional keys: patents, contracts, fda
+                  Each is the output from the respective engine's analyze().
+    """
+    results = []
+
+    if not alt_data:
+        return _default_scores("altData")
+
+    patents = alt_data.get("patents")
+    contracts = alt_data.get("contracts")
+    fda = alt_data.get("fda")
+
+    # AD1: Patent Innovation
+    pat_score = 0.0
+    if patents and patents.get("score"):
+        # Map 1-10 score to -2..+2
+        raw = patents["score"]
+        pat_score = _clamp((raw - 5) * 0.5)  # 5→0, 10→+2.5→+2, 1→-2
+        velocity = patents.get("velocity", 0)
+        explanation = f"Patent velocity {'+' if velocity >= 0 else ''}{velocity}% YoY, {patents.get('totalLast12Mo', 0)} grants last 12mo"
+    else:
+        explanation = "No patent data available for this company"
+    results.append({
+        "factorId": "AD1", "rawValue": pat_score,
+        "normalizedScore": round(pat_score, 2),
+        "direction": "positive" if pat_score > 0.3 else "negative" if pat_score < -0.3 else "neutral",
+        "dataSource": "USPTO PatentsView",
+        "explanation": explanation,
+    })
+
+    # AD2: Government Contract Pipeline
+    con_score = 0.0
+    if contracts and contracts.get("score"):
+        raw = contracts["score"]
+        con_score = _clamp((raw - 5) * 0.5)
+        growth = contracts.get("awardGrowth", 0)
+        explanation = f"Contract awards {'+' if growth >= 0 else ''}{growth}% YoY, {contracts.get('activeContracts', 0)} active"
+    else:
+        explanation = "No government contract data for this company"
+    results.append({
+        "factorId": "AD2", "rawValue": con_score,
+        "normalizedScore": round(con_score, 2),
+        "direction": "positive" if con_score > 0.3 else "negative" if con_score < -0.3 else "neutral",
+        "dataSource": "USASpending.gov",
+        "explanation": explanation,
+    })
+
+    # AD3: FDA Catalyst Strength
+    fda_score = 0.0
+    if fda and fda.get("score"):
+        raw = fda["score"]
+        fda_score = _clamp((raw - 5) * 0.5)
+        trials = fda.get("totalActiveTrials", 0)
+        pdufa_90d = fda.get("pdufaWithin90Days", 0)
+        explanation = f"{trials} active trials, {pdufa_90d} PDUFA dates within 90 days"
+    else:
+        explanation = "No FDA pipeline data for this company"
+    results.append({
+        "factorId": "AD3", "rawValue": fda_score,
+        "normalizedScore": round(fda_score, 2),
+        "direction": "positive" if fda_score > 0.3 else "negative" if fda_score < -0.3 else "neutral",
+        "dataSource": "ClinicalTrials.gov + OpenFDA",
+        "explanation": explanation,
+    })
+
+    return results
+
+
 # ─── Helper ───
 
 
@@ -532,14 +635,15 @@ def _dim_score_to_10(contributions, dimension_key):
 # ─── Main Entry Point ───
 
 
-def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None):
-    """Compute all 25 sub-factors and 5 dimension scores for a ticker.
+def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None, alt_data=None):
+    """Compute all sub-factors and dimension scores for a ticker.
 
     Args:
         ticker: Stock symbol
         signal_data: Full signal from S3/DynamoDB (with factorDetails)
         technicals: Output from technical_engine.compute_indicators()
         fundamentals: Output from fundamentals_engine.analyze()
+        alt_data: Dict with optional keys: patents, contracts, fda
 
     Returns:
         Dict with factorContributions, dimensionScores, topPositive, topNegative,
@@ -560,6 +664,21 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
     all_contributions.extend(fd_factors)
     all_contributions.extend(se_factors)
 
+    # Alt data dimension (6th, optional)
+    has_alt_data = False
+    ad_factors = []
+    if alt_data:
+        patents = alt_data.get("patents")
+        contracts = alt_data.get("contracts")
+        fda = alt_data.get("fda")
+        if any(d and d.get("score") for d in [patents, contracts, fda]):
+            has_alt_data = True
+            ad_factors = _score_alt_data_factors(alt_data)
+            all_contributions.extend(ad_factors)
+
+    # Determine active weights based on alt data availability
+    active_weights = WEIGHTS_WITH_ALT if has_alt_data else WEIGHTS_WITHOUT_ALT
+
     # Attach dimension and factor names
     factor_name_map = {}
     factor_dim_map = {}
@@ -571,10 +690,10 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
     for c in all_contributions:
         c["factorName"] = factor_name_map.get(c["factorId"], c["factorId"])
         c["dimension"] = factor_dim_map.get(c["factorId"], "unknown")
-        # Compute weighted contribution
+        # Compute weighted contribution using active weights
         dim_key = c["dimension"]
         dim = DIMENSIONS.get(dim_key, {})
-        dim_weight = dim.get("weight", 0.2)
+        dim_weight = active_weights.get(dim_key, dim.get("weight", 0.2))
         factor_def = next((f for f in dim.get("factors", []) if f["id"] == c["factorId"]), None)
         factor_weight = factor_def["weight"] if factor_def else 0.2
         c["weight"] = round(dim_weight * factor_weight, 4)
@@ -588,15 +707,14 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
         "fundamental": _dim_score_to_10(fd_factors, "fundamental"),
         "sentiment": _dim_score_to_10(se_factors, "sentiment"),
     }
+    if has_alt_data:
+        dimension_scores["altData"] = _dim_score_to_10(ad_factors, "altData")
 
-    # Composite score (1-10): weighted average of dimension scores
-    composite = (
-        dimension_scores["supplyChain"] * 0.20 +
-        dimension_scores["macroGeo"] * 0.15 +
-        dimension_scores["technical"] * 0.25 +
-        dimension_scores["fundamental"] * 0.25 +
-        dimension_scores["sentiment"] * 0.15
-    )
+    # Composite score (1-10): weighted average using active weights
+    composite = 0.0
+    for dim_key, weight in active_weights.items():
+        if dim_key in dimension_scores:
+            composite += dimension_scores[dim_key] * weight
     composite = round(max(1, min(10, composite)), 1)
 
     # Top positive/negative
@@ -609,6 +727,9 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
         key=lambda x: x["contribution"],
     )
 
+    factor_count = len(all_contributions)
+    dim_count = 6 if has_alt_data else 5
+
     return {
         "ticker": ticker,
         "dimensionScores": dimension_scores,
@@ -616,11 +737,16 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
         "factorContributions": all_contributions,
         "topPositive": sorted_positive[:3],
         "topNegative": sorted_negative[:3],
-        "factorCount": len(all_contributions),
+        "factorCount": factor_count,
+        "hasAltData": has_alt_data,
+        "altDataTypes": [
+            k for k in ["patents", "contracts", "fda"]
+            if alt_data and alt_data.get(k) and alt_data[k].get("score")
+        ] if alt_data else [],
         "scoringMethodology": {
-            "version": "2.0",
-            "factorCount": 25,
-            "dimensions": 5,
+            "version": "3.0",
+            "factorCount": factor_count,
+            "dimensions": dim_count,
             "lastUpdated": datetime.now(timezone.utc).isoformat(),
         },
         "analyzedAt": datetime.now(timezone.utc).isoformat(),

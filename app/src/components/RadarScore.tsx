@@ -14,6 +14,7 @@ export interface DimensionScores {
   technical: number;
   fundamental: number;
   sentiment: number;
+  altData?: number;
 }
 
 interface RadarScoreProps {
@@ -24,12 +25,17 @@ interface RadarScoreProps {
   mini?: boolean;
 }
 
-const AXES = [
+const AXES_5 = [
   { key: 'supplyChain', label: 'Supply\nChain', short: 'SC' },
   { key: 'macroGeo', label: 'Macro &\nGeo', short: 'MG' },
   { key: 'technical', label: 'Technical', short: 'TE' },
   { key: 'fundamental', label: 'Fundamental', short: 'FD' },
   { key: 'sentiment', label: 'Sentiment', short: 'SE' },
+];
+
+const AXES_6 = [
+  ...AXES_5,
+  { key: 'altData', label: 'Alt\nData', short: 'AD' },
 ];
 
 const SIGNAL_COLORS: Record<string, { fill: string; stroke: string }> = {
@@ -80,6 +86,11 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
   const radius = mini ? center * 0.85 : center * 0.65;
   const colors = SIGNAL_COLORS[signal] || SIGNAL_COLORS.HOLD;
 
+  // Dynamically choose 5 or 6 axes based on altData availability
+  const hasAltData = scores.altData != null && scores.altData > 0;
+  const AXES = hasAltData ? AXES_6 : AXES_5;
+  const numAxes = AXES.length;
+
   const scoreValues = AXES.map((a) => safeNum((scores as any)[a.key]));
 
   // Grid lines at 25%, 50%, 75%, 100%
@@ -88,14 +99,14 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
   // Build polygon points for the score shape
   const polygonPoints = scoreValues
     .map((val, i) => {
-      const pt = getPolygonPoint(i, val, center, radius, 5);
+      const pt = getPolygonPoint(i, val, center, radius, numAxes);
       return `${pt.x},${pt.y}`;
     })
     .join(' ');
 
   // Axis endpoints
   const axisEndpoints = AXES.map((_, i) =>
-    getPolygonPoint(i, 10, center, radius, 5),
+    getPolygonPoint(i, 10, center, radius, numAxes),
   );
 
   if (mini) {
@@ -105,7 +116,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
           {/* Grid */}
           {gridLevels.map((level) => {
             const pts = AXES.map((_, i) =>
-              getPolygonPoint(i, level, center, radius, 5),
+              getPolygonPoint(i, level, center, radius, numAxes),
             )
               .map((p) => `${p.x},${p.y}`)
               .join(' ');
@@ -137,7 +148,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
         {/* Grid polygons */}
         {gridLevels.map((level) => {
           const pts = AXES.map((_, i) =>
-            getPolygonPoint(i, level, center, radius, 5),
+            getPolygonPoint(i, level, center, radius, numAxes),
           )
             .map((p) => `${p.x},${p.y}`)
             .join(' ');
@@ -175,7 +186,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
 
         {/* Score dots */}
         {scoreValues.map((val, i) => {
-          const pt = getPolygonPoint(i, val, center, radius, 5);
+          const pt = getPolygonPoint(i, val, center, radius, numAxes);
           return (
             <Circle
               key={`dot-${i}`}
@@ -190,7 +201,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
 
       {/* Axis labels (positioned around the chart) */}
       {AXES.map((axis, i) => {
-        const labelPt = getPolygonPoint(i, 12.5, center, radius, 5);
+        const labelPt = getPolygonPoint(i, 12.5, center, radius, numAxes);
         return (
           <TouchableOpacity
             key={axis.key}

@@ -608,6 +608,7 @@ export interface DimensionScores {
   technical: number;
   fundamental: number;
   sentiment: number;
+  altData?: number;         // 0-10, optional 6th dimension
 }
 
 export interface ScoringMethodology {
@@ -625,10 +626,122 @@ export interface FactorAnalysis {
   topPositive: FactorContribution[];
   topNegative: FactorContribution[];
   factorCount: number;
+  hasAltData?: boolean;
+  altDataTypes?: string[];  // ['patents', 'contracts', 'fda']
   scoringMethodology: ScoringMethodology;
   analyzedAt: string;
   source?: string;
   error?: string;
+}
+
+// ─── Alternative Data Types ───
+
+export interface PatentData {
+  ticker: string;
+  score: number;            // 1-10
+  totalLast12Mo: number;
+  totalPrior12Mo: number;
+  total5Yr: number;
+  velocity: number;         // % YoY change
+  velocityScore: number;
+  avgCitations: number;
+  qualityScore: number;
+  distinctCpcSections: number;
+  breadthScore: number;
+  recencyRatio: number;
+  recencyScore: number;
+  recentPatents: Array<{
+    patentId: string;
+    title: string;
+    date: string;
+    category: string;
+    citations: number;
+  }>;
+  techDistribution: Record<string, number>;
+  quarterly: Array<{ quarter: string; count: number }>;
+  assigneeName: string;
+  dataSource: string;
+  analyzedAt: string;
+}
+
+export interface ContractData {
+  ticker: string;
+  score: number;            // 1-10
+  totalValueCurrent: number;
+  totalValuePrior: number;
+  awardGrowth: number;      // % YoY
+  growthScore: number;
+  activeContracts: number;
+  pipelineScore: number;
+  distinctAgencies: number;
+  diversificationScore: number;
+  majorAwardsCount: number;
+  dealScore: number;
+  recentAwards: Array<{
+    awardId: string;
+    agency: string;
+    value: number;
+    description: string;
+  }>;
+  agencyBreakdown: Array<{ agency: string; amount: number }>;
+  quarterly: Array<{ quarter: string; value: number }>;
+  recipientName: string;
+  dataSource: string;
+  analyzedAt: string;
+}
+
+export interface FDAData {
+  ticker: string;
+  score: number;            // 1-10
+  totalActiveTrials: number;
+  phaseCounts: Record<string, number>;
+  pipelineFunnel: {
+    phase1: number;
+    phase2: number;
+    phase3: number;
+    phase4: number;
+    approved: number;
+  };
+  pipelineScore: number;
+  approvalScore: number;
+  catalystScore: number;
+  winsScore: number;
+  upcomingPDUFA: Array<{
+    trialId: string;
+    drugName: string;
+    indication: string;
+    estimatedDate: string;
+    daysAway: number;
+    isWithin90Days: boolean;
+  }>;
+  pdufaWithin90Days: number;
+  recentApprovals: Array<{
+    brandName: string;
+    genericName: string;
+    applicationNumber: string;
+    approvalDate: string;
+    submissionType: string;
+  }>;
+  topTrials: Array<{
+    nctId: string;
+    title: string;
+    phase: string;
+    status: string;
+    condition: string;
+    intervention: string;
+    completionDate: string;
+  }>;
+  sponsorName: string;
+  dataSource: string;
+  analyzedAt: string;
+}
+
+export interface AlternativeData {
+  ticker: string;
+  available: string[];      // ['patents', 'contracts', 'fda']
+  patents?: PatentData;
+  contracts?: ContractData;
+  fda?: FDAData;
 }
 
 // ─── Auth Types ───
@@ -717,6 +830,7 @@ export type RootStackParamList = {
   MainTabs: undefined;
   SignalDetail: { ticker: string; feedItemId: string };
   FinancialHealth: { ticker: string };
+  AlternativeData: { ticker: string };
   Profile: undefined;
   WealthSimulator: undefined;
   TaxStrategy: undefined;

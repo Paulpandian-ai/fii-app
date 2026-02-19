@@ -16,7 +16,7 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData } from '../services/api';
 import type {
   FullAnalysis,
   PriceData,
@@ -25,6 +25,7 @@ import type {
   FactorAnalysis,
   FactorContribution,
   DimensionScores,
+  AlternativeData,
   FactorCategory,
   Confidence,
   Signal,
@@ -82,6 +83,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [technicals, setTechnicals] = useState<TechnicalAnalysis | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalAnalysis | null>(null);
   const [factors, setFactors] = useState<FactorAnalysis | null>(null);
+  const [altData, setAltData] = useState<AlternativeData | null>(null);
   const [showAllFactors, setShowAllFactors] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -93,18 +95,20 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const loadData = async () => {
     setLoading(true);
     try {
-      const [signalData, price, techData, fundData, factorData] = await Promise.all([
+      const [signalData, price, techData, fundData, factorData, altResult] = await Promise.all([
         getSignalDetail(ticker).catch(() => null),
         getPrice(ticker).catch(() => null),
         getTechnicals(ticker).catch(() => null),
         getFundamentals(ticker).catch(() => null),
         getFactors(ticker).catch(() => null),
+        getAltData(ticker).catch(() => null),
       ]);
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
       if (techData && techData.indicatorCount > 0) setTechnicals(techData);
       if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData);
       if (factorData && factorData.dimensionScores) setFactors(factorData);
+      if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
     } finally {
       setLoading(false);
     }
@@ -474,6 +478,44 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
+        {/* Section 5b: Alternative Data Insights */}
+        {altData && altData.available.length > 0 && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.altDataCard}
+              onPress={() => navigation.push('AlternativeData', { ticker })}
+              activeOpacity={0.7}
+            >
+              <View style={styles.altDataLeft}>
+                <View style={styles.altDataIcons}>
+                  {altData.available.includes('patents') && (
+                    <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
+                  )}
+                  {altData.available.includes('contracts') && (
+                    <Ionicons name="business-outline" size={16} color="#60A5FA" />
+                  )}
+                  {altData.available.includes('fda') && (
+                    <Ionicons name="medical-outline" size={16} color="#8B5CF6" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.altDataTitle}>Alternative Data Insights</Text>
+                  <Text style={styles.altDataInsight} numberOfLines={1}>
+                    {altData.patents && altData.patents.score > 0
+                      ? `Patent filings ${altData.patents.velocity >= 0 ? 'up' : 'down'} ${Math.abs(safeNum(altData.patents.velocity)).toFixed(0)}% YoY`
+                      : altData.fda && altData.fda.score > 0
+                      ? `${altData.fda.pdufaWithin90Days} PDUFA date${altData.fda.pdufaWithin90Days !== 1 ? 's' : ''} within 90 days`
+                      : altData.contracts && altData.contracts.score > 0
+                      ? `Gov contracts ${altData.contracts.awardGrowth >= 0 ? 'up' : 'down'} ${Math.abs(safeNum(altData.contracts.awardGrowth)).toFixed(0)}% YoY`
+                      : `${altData.available.length} alt data source${altData.available.length > 1 ? 's' : ''} available`}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Section 6: Alternatives */}
         {showAlternatives && (
           <View style={styles.section}>
@@ -645,4 +687,14 @@ const styles = StyleSheet.create({
   },
   factorBarFill: { height: 6, borderRadius: 3 },
   factorBarValue: { fontSize: 11, fontWeight: '800', width: 36, textAlign: 'right' },
+  // Alt Data Card
+  altDataCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(139,92,246,0.06)', borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(139,92,246,0.15)',
+  },
+  altDataLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  altDataIcons: { flexDirection: 'row', gap: 4 },
+  altDataTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  altDataInsight: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
 });

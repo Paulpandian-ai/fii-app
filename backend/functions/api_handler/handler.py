@@ -17,6 +17,7 @@ Routes:
   GET  /prices/<ticker>              — Alias for /price/<ticker>
   GET  /technicals/<ticker>          — Technical indicators (15 indicators)
   GET  /fundamentals/<ticker>        — Financial health + DCF valuation
+  GET  /altdata/<ticker>             — Alternative data (patents, contracts, FDA)
   GET  /trending                     — Social proof / trending stocks
   GET  /discovery                    — Tinder-style discovery cards
   GET  /watchlist                    — User watchlists
@@ -53,6 +54,9 @@ import finnhub_client
 import technical_engine
 import fundamentals_engine
 import factor_engine
+import patent_engine
+import contract_engine
+import fda_engine
 
 
 def lambda_handler(event, context):
@@ -104,6 +108,9 @@ def lambda_handler(event, context):
         elif path.startswith("/factors/"):
             ticker = path.split("/factors/")[-1].strip("/").upper()
             return _handle_factors(http_method, ticker)
+        elif path.startswith("/altdata/"):
+            ticker = path.split("/altdata/")[-1].strip("/").upper()
+            return _handle_altdata(http_method, ticker)
         elif path.startswith("/search"):
             return _handle_search(http_method, query_params)
         elif path.startswith("/signals/refresh-all"):
@@ -797,6 +804,9 @@ def _handle_factors(method, ticker):
         except Exception as e:
             print(f"[Factors] Failed to fetch live fundamentals for {ticker}: {e}")
 
+    # 2b) Gather alternative data (cached or live)
+    alt_data = _gather_alt_data(ticker)
+
     # 3) Compute enhanced factors
     try:
         result = factor_engine.compute_factors(
@@ -804,6 +814,7 @@ def _handle_factors(method, ticker):
             signal_data=signal_data,
             technicals=technicals_data,
             fundamentals=fundamentals_data,
+            alt_data=alt_data,
         )
 
         # 4) Cache to DynamoDB
@@ -833,6 +844,142 @@ def _handle_factors(method, ticker):
             "dimensionScores": {},
             "factorContributions": [],
         })
+
+
+# ─── Alternative Data Helpers ───
+
+def _gather_alt_data(ticker):
+    """Gather alternative data (patents, contracts, FDA) for a ticker.
+
+    Tries DynamoDB cache first (24h for patents, 7d for contracts/FDA),
+    then fetches live from APIs.
+    """
+    from datetime import datetime, timezone
+
+    alt_data = {}
+
+    # Patents
+    try:
+        cached = db.get_item(f"PATENTS#{ticker}", "LATEST")
+        if cached:
+            cached_at = cached.get("cachedAt", "")
+            try:
+                ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                if age_hours < 720:  # 30 days cache for patents
+                    alt_data["patents"] = cached.get("data", {})
+            except Exception:
+                pass
+
+        if "patents" not in alt_data:
+            patent_result = patent_engine.analyze(ticker)
+            if patent_result:
+                alt_data["patents"] = patent_result
+                try:
+                    db.put_item({
+                        "PK": f"PATENTS#{ticker}",
+                        "SK": "LATEST",
+                        "data": patent_result,
+                        "cachedAt": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[AltData] Patent analysis failed for {ticker}: {e}")
+
+    # Government Contracts
+    try:
+        cached = db.get_item(f"CONTRACTS#{ticker}", "LATEST")
+        if cached:
+            cached_at = cached.get("cachedAt", "")
+            try:
+                ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                if age_hours < 168:  # 7 days cache
+                    alt_data["contracts"] = cached.get("data", {})
+            except Exception:
+                pass
+
+        if "contracts" not in alt_data:
+            contract_result = contract_engine.analyze(ticker)
+            if contract_result:
+                alt_data["contracts"] = contract_result
+                try:
+                    db.put_item({
+                        "PK": f"CONTRACTS#{ticker}",
+                        "SK": "LATEST",
+                        "data": contract_result,
+                        "cachedAt": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[AltData] Contract analysis failed for {ticker}: {e}")
+
+    # FDA Pipeline
+    try:
+        cached = db.get_item(f"FDA#{ticker}", "LATEST")
+        if cached:
+            cached_at = cached.get("cachedAt", "")
+            try:
+                ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                if age_hours < 168:  # 7 days cache
+                    alt_data["fda"] = cached.get("data", {})
+            except Exception:
+                pass
+
+        if "fda" not in alt_data:
+            fda_result = fda_engine.analyze(ticker)
+            if fda_result:
+                alt_data["fda"] = fda_result
+                try:
+                    db.put_item({
+                        "PK": f"FDA#{ticker}",
+                        "SK": "LATEST",
+                        "data": fda_result,
+                        "cachedAt": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[AltData] FDA analysis failed for {ticker}: {e}")
+
+    return alt_data if alt_data else None
+
+
+def _handle_altdata(method, ticker):
+    """GET /altdata/<ticker> — Alternative data signals (patents, contracts, FDA)."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    alt_data = _gather_alt_data(ticker)
+
+    if not alt_data:
+        return _response(200, {
+            "ticker": ticker,
+            "available": [],
+            "message": "No alternative data available for this ticker",
+        })
+
+    available = []
+    if alt_data.get("patents") and alt_data["patents"].get("score"):
+        available.append("patents")
+    if alt_data.get("contracts") and alt_data["contracts"].get("score"):
+        available.append("contracts")
+    if alt_data.get("fda") and alt_data["fda"].get("score"):
+        available.append("fda")
+
+    return _response(200, {
+        "ticker": ticker,
+        "available": available,
+        "patents": alt_data.get("patents"),
+        "contracts": alt_data.get("contracts"),
+        "fda": alt_data.get("fda"),
+    })
 
 
 # ─── Search Endpoint ───

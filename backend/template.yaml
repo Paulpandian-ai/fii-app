@@ -331,6 +331,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetAltData:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /altdata/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetSearch:
           Type: HttpApi
           Properties:
