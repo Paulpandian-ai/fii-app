@@ -80,11 +80,14 @@ def lambda_handler(event, context):
 
 
 def _compile_feed() -> list[dict]:
-    """Read all signals from DynamoDB and build ranked feed with educational cards."""
-    from models import STOCK_UNIVERSE
+    """Read all signals from DynamoDB and build ranked feed with educational cards.
+
+    Prioritizes TIER_1 stocks (richest data), then TIER_2, then TIER_3/ETF.
+    """
+    from models import ALL_SECURITIES, TIER_1_SET, ETF_SET, get_tier
 
     # Batch-read all SIGNAL#* | LATEST items
-    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in STOCK_UNIVERSE]
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in ALL_SECURITIES]
     items = db.batch_get(keys)
 
     if not items:
@@ -98,6 +101,8 @@ def _compile_feed() -> list[dict]:
         if not ticker:
             continue
         top_factors = json.loads(item.get("topFactors", "[]"))
+        tier = item.get("tier") or get_tier(ticker)
+        is_etf = item.get("isETF", False) or ticker in ETF_SET
         signals.append({
             "id": f"signal-{ticker}",
             "type": "signal",
@@ -109,11 +114,16 @@ def _compile_feed() -> list[dict]:
             "insight": item.get("insight", ""),
             "topFactors": top_factors,
             "updatedAt": item.get("lastUpdated", ""),
+            "tier": tier,
+            "isETF": is_etf,
+            "tierLabel": "Full Analysis" if tier == "TIER_1" else "Technical + Fundamental" if tier == "TIER_2" else "ETF" if is_etf else "Technical Only",
         })
 
-    # Sort: highest confidence first, then most extreme scores
+    # Sort: TIER_1 first, then by confidence, then by score extremity
+    tier_order = {"TIER_1": 0, "TIER_2": 1, "TIER_3": 2, "ETF": 3}
     confidence_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     signals.sort(key=lambda x: (
+        tier_order.get(x.get("tier", "TIER_3"), 3),
         confidence_order.get(x.get("confidence", "MEDIUM"), 1),
         -abs(x.get("compositeScore", 5.0) - 5.5),
     ))

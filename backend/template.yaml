@@ -1093,35 +1093,20 @@ Resources:
             Description: Refresh prices every 30 min during market hours (9:30AM-4PM ET)
             Enabled: true
             Input: '{"mode": "prices"}'
-        # Batched daily full refresh for 100+ stock universe
-        DailyBatch1:
+        MarketOpenRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(45 14 ? * MON-FRI *)
+            Description: Market-open price refresh at 9:45 AM ET
+            Enabled: true
+            Input: '{"mode": "prices"}'
+        DailyFullRefresh:
           Type: Schedule
           Properties:
             Schedule: cron(30 21 ? * MON-FRI *)
-            Description: Batch 1 (stocks 1-25) at 4:30 PM ET
+            Description: Full daily refresh for 523 securities at 4:30 PM ET
             Enabled: true
-            Input: '{"mode": "full", "batch": 1}'
-        DailyBatch2:
-          Type: Schedule
-          Properties:
-            Schedule: cron(45 21 ? * MON-FRI *)
-            Description: Batch 2 (stocks 26-50) at 4:45 PM ET
-            Enabled: true
-            Input: '{"mode": "full", "batch": 2}'
-        DailyBatch3:
-          Type: Schedule
-          Properties:
-            Schedule: cron(0 22 ? * MON-FRI *)
-            Description: Batch 3 (stocks 51-75) at 5:00 PM ET
-            Enabled: true
-            Input: '{"mode": "full", "batch": 3}'
-        DailyBatch4:
-          Type: Schedule
-          Properties:
-            Schedule: cron(15 22 ? * MON-FRI *)
-            Description: Batch 4 (stocks 76-100+) at 5:15 PM ET
-            Enabled: true
-            Input: '{"mode": "full", "batch": 4}'
+            Input: '{"mode": "full"}'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]

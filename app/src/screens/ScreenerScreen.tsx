@@ -177,53 +177,86 @@ export const ScreenerScreen: React.FC = () => {
   const [results, setResults] = useState<ScreenerResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const PAGE_SIZE = 20;
 
   // ─── Data Fetching ───
+
+  const _buildParams = useCallback((appliedFilters: ScreenerFilters, offset = 0) => {
+    const params: Record<string, any> = { limit: String(PAGE_SIZE), offset: String(offset) };
+    if (appliedFilters.aiScoreMin > 1 || appliedFilters.aiScoreMax < 10) {
+      params.aiScore = `${appliedFilters.aiScoreMin},${appliedFilters.aiScoreMax}`;
+    }
+    if (appliedFilters.techScoreMin > 1 || appliedFilters.techScoreMax < 10) {
+      params.technicalScore = `${appliedFilters.techScoreMin},${appliedFilters.techScoreMax}`;
+    }
+    if (appliedFilters.signals.length > 0) params.signal = appliedFilters.signals.join(',');
+    if (appliedFilters.sectors.length > 0) params.sector = appliedFilters.sectors.join(',');
+    if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
+    if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
+    const sortMap: Record<string, string> = {
+      'AI Score': 'aiScore', 'Tech Score': 'technicalScore',
+      'Price Change': 'changePercent', 'Volume': 'volume',
+    };
+    if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'aiScore';
+    return params;
+  }, []);
+
+  const _parseItems = (data: any): ScreenerResult[] =>
+    (data?.results || data?.items || []).map((item: any) => ({
+      ticker: item.ticker || '',
+      companyName: item.companyName || item.company_name || '',
+      price: item.price ?? 0,
+      changePercent: item.changePercent ?? item.change_percent ?? 0,
+      aiScore: item.aiScore ?? item.compositeScore ?? item.score ?? 0,
+      technicalScore: item.technicalScore ?? item.techScore ?? 0,
+      fundamentalGrade: item.fundamentalGrade ?? item.grade ?? 'N/A',
+      signal: item.signal || 'HOLD',
+      sector: item.sector || '',
+      marketCap: item.marketCap || '',
+      volume: item.volume ?? 0,
+      dataPending: item.dataPending ?? false,
+      tier: item.tier || 'TIER_3',
+      isETF: item.isETF ?? false,
+    }));
 
   const fetchResults = useCallback(async (appliedFilters: ScreenerFilters) => {
     setError(null);
     try {
-      const params: Record<string, any> = {};
-      // Backend expects "aiScore=min,max" format
-      if (appliedFilters.aiScoreMin > 1 || appliedFilters.aiScoreMax < 10) {
-        params.aiScore = `${appliedFilters.aiScoreMin},${appliedFilters.aiScoreMax}`;
-      }
-      if (appliedFilters.techScoreMin > 1 || appliedFilters.techScoreMax < 10) {
-        params.technicalScore = `${appliedFilters.techScoreMin},${appliedFilters.techScoreMax}`;
-      }
-      if (appliedFilters.signals.length > 0) params.signal = appliedFilters.signals.join(',');
-      if (appliedFilters.sectors.length > 0) params.sector = appliedFilters.sectors.join(',');
-      if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
-      if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
-      const sortMap: Record<string, string> = {
-        'AI Score': 'aiScore', 'Tech Score': 'technicalScore',
-        'Price Change': 'changePercent', 'Volume': 'volume',
-      };
-      if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'aiScore';
-
+      const params = _buildParams(appliedFilters, 0);
       const data = await getScreener(params);
-      const items: ScreenerResult[] = (data?.results || data?.items || []).map((item: any) => ({
-        ticker: item.ticker || '',
-        companyName: item.companyName || item.company_name || '',
-        price: item.price ?? 0,
-        changePercent: item.changePercent ?? item.change_percent ?? 0,
-        aiScore: item.aiScore ?? item.compositeScore ?? item.score ?? 0,
-        technicalScore: item.technicalScore ?? item.techScore ?? 0,
-        fundamentalGrade: item.fundamentalGrade ?? item.grade ?? 'N/A',
-        signal: item.signal || 'HOLD',
-        sector: item.sector || '',
-        marketCap: item.marketCap || '',
-        volume: item.volume ?? 0,
-        dataPending: item.dataPending ?? false,
-      }));
+      const items = _parseItems(data);
       setResults(items);
+      setTotalCount(data?.total ?? items.length);
+      setHasMore(data?.hasMore ?? false);
+      setCurrentOffset(PAGE_SIZE);
     } catch (err: any) {
       setError('Failed to load screener results. Pull to refresh.');
       setResults([]);
     }
-  }, []);
+  }, [_buildParams]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const params = _buildParams(filters, currentOffset);
+      const data = await getScreener(params);
+      const items = _parseItems(data);
+      setResults(prev => [...prev, ...items]);
+      setHasMore(data?.hasMore ?? false);
+      setCurrentOffset(prev => prev + PAGE_SIZE);
+    } catch {
+      // Silently fail on load more
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, filters, currentOffset, _buildParams]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -635,7 +668,21 @@ export const ScreenerScreen: React.FC = () => {
           keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
           ListHeaderComponent={results.length > 0 ? renderHeader : null}
           ListEmptyComponent={renderEmpty}
-          ListFooterComponent={results.length > 0 ? <DisclaimerBanner /> : null}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={results.length > 0 ? (
+            <>
+              {totalCount > 0 && (
+                <Text style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingVertical: 8, fontSize: 12 }}>
+                  Showing {results.length} of {totalCount} stocks
+                </Text>
+              )}
+              {loadingMore && (
+                <ActivityIndicator size="small" color="#60A5FA" style={{ paddingVertical: 12 }} />
+              )}
+              <DisclaimerBanner />
+            </>
+          ) : null}
           contentContainerStyle={results.length === 0 ? styles.emptyList : styles.resultList}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={true}

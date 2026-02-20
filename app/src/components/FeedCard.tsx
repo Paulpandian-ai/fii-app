@@ -230,6 +230,13 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
               </Text>
             </View>
           )}
+          {(item as any).tierLabel && (
+            <View style={[styles.confidencePill, { backgroundColor: (item as any).isETF ? '#8B5CF620' : '#60A5FA20' }]}>
+              <Text style={[styles.confidenceText, { color: (item as any).isETF ? '#8B5CF6' : '#60A5FA' }]}>
+                {(item as any).tierLabel}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Technical Indicator Badge */}

@@ -28,14 +28,20 @@ import finnhub_client
 import technical_engine
 import sec_edgar
 from models import (
+    ALL_SECURITIES,
     COMPANY_NAMES,
+    ETF_SET,
     FACTOR_IDS,
     FACTOR_NAMES,
     PEER_MAP,
     STOCK_UNIVERSE,
+    TIER_1_SET,
+    TIER_2_SET,
+    TIER_3_SET,
     compute_composite_score,
     determine_confidence,
     determine_signal,
+    get_tier,
 )
 
 logger = logging.getLogger()
@@ -55,11 +61,12 @@ def lambda_handler(event, context):
 
         tickers = _extract_tickers(event)
 
-        # Single ticker — process it directly
+        # Single ticker — process it directly (tier-aware)
         if len(tickers) == 1:
             ticker = tickers[0]
-            logger.info(f"[SignalEngine] Analyzing {ticker}...")
-            result = analyze_ticker(ticker)
+            tier = get_tier(ticker)
+            logger.info(f"[SignalEngine] Analyzing {ticker} (tier={tier})...")
+            result = analyze_ticker(ticker, tier=tier)
             logger.info(
                 f"[SignalEngine] {ticker}: score={result['compositeScore']}, "
                 f"signal={result['signal']}"
@@ -150,32 +157,40 @@ def _extract_tickers(event: dict) -> list[str]:
     if "tickers" in body:
         return [t.upper() for t in body["tickers"]]
 
-    # Scheduled: analyze full universe
-    return STOCK_UNIVERSE
+    # Scheduled: analyze full universe (stocks + ETFs)
+    return list(ALL_SECURITIES)
 
 
-def analyze_ticker(ticker: str) -> dict:
-    """Run full 6-factor analysis pipeline for a single ticker.
+def analyze_ticker(ticker: str, tier: str = None) -> dict:
+    """Run tiered analysis pipeline for a single ticker.
 
-    Steps:
-    1. Fetch SEC filing data and extract supply chain entities
-    2. Fetch FRED macro indicators
-    3. Fetch Yahoo Finance market data
-    4. Compute correlation matrix
-    5. Send all data to Claude for 18-factor scoring
-    6. Compute composite score
-    7. Generate Claude reasoning (80-120 words)
-    8. Generate alternatives (for SELL/weak HOLD)
-    9. Store results in DynamoDB + S3
+    Tier determines analysis depth:
+    - TIER_1: Full Claude AI + all 6 factors + supply chain + reasoning
+    - TIER_2: Technical + Fundamental only (no Claude, no supply chain)
+    - TIER_3: Technical only
+    - ETF: Technical only with isETF flag
 
     Args:
         ticker: Stock ticker symbol.
+        tier: Analysis tier. Auto-detected if not provided.
 
     Returns:
         Complete signal result dict.
     """
+    if tier is None:
+        tier = get_tier(ticker)
+
     company_name = COMPANY_NAMES.get(ticker, ticker)
     peers = PEER_MAP.get(ticker, [])
+    is_etf = ticker in ETF_SET
+
+    # ── TIER_3 and ETF: Technical-only analysis (fast path) ──
+    if tier in ("TIER_3", "ETF"):
+        return _analyze_technical_only(ticker, company_name, is_etf)
+
+    # ── TIER_2: Technical + Fundamental (no Claude AI) ──
+    if tier == "TIER_2":
+        return _analyze_tier2(ticker, company_name, peers)
 
     # ── Step 1: SEC Filing Extraction ──
     logger.info(f"[{ticker}] Step 1: SEC filing extraction")
@@ -312,6 +327,160 @@ def analyze_ticker(ticker: str) -> dict:
     return result
 
 
+def _analyze_technical_only(ticker: str, company_name: str, is_etf: bool = False) -> dict:
+    """TIER_3 / ETF analysis: technical score only."""
+    logger.info(f"[{ticker}] Technical-only analysis (tier={'ETF' if is_etf else 'TIER_3'})")
+
+    # Fetch market data
+    yf_data = {}
+    try:
+        yf_data = finnhub_client.get_market_data_for_signal(ticker)
+    except Exception as e:
+        logger.warning(f"[{ticker}] Market data fetch failed: {e}")
+
+    # Technical indicators
+    tech_data = {}
+    technical_score = 5.0
+    try:
+        candles = finnhub_client.get_candles(ticker, resolution="D")
+        if candles:
+            tech_data = technical_engine.compute_indicators(candles)
+            technical_score = tech_data.get("technicalScore", 5.0)
+    except Exception as e:
+        logger.warning(f"[{ticker}] Technical analysis failed: {e}")
+
+    # Composite = technical score mapped to 1-10
+    composite_score = round(max(1.0, min(10.0, technical_score)), 1)
+    signal = determine_signal(composite_score)
+    now = datetime.now(timezone.utc).isoformat()
+
+    result = {
+        "ticker": ticker,
+        "companyName": company_name,
+        "compositeScore": composite_score,
+        "signal": signal.value,
+        "confidence": "LOW",
+        "insight": f"Technical analysis only. Score: {composite_score}/10.",
+        "reasoning": "",
+        "topFactors": [],
+        "factorDetails": {},
+        "alternatives": [],
+        "analyzedAt": now,
+        "tier": "ETF" if is_etf else "TIER_3",
+        "isETF": is_etf,
+        "marketData": {
+            "currentPrice": yf_data.get("current_price", 0),
+            "marketCap": yf_data.get("market_cap", 0),
+            "beta": yf_data.get("beta", 1.0),
+            "forwardPE": yf_data.get("forward_pe", 0),
+            "earningsSurprise": yf_data.get("earnings_surprise_pct", 0),
+        },
+        "technicalAnalysis": {
+            "technicalScore": technical_score,
+            "rsi": tech_data.get("rsi"),
+            "macd": tech_data.get("macd", {}),
+            "sma20": tech_data.get("sma20"),
+            "sma50": tech_data.get("sma50"),
+            "sma200": tech_data.get("sma200"),
+            "bollingerBands": tech_data.get("bollingerBands", {}),
+            "atr": tech_data.get("atr"),
+            "signals": tech_data.get("signals", {}),
+            "indicatorCount": tech_data.get("indicatorCount", 0),
+        },
+    }
+
+    _store_signal(ticker, result)
+    return result
+
+
+def _analyze_tier2(ticker: str, company_name: str, peers: list) -> dict:
+    """TIER_2 analysis: technical + fundamental (no Claude AI)."""
+    logger.info(f"[{ticker}] TIER_2 analysis (technical + fundamental)")
+
+    # Market data
+    yf_data = {}
+    try:
+        yf_data = finnhub_client.get_market_data_for_signal(ticker)
+    except Exception as e:
+        logger.warning(f"[{ticker}] Market data fetch failed: {e}")
+
+    # Technical indicators
+    tech_data = {}
+    technical_score = 5.0
+    try:
+        candles = finnhub_client.get_candles(ticker, resolution="D")
+        if candles:
+            tech_data = technical_engine.compute_indicators(candles)
+            technical_score = tech_data.get("technicalScore", 5.0)
+    except Exception as e:
+        logger.warning(f"[{ticker}] Technical analysis failed: {e}")
+
+    # Fundamental score from market data
+    fundamental_score = 5.0
+    eps = yf_data.get("earnings_surprise_pct", 0)
+    fpe = yf_data.get("forward_pe", 0)
+    beta = yf_data.get("beta", 1.0)
+    # Simple fundamental scoring
+    f_score = 5.0
+    if eps > 5:
+        f_score += 1.5
+    elif eps > 0:
+        f_score += 0.5
+    elif eps < -5:
+        f_score -= 1.5
+    if fpe and 5 < fpe < 25:
+        f_score += 0.5
+    elif fpe and fpe > 50:
+        f_score -= 0.5
+    if beta and beta > 1.5:
+        f_score -= 0.5
+    fundamental_score = max(1.0, min(10.0, f_score))
+
+    # Composite: 50% technical + 50% fundamental
+    composite_score = round((technical_score * 0.5 + fundamental_score * 0.5), 1)
+    composite_score = max(1.0, min(10.0, composite_score))
+    signal = determine_signal(composite_score)
+    now = datetime.now(timezone.utc).isoformat()
+
+    result = {
+        "ticker": ticker,
+        "companyName": company_name,
+        "compositeScore": composite_score,
+        "signal": signal.value,
+        "confidence": "LOW",
+        "insight": f"Technical + fundamental analysis. Score: {composite_score}/10.",
+        "reasoning": "",
+        "topFactors": [],
+        "factorDetails": {},
+        "alternatives": [],
+        "analyzedAt": now,
+        "tier": "TIER_2",
+        "isETF": False,
+        "marketData": {
+            "currentPrice": yf_data.get("current_price", 0),
+            "marketCap": yf_data.get("market_cap", 0),
+            "beta": beta,
+            "forwardPE": fpe,
+            "earningsSurprise": eps,
+        },
+        "technicalAnalysis": {
+            "technicalScore": technical_score,
+            "rsi": tech_data.get("rsi"),
+            "macd": tech_data.get("macd", {}),
+            "sma20": tech_data.get("sma20"),
+            "sma50": tech_data.get("sma50"),
+            "sma200": tech_data.get("sma200"),
+            "bollingerBands": tech_data.get("bollingerBands", {}),
+            "atr": tech_data.get("atr"),
+            "signals": tech_data.get("signals", {}),
+            "indicatorCount": tech_data.get("indicatorCount", 0),
+        },
+    }
+
+    _store_signal(ticker, result)
+    return result
+
+
 def _merge_precomputed_scores(
     factor_details: dict,
     macro_data: dict,
@@ -392,7 +561,7 @@ def _normalize_signals() -> None:
     all_scores = []
     signal_items = []
 
-    for ticker in STOCK_UNIVERSE:
+    for ticker in ALL_SECURITIES:
         try:
             item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
             if item:
@@ -466,9 +635,11 @@ def _store_signal(ticker: str, result: dict) -> None:
         "signal": result["signal"],
         "confidence": result["confidence"],
         "insight": result["insight"],
-        "reasoning": result["reasoning"],
-        "topFactors": json.dumps(result["topFactors"]),
+        "reasoning": result.get("reasoning", ""),
+        "topFactors": json.dumps(result.get("topFactors", [])),
         "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
+        "tier": result.get("tier", "TIER_1"),
+        "isETF": result.get("isETF", False),
         "lastUpdated": now,
     })
 

@@ -169,7 +169,7 @@ def _handle_earnings_calendar(method, query_params):
         return _response(405, {"error": "Method not allowed"})
 
     from datetime import datetime, timedelta, timezone
-    from models import STOCK_UNIVERSE, COMPANY_NAMES
+    from models import ALL_SECURITIES, COMPANY_NAMES
 
     now = datetime.now(timezone.utc)
     from_date = now.strftime("%Y-%m-%d")
@@ -181,7 +181,7 @@ def _handle_earnings_calendar(method, query_params):
         raw = finnhub_client._call(f"/calendar/earnings?from={from_date}&to={to_date}")
         all_earnings = raw.get("earningsCalendar", [])
 
-        tracked_set = set(STOCK_UNIVERSE)
+        tracked_set = set(ALL_SECURITIES)
         for e in all_earnings:
             ticker = e.get("symbol", "")
             if ticker in tracked_set:
@@ -273,11 +273,11 @@ def _handle_market_movers(method):
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
-    from models import STOCK_UNIVERSE, COMPANY_NAMES
+    from models import ALL_SECURITIES, COMPANY_NAMES, ETF_SET
 
-    # Batch read all PRICE# records from DynamoDB
+    # Batch read all PRICE# records from DynamoDB (full 523 universe)
     all_prices = []
-    for ticker in STOCK_UNIVERSE:
+    for ticker in ALL_SECURITIES:
         try:
             price_item = db.get_item(f"PRICE#{ticker}", "LATEST")
             if price_item:
@@ -299,7 +299,7 @@ def _handle_market_movers(method):
 
     # If no PRICE# records exist, fall back to SIGNAL# records as "AI Favorites"
     if not all_prices:
-        for ticker in STOCK_UNIVERSE:
+        for ticker in ALL_SECURITIES:
             try:
                 signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
                 if signal_item:
@@ -350,20 +350,25 @@ def _handle_market_movers(method):
     ai_upgrades.sort(key=lambda x: x.get("scoreChange", 0), reverse=True)
     ai_downgrades.sort(key=lambda x: x.get("scoreChange", 0))
 
-    # Market summary indices (placeholder - would use real index data)
-    has_price_data = any(x["price"] > 0 for x in all_prices)
-    if has_price_data:
-        market_summary = {
-            "sp500": {"name": "S&P 500", "changePercent": round(sum(x["changePercent"] for x in by_cap[:50]) / max(len(by_cap[:50]), 1), 2)},
-            "nasdaq": {"name": "Nasdaq", "changePercent": round(sum(x["changePercent"] for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")) / max(len([x for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")]), 1), 2)},
-            "dow": {"name": "Dow Jones", "changePercent": round(sum(x["changePercent"] for x in by_cap[:30]) / max(len(by_cap[:30]), 1), 2)},
-        }
-    else:
-        market_summary = {
-            "sp500": {"name": "S&P 500", "changePercent": 0},
-            "nasdaq": {"name": "Nasdaq", "changePercent": 0},
-            "dow": {"name": "Dow Jones", "changePercent": 0},
-        }
+    # Market summary from real ETF prices (SPY=S&P500, QQQ=Nasdaq, DIA=Dow)
+    market_summary = {
+        "sp500": {"name": "S&P 500", "changePercent": 0.0},
+        "nasdaq": {"name": "Nasdaq", "changePercent": 0.0},
+        "dow": {"name": "Dow Jones", "changePercent": 0.0},
+    }
+    for item in all_prices:
+        t = item["ticker"]
+        if t == "SPY":
+            market_summary["sp500"]["changePercent"] = round(item["changePercent"], 2)
+        elif t == "QQQ":
+            market_summary["nasdaq"]["changePercent"] = round(item["changePercent"], 2)
+        elif t == "DIA":
+            market_summary["dow"]["changePercent"] = round(item["changePercent"], 2)
+    # Fallback: compute from top stocks if ETF data missing
+    if market_summary["sp500"]["changePercent"] == 0 and any(x["price"] > 0 for x in all_prices):
+        non_etf = [x for x in all_prices if x["ticker"] not in ETF_SET and x["price"] > 0]
+        if non_etf:
+            market_summary["sp500"]["changePercent"] = round(sum(x["changePercent"] for x in by_cap[:50]) / max(len(by_cap[:50]), 1), 2)
 
     # AI Favorites — top stocks by AI score
     by_ai = sorted(
@@ -1455,11 +1460,12 @@ def _handle_charts(method, ticker, query_params):
 
 # ─── Screener Endpoints ───
 
-# 15 core tracked tickers
-_SCREENER_UNIVERSE = [
-    "NVDA", "AAPL", "MSFT", "AMD", "GOOGL", "AMZN", "META",
-    "TSLA", "AVGO", "CRM", "NFLX", "JPM", "V", "UNH", "XOM",
-]
+# Full universe for screener (loaded from models)
+def _get_screener_universe():
+    from models import ALL_SECURITIES
+    return ALL_SECURITIES
+
+_SCREENER_UNIVERSE = None
 
 _MCAP_LABELS = [
     (300_000_000, "nano"),
@@ -1554,12 +1560,20 @@ def _handle_screener(method, query_params):
 
     sort_by = query_params.get("sortBy", "aiScore")
     sort_dir = query_params.get("sortDir", "desc")
-    limit = min(int(query_params.get("limit", "50")), 100)
+    limit = min(int(query_params.get("limit", "20")), 50)
+    offset = int(query_params.get("offset", "0"))
+    show_etf = query_params.get("showETF", "true").lower() == "true"
+    tier_filter = [t.strip() for t in query_params.get("tier", "").split(",") if t.strip()] or None
 
-    # Gather data for all tracked stocks
-    from models import STOCK_SECTORS
+    # Gather data for all tracked securities
+    from models import STOCK_SECTORS, ETF_SET, get_tier
+    screener_universe = _get_screener_universe()
     results = []
-    for t in _SCREENER_UNIVERSE:
+    for t in screener_universe:
+        # ETF filter
+        is_etf = t in ETF_SET
+        if is_etf and not show_etf:
+            continue
         signal = db.get_item(f"SIGNAL#{t}", "LATEST")
         if not signal:
             continue
@@ -1623,6 +1637,11 @@ def _handle_screener(method, query_params):
         if mcap_filter and mcap_lbl not in mcap_filter:
             continue
 
+        stock_tier = get_tier(t)
+        # Tier filter
+        if tier_filter and stock_tier not in tier_filter:
+            continue
+
         results.append({
             "ticker": t,
             "companyName": company,
@@ -1640,6 +1659,8 @@ def _handle_screener(method, query_params):
             "marketCapLabel": mcap_lbl,
             "peRatio": round(pe, 1) if pe else None,
             "dataPending": not price_data or price == 0.0,
+            "tier": stock_tier,
+            "isETF": is_etf,
         })
 
     # Normalize signals based on mean ± 0.5*stddev
@@ -1661,11 +1682,14 @@ def _handle_screener(method, query_params):
     results.sort(key=key_fn, reverse=(sort_dir == "desc"))
 
     total = len(results)
-    results = results[:limit]
+    paginated = results[offset:offset + limit]
 
     return _response(200, {
-        "results": results,
+        "results": paginated,
         "total": total,
+        "offset": offset,
+        "limit": limit,
+        "hasMore": (offset + limit) < total,
         "sortBy": sort_by,
         "sortDir": sort_dir,
     })
@@ -1832,7 +1856,7 @@ _FALLBACK_TICKERS = [
 
 
 def _handle_search(method, query_params):
-    """GET /search?q=<query> — Ticker search via DynamoDB signals + S3 ticker list."""
+    """GET /search?q=<query> — Search across all 523 securities."""
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
@@ -1840,57 +1864,50 @@ def _handle_search(method, query_params):
     if not query or len(query) < 1:
         return _response(400, {"error": "Missing 'q' query parameter"})
 
+    from models import ALL_SECURITIES, COMPANY_NAMES, STOCK_SECTORS, get_tier
+
     query_upper = query.upper()
     query_lower = query.lower()
     results = []
     seen = set()
 
-    # 1. Check DynamoDB for an exact signal match
-    signal = db.get_item(f"SIGNAL#{query_upper}", "LATEST")
-    if signal and signal.get("ticker"):
-        t = signal["ticker"]
-        results.append({
-            "ticker": t,
-            "companyName": signal.get("companyName", t),
-            "exchange": "",
-            "sector": signal.get("sector", ""),
-            "score": round(float(signal.get("compositeScore", 0)), 1) or None,
-            "signal": signal.get("signal") or None,
-        })
-        seen.add(t)
+    # Tier sort priority: TIER_1=0, TIER_2=1, TIER_3=2, ETF=3
+    _tier_order = {"TIER_1": 0, "TIER_2": 1, "TIER_3": 2, "ETF": 3}
 
-    # 2. Search the S3 / fallback ticker database
-    ticker_db = _get_ticker_db()
-    for entry in ticker_db:
-        t = entry.get("ticker", "")
-        name = entry.get("name", "")
-        if t in seen:
-            continue
-        # Match ticker prefix or company name substring
-        if t.startswith(query_upper) or query_lower in name.lower():
+    # 1. Search all securities by ticker prefix or company name substring
+    for ticker in ALL_SECURITIES:
+        name = COMPANY_NAMES.get(ticker, "")
+        if ticker.startswith(query_upper) or query_lower in name.lower():
+            tier = get_tier(ticker)
             results.append({
-                "ticker": t,
+                "ticker": ticker,
                 "companyName": name,
-                "exchange": entry.get("exchange", ""),
-                "sector": entry.get("sector", ""),
+                "sector": STOCK_SECTORS.get(ticker, ""),
+                "tier": tier,
                 "score": None,
                 "signal": None,
+                "_tierOrder": _tier_order.get(tier, 9),
             })
-            seen.add(t)
-        if len(results) >= 10:
+            seen.add(ticker)
+        if len(results) >= 40:
             break
 
-    # 3. Enrich results with DynamoDB signals for any matched tickers
-    tickers_to_enrich = [r["ticker"] for r in results if r.get("score") is None]
-    if tickers_to_enrich:
-        signals_map = _get_signal_data_for_tickers(tickers_to_enrich)
-        for r in results:
-            if r.get("score") is None and r["ticker"] in signals_map:
-                sig = signals_map[r["ticker"]]
-                r["score"] = round(sig.get("compositeScore", 0), 1) or None
-                r["signal"] = sig.get("signal") or None
+    # 2. Sort by tier (TIER_1 first), then alphabetically
+    results.sort(key=lambda x: (x["_tierOrder"], x["ticker"]))
+    results = results[:20]
 
-    return _response(200, {"results": results[:10], "query": query})
+    # 3. Enrich with DynamoDB signals
+    for r in results:
+        try:
+            sig = db.get_item(f"SIGNAL#{r['ticker']}", "LATEST")
+            if sig:
+                r["score"] = round(float(sig.get("compositeScore", 0)), 1) or None
+                r["signal"] = sig.get("signal") or None
+        except Exception:
+            pass
+        del r["_tierOrder"]
+
+    return _response(200, {"results": results, "query": query, "total": len(results)})
 
 
 # ─── Portfolio Endpoints ───
