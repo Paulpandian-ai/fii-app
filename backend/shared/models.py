@@ -804,7 +804,7 @@ PEER_MAP: dict[str, list[str]] = {
     "ABBV": ["LLY", "MRK", "PFE", "BMY", "AMGN"],
     "MRK": ["PFE", "ABBV", "LLY", "BMY", "GILD"],
     "TMO": ["DHR", "A", "BDX", "MTD", "ILMN"],
-    "ISRG": ("SYK", "BSX", "MDT", "EW", "GEHC"),
+    "ISRG": ["SYK", "BSX", "MDT", "EW", "GEHC"],
     # ── Energy ──
     "XOM": ["CVX", "COP", "SLB", "EOG", "OXY"],
     "CVX": ["XOM", "COP", "EOG", "SLB", "MPC"],
