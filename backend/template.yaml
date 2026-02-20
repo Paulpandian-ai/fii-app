@@ -837,6 +837,48 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+        # Subscription endpoints
+        GetSubscriptionStatus:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /subscription/status
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetSubscriptionUsage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /subscription/usage
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        PostRevenueCatWebhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /webhooks/revenuecat
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        # Affiliate endpoints
+        GetAffiliateLink:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /affiliate/link
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetAffiliateBrokers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /affiliate/brokers
+            Method: GET
+            Auth:
+              Authorizer: NONE
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]

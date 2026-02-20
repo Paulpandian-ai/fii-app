@@ -16,6 +16,7 @@ import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { TradeButton } from '../components/TradeButton';
 import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory } from '../services/api';
 import { StockChart } from '../components/StockChart';
 import type { ChartData } from '../components/StockChart';
@@ -271,6 +272,9 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               </Text>
             </View>
           </View>
+
+          {/* Trade Button */}
+          <TradeButton ticker={analysis.ticker} />
         </View>
 
         {/* Section 2: AI Analysis */}

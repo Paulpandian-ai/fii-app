@@ -1083,4 +1083,5 @@ export type RootStackParamList = {
   EarningsCalendar: undefined;
   MarketDashboard: undefined;
   BasketList: undefined;
+  Paywall: { feature?: string };
 };

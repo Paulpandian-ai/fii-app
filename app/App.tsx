@@ -31,6 +31,7 @@ import { DiscussionScreen } from './src/screens/DiscussionScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { LeaderboardScreen } from './src/screens/LeaderboardScreen';
 import { AIChatScreen } from './src/screens/AIChatScreen';
+import { PaywallScreen } from './src/screens/PaywallScreen';
 import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
@@ -104,6 +105,9 @@ const WrappedLeaderboard = () => (
 );
 const WrappedAIChat = (props: any) => (
   <ErrorBoundary screenName="AIChatScreen"><AIChatScreen {...props} /></ErrorBoundary>
+);
+const WrappedPaywall = (props: any) => (
+  <ErrorBoundary screenName="PaywallScreen"><PaywallScreen {...props} /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -314,6 +318,14 @@ export default function App() {
           name="AIChat"
           component={WrappedAIChat}
           options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="Paywall"
+          component={WrappedPaywall}
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
         />
         <Stack.Screen
           name="Settings"

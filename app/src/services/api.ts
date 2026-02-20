@@ -440,4 +440,29 @@ export const registerDeviceToken = async (token: string, platform: string = 'exp
   return data;
 };
 
+// ─── Subscription ───
+
+export const getSubscriptionStatus = async () => {
+  const { data } = await api.get('/subscription/status');
+  return data;
+};
+
+export const getSubscriptionUsage = async () => {
+  const { data } = await api.get('/subscription/usage');
+  return data;
+};
+
+// ─── Affiliates ───
+
+export const getAffiliateBrokers = async (ticker?: string) => {
+  const params = ticker ? { ticker } : {};
+  const { data } = await api.get('/affiliate/brokers', { params });
+  return data;
+};
+
+export const getAffiliateLink = async (broker: string, ticker: string) => {
+  const { data } = await api.get('/affiliate/link', { params: { broker, ticker } });
+  return data;
+};
+
 export default api;

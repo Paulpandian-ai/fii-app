@@ -1,4 +1,4 @@
-"""FII Social Handler — Routes for social/community features.
+"""FII Social Handler — Routes for social/community features, subscriptions, and affiliates.
 
 Routes:
   GET  /track-record              — Aggregate signal performance stats
@@ -10,6 +10,11 @@ Routes:
   GET  /profile/{userId}          — Public profile
   GET  /leaderboard               — Top users by discipline score
   POST /chat                      — AI-powered stock Q&A
+  GET  /subscription/status       — Current tier and limits
+  GET  /subscription/usage        — Current period usage counts
+  POST /webhooks/revenuecat       — RevenueCat subscription lifecycle webhook
+  GET  /affiliate/link            — Generate broker deep link
+  GET  /affiliate/brokers         — List available brokers
 """
 
 import json
@@ -26,6 +31,8 @@ if "/opt/python" not in sys.path:
 
 import track_record
 import social
+import subscription
+import affiliates
 
 
 def lambda_handler(event, context):
@@ -54,7 +61,20 @@ def lambda_handler(event, context):
 
         # ─── Route Dispatch ───
 
-        if path.startswith("/track-record/"):
+        # Subscription routes
+        if path == "/subscription/status":
+            return _handle_subscription_status(http_method, user_id)
+        elif path == "/subscription/usage":
+            return _handle_subscription_usage(http_method, user_id)
+        elif path == "/webhooks/revenuecat":
+            return _handle_revenuecat_webhook(http_method, body)
+        # Affiliate routes
+        elif path == "/affiliate/link":
+            return _handle_affiliate_link(http_method, query_params, user_id)
+        elif path == "/affiliate/brokers":
+            return _handle_affiliate_brokers(http_method, query_params)
+        # Social routes
+        elif path.startswith("/track-record/"):
             ticker = path.split("/track-record/")[-1].strip("/").upper()
             return _handle_track_record_ticker(http_method, ticker)
         elif path == "/track-record":
@@ -83,6 +103,61 @@ def lambda_handler(event, context):
     except Exception as e:
         traceback.print_exc()
         return _response(500, {"error": str(e)})
+
+
+# ─── Subscription Endpoints ───
+
+
+def _handle_subscription_status(method, user_id):
+    """GET /subscription/status — Current tier and limits."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    result = subscription.get_subscription(user_id)
+    return _response(200, result)
+
+
+def _handle_subscription_usage(method, user_id):
+    """GET /subscription/usage — Current period usage counts."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    result = subscription.get_usage(user_id)
+    return _response(200, result)
+
+
+def _handle_revenuecat_webhook(method, body):
+    """POST /webhooks/revenuecat — RevenueCat subscription lifecycle events."""
+    if method != "POST":
+        return _response(405, {"error": "Method not allowed"})
+    result = subscription.handle_webhook(body)
+    if isinstance(result, tuple):
+        return _response(result[1], result[0])
+    return _response(200, result)
+
+
+# ─── Affiliate Endpoints ───
+
+
+def _handle_affiliate_link(method, query_params, user_id):
+    """GET /affiliate/link — Generate broker deep link."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    broker = query_params.get("broker", "")
+    ticker = query_params.get("ticker", "")
+    if not broker or not ticker:
+        return _response(400, {"error": "broker and ticker query params required"})
+    result = affiliates.get_affiliate_link(broker, ticker, user_id)
+    if isinstance(result, tuple):
+        return _response(result[1], result[0])
+    return _response(200, result)
+
+
+def _handle_affiliate_brokers(method, query_params):
+    """GET /affiliate/brokers — List available brokers."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    ticker = query_params.get("ticker")
+    result = affiliates.get_brokers(ticker)
+    return _response(200, result)
 
 
 # ─── Track Record Endpoints ───

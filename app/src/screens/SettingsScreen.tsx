@@ -8,6 +8,8 @@ import {
   Switch,
   Alert,
   Share,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { DisclaimerFull } from '../components/DisclaimerBanner';
 import { useEventStore } from '../store/eventStore';
+import { useSubscriptionStore } from '../store/subscriptionStore';
 
 const TAX_BRACKETS = [10, 12, 22, 24, 32, 35, 37];
 const RISK_PROFILES = [
@@ -134,6 +137,36 @@ export const SettingsScreen: React.FC = () => {
     });
   }, []);
 
+  // Subscription
+  const tier = useSubscriptionStore((s) => s.tier);
+  const subLabel = useSubscriptionStore((s) => s.label);
+  const expiresAt = useSubscriptionStore((s) => s.expiresAt);
+  const signalViews = useSubscriptionStore((s) => s.signalViews);
+  const chat = useSubscriptionStore((s) => s.chat);
+  const onDemandAnalyses = useSubscriptionStore((s) => s.onDemandAnalyses);
+  const loadSubscription = useSubscriptionStore((s) => s.loadSubscription);
+  const loadUsage = useSubscriptionStore((s) => s.loadUsage);
+
+  useEffect(() => {
+    loadSubscription();
+    loadUsage();
+  }, [loadSubscription, loadUsage]);
+
+  const tierColors: Record<string, string> = { free: '#6B7280', pro: '#60A5FA', premium: '#A78BFA' };
+  const tierColor = tierColors[tier] ?? '#6B7280';
+
+  const handleManageSubscription = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      Linking.openURL('https://apps.apple.com/account/subscriptions');
+    } else {
+      Linking.openURL('https://play.google.com/store/account/subscriptions');
+    }
+  }, []);
+
+  const handleRestorePurchases = useCallback(() => {
+    Alert.alert('Restore Purchases', 'Checking for existing purchases...', [{ text: 'OK' }]);
+  }, []);
+
   const profileColor = RISK_PROFILES.find((p) => p.id === riskProfile)?.color ?? '#60A5FA';
   const initials = 'GU'; // Guest User
 
@@ -155,6 +188,103 @@ export const SettingsScreen: React.FC = () => {
           </View>
           <Text style={styles.userName}>Guest User</Text>
           <Text style={styles.userSubtitle}>Sign in with Google or Apple to sync data</Text>
+        </View>
+
+        {/* Subscription */}
+        <Text style={styles.sectionHeader}>Subscription</Text>
+        <View style={[styles.subCard, { borderColor: tierColor + '40' }]}>
+          <View style={styles.subCardHeader}>
+            <View style={[styles.tierBadge, { backgroundColor: tierColor + '20' }]}>
+              <Ionicons
+                name={tier === 'premium' ? 'diamond' : tier === 'pro' ? 'star' : 'person'}
+                size={16}
+                color={tierColor}
+              />
+              <Text style={[styles.tierBadgeText, { color: tierColor }]}>
+                {subLabel || 'Free'}
+              </Text>
+            </View>
+            {expiresAt ? (
+              <Text style={styles.expiresText}>
+                Renews {new Date(expiresAt).toLocaleDateString()}
+              </Text>
+            ) : null}
+          </View>
+
+          {/* Usage bars */}
+          <View style={styles.usageRow}>
+            <Text style={styles.usageLabel}>Signal views</Text>
+            <View style={styles.usageBarBg}>
+              <View
+                style={[
+                  styles.usageBarFill,
+                  {
+                    width: `${Math.min(100, signalViews.limit > 0 ? (signalViews.used / signalViews.limit) * 100 : 0)}%`,
+                    backgroundColor: tierColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.usageCount}>
+              {signalViews.used}/{signalViews.limit >= 999 ? '\u221E' : signalViews.limit}
+            </Text>
+          </View>
+          <View style={styles.usageRow}>
+            <Text style={styles.usageLabel}>Chat</Text>
+            <View style={styles.usageBarBg}>
+              <View
+                style={[
+                  styles.usageBarFill,
+                  {
+                    width: `${Math.min(100, chat.limit > 0 ? (chat.used / chat.limit) * 100 : 0)}%`,
+                    backgroundColor: tierColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.usageCount}>
+              {chat.used}/{chat.limit >= 999 ? '\u221E' : chat.limit}
+            </Text>
+          </View>
+          <View style={styles.usageRow}>
+            <Text style={styles.usageLabel}>On-demand</Text>
+            <View style={styles.usageBarBg}>
+              <View
+                style={[
+                  styles.usageBarFill,
+                  {
+                    width: `${Math.min(100, onDemandAnalyses.limit > 0 ? (onDemandAnalyses.used / onDemandAnalyses.limit) * 100 : 0)}%`,
+                    backgroundColor: tierColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.usageCount}>
+              {onDemandAnalyses.used}/{onDemandAnalyses.limit >= 999 ? '\u221E' : onDemandAnalyses.limit}
+            </Text>
+          </View>
+
+          {/* Actions */}
+          <View style={styles.subActions}>
+            {tier !== 'premium' && (
+              <TouchableOpacity
+                style={[styles.upgradeButton, { backgroundColor: tierColor }]}
+                onPress={() => navigation.navigate('Paywall', {})}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="arrow-up-circle" size={16} color="#FFF" />
+                <Text style={styles.upgradeButtonText}>Upgrade</Text>
+              </TouchableOpacity>
+            )}
+            {tier !== 'free' && (
+              <TouchableOpacity style={styles.manageLink} onPress={handleManageSubscription}>
+                <Text style={styles.manageLinkText}>Manage Subscription</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.manageLink} onPress={handleRestorePurchases}>
+              <Text style={styles.manageLinkText}>Restore Purchases</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Risk Profile */}
@@ -401,4 +531,92 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 14, marginBottom: 8,
   },
   quietHoursText: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '500' },
+
+  // Subscription
+  subCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  subCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  tierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  tierBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  expiresText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+  },
+  usageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  usageLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+    width: 74,
+  },
+  usageBarBg: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  usageBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  usageCount: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '600',
+    width: 42,
+    textAlign: 'right',
+  },
+  subActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  upgradeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  upgradeButtonText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  manageLink: {},
+  manageLinkText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
 });
