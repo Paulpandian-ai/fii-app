@@ -23,7 +23,7 @@ export const ScoreRing: React.FC<ScoreRingProps> = ({ score: rawScore, size = 12
   const center = size / 2;
 
   return (
-    <View style={[styles.container, { width: size, height: size }]}>
+    <View style={[styles.container, { width: size, height: size }]} accessibilityLabel={`FII Score ${score.toFixed(1)} out of 10`}>
       <Svg width={size} height={size}>
         {/* Background circle */}
         <Circle

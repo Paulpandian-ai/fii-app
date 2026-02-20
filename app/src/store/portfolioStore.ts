@@ -41,16 +41,17 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     try {
       const data = await getPortfolio();
       set({
-        holdings: data.holdings || [],
-        totalValue: data.totalValue || 0,
-        totalCost: data.totalCost || 0,
-        totalGainLoss: data.totalGainLoss || 0,
-        totalGainLossPercent: data.totalGainLossPercent || 0,
-        dailyChange: data.dailyChange || 0,
-        dailyChangePercent: data.dailyChangePercent || 0,
+        holdings: data?.holdings ?? [],
+        totalValue: data?.totalValue ?? 0,
+        totalCost: data?.totalCost ?? 0,
+        totalGainLoss: data?.totalGainLoss ?? 0,
+        totalGainLossPercent: data?.totalGainLossPercent ?? 0,
+        dailyChange: data?.dailyChange ?? 0,
+        dailyChangePercent: data?.dailyChangePercent ?? 0,
         isLoading: false,
       });
-    } catch {
+    } catch (error) {
+      console.error('[PortfolioStore] loadPortfolio failed:', error);
       set({ isLoading: false, error: 'Failed to load portfolio' });
     }
   },
@@ -58,8 +59,9 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
   loadSummary: async () => {
     try {
       const data = await getPortfolioSummary();
-      set({ summary: data });
-    } catch {
+      set({ summary: data ?? null });
+    } catch (error) {
+      console.error('[PortfolioStore] loadSummary failed:', error);
       // Silent fail — summary is optional
     }
   },
@@ -91,7 +93,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
-    } catch {
+    } catch (error) {
+      console.error('[PortfolioStore] addHolding failed:', error);
       set({ error: 'Failed to save portfolio' });
     }
   },
@@ -103,7 +106,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
-    } catch {
+    } catch (error) {
+      console.error('[PortfolioStore] removeHolding failed:', error);
       set({ error: 'Failed to save portfolio' });
     }
   },
@@ -115,7 +119,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
-    } catch {
+    } catch (error) {
+      console.error('[PortfolioStore] updateHolding failed:', error);
       set({ error: 'Failed to save portfolio' });
     }
   },
@@ -139,7 +144,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     try {
       await savePortfolio(merged);
       await get().loadPortfolio();
-    } catch {
+    } catch (error) {
+      console.error('[PortfolioStore] importHoldings failed:', error);
       set({ error: 'Failed to save portfolio' });
     }
   },

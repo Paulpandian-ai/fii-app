@@ -413,14 +413,40 @@ def compute_composite_score(factor_scores: dict[str, float]) -> float:
     return round(max(1.0, min(10.0, score_10)), 1)
 
 
-def determine_signal(score: float) -> Signal:
-    """Determine BUY/HOLD/SELL signal from composite score."""
-    if score <= 3.0:
+def determine_signal(score: float, mean: float = 5.0, stddev: float = 1.5) -> Signal:
+    """Determine BUY/HOLD/SELL signal from composite score.
+
+    Uses mean ± 0.5*stddev thresholds for ~25% BUY, 50% HOLD, 25% SELL distribution.
+    Default mean=5.0, stddev=1.5 gives thresholds of 4.25 and 5.75.
+    """
+    buy_threshold = mean + 0.5 * stddev
+    sell_threshold = mean - 0.5 * stddev
+    if score <= sell_threshold:
         return Signal.SELL
-    elif score <= 6.0:
-        return Signal.HOLD
-    else:
+    elif score >= buy_threshold:
         return Signal.BUY
+    else:
+        return Signal.HOLD
+
+
+def normalize_signals(scores: list[float]) -> tuple[float, float]:
+    """Compute mean and stddev for a list of composite scores.
+
+    Returns (mean, stddev) to be passed to determine_signal() for
+    relative signal classification across the universe.
+    """
+    import math
+    if not scores:
+        return 5.0, 1.5
+    n = len(scores)
+    mean = sum(scores) / n
+    if n < 2:
+        return mean, 1.5
+    variance = sum((s - mean) ** 2 for s in scores) / (n - 1)
+    stddev = math.sqrt(variance) if variance > 0 else 1.5
+    # Clamp stddev to reasonable range
+    stddev = max(0.5, min(3.0, stddev))
+    return mean, stddev
 
 
 def determine_confidence(factor_scores: dict[str, float]) -> Confidence:

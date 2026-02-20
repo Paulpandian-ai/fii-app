@@ -335,14 +335,29 @@ export const EarningsCalendarScreen: React.FC = () => {
 
         <FlatList
           data={flatData}
-          keyExtractor={(item, i) => item.type === 'date' ? `date-${item.date}` : `earn-${item.item.ticker}-${i}`}
+          keyExtractor={(item, i) => item.type === 'date' ? `date-${item.date}` : `earn-${(item as any).item?.ticker ?? 'item'}-${i}`}
           renderItem={({ item }) => {
             if (item.type === 'date') return renderDateGroup(item.date);
             return renderEarningsCard({ item: item.item });
           }}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={flatData.length === 0 ? { flexGrow: 1 } : styles.listContent}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#60A5FA" />
+          }
+          ListEmptyComponent={
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 48, paddingHorizontal: 32 }}>
+              <Ionicons name="calendar-outline" size={48} color="rgba(255,255,255,0.2)" />
+              <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 16 }}>
+                No upcoming earnings
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, textAlign: 'center', marginTop: 6 }}>
+                Pull to refresh or check back later
+              </Text>
+            </View>
           }
           ListFooterComponent={<DisclaimerBanner />}
         />

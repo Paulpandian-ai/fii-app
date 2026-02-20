@@ -64,6 +64,10 @@ def lambda_handler(event, context):
                 f"[SignalEngine] {ticker}: score={result['compositeScore']}, "
                 f"signal={result['signal']}"
             )
+
+            # Normalize signal distribution across all stocks
+            _normalize_signals()
+
             return {
                 "statusCode": 200,
                 "body": json.dumps({
@@ -374,6 +378,67 @@ def _merge_precomputed_scores(
         factor_details["F3"]["score"] = round(
             max(-2.0, min(2.0, (quant_f3 + claude_f3) / 2)), 1
         )
+
+
+def _normalize_signals() -> None:
+    """Normalize signal labels across all stocks using mean/stddev distribution.
+
+    Reads all SIGNAL#LATEST records, computes mean and standard deviation
+    of composite scores, then re-labels:
+      - score > mean + 0.5*stddev -> BUY
+      - score < mean - 0.5*stddev -> SELL
+      - otherwise -> HOLD
+    """
+    all_scores = []
+    signal_items = []
+
+    for ticker in STOCK_UNIVERSE:
+        try:
+            item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if item:
+                score = float(item.get("compositeScore", 0))
+                signal_items.append((ticker, item, score))
+                all_scores.append(score)
+        except Exception:
+            pass
+
+    if len(all_scores) < 3:
+        logger.info("[SignalEngine] Not enough signals to normalize")
+        return
+
+    # Compute mean and standard deviation
+    mean = sum(all_scores) / len(all_scores)
+    variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
+    stddev = variance ** 0.5
+
+    if stddev < 0.1:
+        logger.info(f"[SignalEngine] Stddev too small ({stddev:.2f}), skipping normalization")
+        return
+
+    buy_threshold = mean + 0.5 * stddev
+    sell_threshold = mean - 0.5 * stddev
+
+    logger.info(
+        f"[SignalEngine] Normalizing signals: mean={mean:.2f}, stddev={stddev:.2f}, "
+        f"buy>={buy_threshold:.2f}, sell<={sell_threshold:.2f}"
+    )
+
+    updated = 0
+    for ticker, item, score in signal_items:
+        if score >= buy_threshold:
+            new_signal = "BUY"
+        elif score <= sell_threshold:
+            new_signal = "SELL"
+        else:
+            new_signal = "HOLD"
+
+        old_signal = item.get("signal", "HOLD")
+        if new_signal != old_signal:
+            db.update_item(f"SIGNAL#{ticker}", "LATEST", {"signal": new_signal})
+            updated += 1
+            logger.info(f"[SignalEngine] {ticker}: {old_signal} -> {new_signal} (score={score:.1f})")
+
+    logger.info(f"[SignalEngine] Normalization complete: {updated} signals updated")
 
 
 def _store_signal(ticker: str, result: dict) -> None:

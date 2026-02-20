@@ -13,6 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList, RootStackParamList } from '../types';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 
 import { useCoachStore } from '../store/coachStore';
 import { DailyBriefing } from '../components/DailyBriefing';
@@ -88,6 +90,36 @@ export const CoachScreen: React.FC = () => {
   }, [loadWeekly]);
 
   const isLoading = isDailyLoading || isScoreLoading || isAchievementsLoading;
+
+  if (!hasLoaded && isLoading) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.topBarTitle}>Coach</Text>
+        </View>
+        <View style={{ padding: 16, gap: 16 }}>
+          <Skeleton width="100%" height={120} borderRadius={12} />
+          <Skeleton width="100%" height={80} borderRadius={12} />
+          <Skeleton width="100%" height={80} borderRadius={12} />
+          <Skeleton width="100%" height={100} borderRadius={12} />
+        </View>
+      </LinearGradient>
+    );
+  }
+
+  if (!hasLoaded && !isLoading && !daily && !score) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.topBarTitle}>Coach</Text>
+        </View>
+        <ErrorState
+          message="Couldn't load coaching data"
+          onRetry={loadAll}
+        />
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>

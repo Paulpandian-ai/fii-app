@@ -129,7 +129,7 @@ export const EventTimelineScreen: React.FC = () => {
             <View style={[styles.typeBadge, { backgroundColor: `${impactColor}20` }]}>
               <Ionicons name={typeIcon} size={14} color={impactColor} />
               <Text style={[styles.typeBadgeText, { color: impactColor }]}>
-                {item.type.toUpperCase()}
+                {(item.type ?? '').toUpperCase()}
               </Text>
             </View>
             <View style={[styles.directionBadge, { backgroundColor: `${dirColor}20` }]}>
@@ -150,7 +150,7 @@ export const EventTimelineScreen: React.FC = () => {
 
           {item.factorsAffected && item.factorsAffected.length > 0 && (
             <View style={styles.factorsRow}>
-              {item.factorsAffected.slice(0, 3).map((f) => (
+              {(item.factorsAffected ?? []).slice(0, 3).map((f) => (
                 <View key={f} style={styles.factorChip}>
                   <Text style={styles.factorChipText}>{f}</Text>
                 </View>
@@ -160,7 +160,7 @@ export const EventTimelineScreen: React.FC = () => {
 
           {item.category && (
             <Text style={styles.eventCategory}>
-              {item.category.charAt(0).toUpperCase() + item.category.slice(1)}
+              {(item.category ?? '').charAt(0).toUpperCase() + (item.category ?? '').slice(1)}
               {item.sourceUrl ? ' · Tap to read' : ''}
             </Text>
           )}
@@ -225,6 +225,10 @@ export const EventTimelineScreen: React.FC = () => {
           renderItem={renderEventCard}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60A5FA" />
           }

@@ -334,9 +334,9 @@ export const AlternativeDataScreen: React.FC<AlternativeDataScreenProps> = ({
             {contracts.agencyBreakdown && contracts.agencyBreakdown.length > 0 && (
               <View style={styles.chartCard}>
                 <Text style={styles.chartTitle}>Top Awarding Agencies</Text>
-                {contracts.agencyBreakdown.slice(0, 5).map((a, i) => {
+                {(contracts.agencyBreakdown ?? []).slice(0, 5).map((a, i) => {
                   const maxAmt = Math.max(
-                    ...contracts.agencyBreakdown.map((x) => safeNum(x.amount)),
+                    ...(contracts.agencyBreakdown ?? []).map((x) => safeNum(x.amount)),
                     1,
                   );
                   const pct = (safeNum(a.amount) / maxAmt) * 100;

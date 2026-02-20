@@ -49,7 +49,8 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
   setActiveWatchlist: (id) => set({ activeWatchlistId: id }),
 
   createWatchlist: async (name) => {
-    const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    if (!name) return;
+    const id = (name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     try {
       const data = await saveWatchlist({ id, name, items: [] });
       set({ watchlists: data.watchlists || get().watchlists });

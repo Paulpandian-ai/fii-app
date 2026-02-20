@@ -111,7 +111,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
 
   if (mini) {
     return (
-      <View style={{ width: size, height: size }}>
+      <View style={{ width: size, height: size }} accessibilityLabel={`Radar score: ${AXES.map((a, i) => `${a.short} ${safeNum(scoreValues[i]).toFixed(1)}`).join(', ')}`}>
         <Svg width={size} height={size}>
           {/* Grid */}
           {gridLevels.map((level) => {
@@ -143,7 +143,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
   }
 
   return (
-    <View style={[styles.container, { width: size, height: size + 20 }]}>
+    <View style={[styles.container, { width: size, height: size + 20 }]} accessibilityLabel={`Radar score chart: ${AXES.map((a, i) => `${a.short} ${safeNum(scoreValues[i]).toFixed(1)}`).join(', ')}`}>
       <Svg width={size} height={size}>
         {/* Grid polygons */}
         {gridLevels.map((level) => {

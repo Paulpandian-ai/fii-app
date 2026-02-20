@@ -466,7 +466,50 @@ export const SettingsScreen: React.FC = () => {
 
         {/* Legal */}
         <Text style={styles.sectionHeader}>Legal</Text>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('PrivacyPolicy')} activeOpacity={0.7}>
+          <Ionicons name="shield-checkmark-outline" size={20} color="#60A5FA" />
+          <Text style={styles.actionText}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('TermsOfService')} activeOpacity={0.7}>
+          <Ionicons name="document-text-outline" size={20} color="#60A5FA" />
+          <Text style={styles.actionText}>Terms of Service</Text>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+        </TouchableOpacity>
         <DisclaimerFull />
+
+        {/* Data Sources */}
+        <Text style={styles.sectionHeader}>Data Sources</Text>
+        <View style={styles.dataSourceCard}>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Stock Data</Text>
+            <Text style={styles.dataSourceValue}>Finnhub.io</Text>
+          </View>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Financial Filings</Text>
+            <Text style={styles.dataSourceValue}>SEC EDGAR</Text>
+          </View>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Economic Data</Text>
+            <Text style={styles.dataSourceValue}>Federal Reserve Economic Data (FRED)</Text>
+          </View>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Patent Data</Text>
+            <Text style={styles.dataSourceValue}>PatentsView (USPTO)</Text>
+          </View>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Government Contracts</Text>
+            <Text style={styles.dataSourceValue}>USASpending.gov</Text>
+          </View>
+          <View style={styles.dataSourceRow}>
+            <Text style={styles.dataSourceLabel}>Clinical Trials</Text>
+            <Text style={styles.dataSourceValue}>ClinicalTrials.gov (NIH)</Text>
+          </View>
+          <View style={[styles.dataSourceRow, { borderBottomWidth: 0 }]}>
+            <Text style={styles.dataSourceLabel}>AI Analysis</Text>
+            <Text style={styles.dataSourceValue}>Anthropic Claude</Text>
+          </View>
+        </View>
       </ScrollView>
     </LinearGradient>
   );
@@ -618,5 +661,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     textDecorationLine: 'underline',
+  },
+  dataSourceCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  dataSourceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  dataSourceLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  dataSourceValue: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '600',
+    flexShrink: 1,
+    textAlign: 'right',
+    marginLeft: 12,
   },
 });

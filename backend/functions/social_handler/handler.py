@@ -19,6 +19,8 @@ Routes:
 
 import json
 import os
+import re
+import html
 import sys
 import traceback
 
@@ -33,6 +35,15 @@ import track_record
 import social
 import subscription
 import affiliates
+
+
+def sanitize_input(text: str, max_length: int = 500) -> str:
+    if not text:
+        return ""
+    text = re.sub(r'<[^>]+>', '', str(text))
+    text = html.escape(text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    return text[:max_length].strip()
 
 
 def lambda_handler(event, context):
@@ -189,7 +200,7 @@ def _handle_discuss(method, ticker, body, query_params, user_id):
         result = social.get_posts(ticker, limit=limit)
         return _response(200, result)
     elif method == "POST":
-        content = body.get("content", "")
+        content = sanitize_input(body.get("content", ""))
         sentiment = body.get("sentiment", "neutral")
         display_name = body.get("displayName", "")
         result, status = social.create_post(ticker, user_id, display_name, content, sentiment)
@@ -217,6 +228,8 @@ def _handle_profile_me(method, body, user_id):
         result = social.get_public_profile(user_id)
         return _response(200, result)
     elif method == "PUT":
+        if "displayName" in body:
+            body["displayName"] = sanitize_input(body["displayName"], max_length=30)
         result = social.update_profile(user_id, body)
         if isinstance(result, tuple):
             return _response(result[1], result[0])
@@ -250,7 +263,7 @@ def _handle_chat(method, body, user_id):
     """POST /chat — AI-powered stock Q&A."""
     if method != "POST":
         return _response(405, {"error": "Method not allowed"})
-    message = body.get("message", "")
+    message = sanitize_input(body.get("message", ""), max_length=1000)
     context = body.get("context", {})
     result = social.handle_chat(user_id, message, context)
     if isinstance(result, tuple):

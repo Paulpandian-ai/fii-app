@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { Skeleton } from '../components/Skeleton';
 import { SectorHeatmap } from '../components/SectorHeatmap';
+import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getScreener, getScreenerTemplates } from '../services/api';
 import type { Signal, RootStackParamList } from '../types';
 
@@ -215,6 +216,7 @@ export const ScreenerScreen: React.FC = () => {
         sector: item.sector || '',
         marketCap: item.marketCap || '',
         volume: item.volume ?? 0,
+        dataPending: item.dataPending ?? false,
       }));
       setResults(items);
     } catch (err: any) {
@@ -375,6 +377,8 @@ export const ScreenerScreen: React.FC = () => {
           style={[styles.templateChip, isActive && styles.templateChipActive]}
           onPress={() => handleTemplatePress(template)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`${template.label} filter${isActive ? ', selected' : ''}`}
         >
           <Ionicons
             name={template.icon}
@@ -405,6 +409,8 @@ export const ScreenerScreen: React.FC = () => {
           style={styles.resultRow}
           onPress={() => handleResultPress(item)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.ticker} ${item.companyName}, ${item.signal} signal, AI score ${(item.aiScore ?? 0).toFixed(1)}`}
         >
           <View style={styles.resultLeft}>
             <View style={styles.resultTickerRow}>
@@ -423,7 +429,7 @@ export const ScreenerScreen: React.FC = () => {
           <View style={styles.resultCenter}>
             <View style={styles.resultPriceCol}>
               <Text style={styles.resultPrice}>
-                ${(item.price ?? 0).toFixed(2)}
+                {(item as any).dataPending ? 'Pending' : `$${(item.price ?? 0).toFixed(2)}`}
               </Text>
               <Text style={[styles.resultChange, { color: changeColor }]}>
                 {changeSign}{(item.changePercent ?? 0).toFixed(2)}%
@@ -538,6 +544,8 @@ export const ScreenerScreen: React.FC = () => {
       ]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} filter${isActive ? ', selected' : ''}`}
     >
       <Text
         style={[
@@ -557,12 +565,12 @@ export const ScreenerScreen: React.FC = () => {
       {/* Header Bar */}
       <View style={styles.headerBar}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityRole="button" accessibilityLabel="Go back">
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Screener</Text>
         </View>
-        <TouchableOpacity style={styles.filterButton} onPress={openFilterModal} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.filterButton} onPress={openFilterModal} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Open filters${activeFilterCount > 0 ? ', ' + activeFilterCount + ' active' : ''}`}>
           <Ionicons name="options-outline" size={18} color="#fff" />
           <Text style={styles.filterButtonText}>Filters</Text>
           {activeFilterCount > 0 && (
@@ -624,11 +632,16 @@ export const ScreenerScreen: React.FC = () => {
         <FlatList
           data={results}
           renderItem={renderResultItem}
-          keyExtractor={(item) => item.ticker}
+          keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
           ListHeaderComponent={results.length > 0 ? renderHeader : null}
           ListEmptyComponent={renderEmpty}
+          ListFooterComponent={results.length > 0 ? <DisclaimerBanner /> : null}
           contentContainerStyle={results.length === 0 ? styles.emptyList : styles.resultList}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

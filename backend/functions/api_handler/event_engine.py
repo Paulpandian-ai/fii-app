@@ -322,6 +322,10 @@ def monitor_sec_filings(tickers):
                     filed_date = filing.get("filedDate", filing.get("acceptedDate", ""))
                     filing_url = filing.get("reportUrl", filing.get("url", ""))
 
+                    # Skip filings with empty/null formType
+                    if not form_type or not form_type.strip():
+                        continue
+
                     # Dedup check
                     filing_hash = _headline_hash(f"{ticker}{form_type}{filed_date}")
                     seen_key = f"FILING_SEEN#{_utc_now().strftime('%Y-%m-%d')}"
@@ -357,6 +361,15 @@ def monitor_sec_filings(tickers):
                         impact = "low"
                         description = f"SEC Filing: {form_type}"
 
+                    # Populate headline from description if empty
+                    headline = filing.get("headline", "") or filing.get("description", "") or description
+                    if not headline or not headline.strip():
+                        headline = description
+
+                    # Only store filings with meaningful data
+                    if not form_type.strip() or not headline.strip():
+                        continue
+
                     timestamp = _utc_now().isoformat()
                     event = {
                         "PK": f"EVENT#{ticker}",
@@ -366,6 +379,7 @@ def monitor_sec_filings(tickers):
                         "ticker": ticker,
                         "type": "filing",
                         "formType": form_type,
+                        "headline": headline,
                         "impact": impact,
                         "direction": "neutral",
                         "category": "regulatory",
@@ -386,6 +400,10 @@ def monitor_sec_filings(tickers):
                 form_type = source.get("form_type", "")
                 filed_date = source.get("file_date", "")
                 filing_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={ticker}&type={form_type}"
+
+                # Skip filings with empty/null formType
+                if not form_type or not form_type.strip():
+                    continue
 
                 filing_hash = _headline_hash(f"{ticker}{form_type}{filed_date}")
                 seen_key = f"FILING_SEEN#{_utc_now().strftime('%Y-%m-%d')}"
@@ -410,6 +428,15 @@ def monitor_sec_filings(tickers):
                     impact = "low"
                     description = f"SEC Filing: {form_type}"
 
+                # Populate headline from description if empty
+                headline = source.get("headline", "") or source.get("description", "") or description
+                if not headline or not headline.strip():
+                    headline = description
+
+                # Only store filings with meaningful data
+                if not form_type.strip() or not headline.strip():
+                    continue
+
                 timestamp = _utc_now().isoformat()
                 event = {
                     "PK": f"EVENT#{ticker}",
@@ -419,6 +446,7 @@ def monitor_sec_filings(tickers):
                     "ticker": ticker,
                     "type": "filing",
                     "formType": form_type,
+                    "headline": headline,
                     "impact": impact,
                     "direction": "neutral",
                     "category": "regulatory",

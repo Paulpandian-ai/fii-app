@@ -704,7 +704,7 @@ export const StockChart: React.FC<StockChartProps> = ({
       </View>
 
       {/* Chart WebView */}
-      <View style={styles.webViewContainer}>
+      <View style={styles.webViewContainer} accessibilityLabel={`Interactive stock chart for ${ticker}`}>
         {htmlSource != null && (
           <WebView
             ref={webViewRef}

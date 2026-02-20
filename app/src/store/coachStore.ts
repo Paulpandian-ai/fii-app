@@ -58,8 +58,9 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     set({ isDailyLoading: true });
     try {
       const data = await getCoachDaily();
-      set({ daily: data, isDailyLoading: false });
-    } catch {
+      set({ daily: data ?? null, isDailyLoading: false });
+    } catch (error) {
+      console.error('[CoachStore] loadDaily failed:', error);
       set({ isDailyLoading: false });
     }
   },
@@ -68,8 +69,9 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     set({ isScoreLoading: true });
     try {
       const data = await getCoachScore();
-      set({ score: data, isScoreLoading: false });
-    } catch {
+      set({ score: data ?? null, isScoreLoading: false });
+    } catch (error) {
+      console.error('[CoachStore] loadScore failed:', error);
       set({ isScoreLoading: false });
     }
   },
@@ -78,8 +80,9 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     set({ isAchievementsLoading: true });
     try {
       const data = await getCoachAchievements();
-      set({ achievements: data, isAchievementsLoading: false });
-    } catch {
+      set({ achievements: data ?? null, isAchievementsLoading: false });
+    } catch (error) {
+      console.error('[CoachStore] loadAchievements failed:', error);
       set({ isAchievementsLoading: false });
     }
   },
@@ -88,8 +91,9 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     set({ isWeeklyLoading: true });
     try {
       const data = await getCoachWeekly();
-      set({ weekly: data, isWeeklyLoading: false });
-    } catch {
+      set({ weekly: data ?? null, isWeeklyLoading: false });
+    } catch (error) {
+      console.error('[CoachStore] loadWeekly failed:', error);
       set({ isWeeklyLoading: false });
     }
   },
@@ -106,7 +110,8 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
       // Refresh score after event
       get().loadScore();
       get().loadAchievements();
-    } catch {
+    } catch (error) {
+      console.error('[CoachStore] logEvent failed:', error);
       // silent
     }
   },

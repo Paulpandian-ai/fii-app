@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { ErrorUtils } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -32,10 +33,21 @@ import { ProfileScreen } from './src/screens/ProfileScreen';
 import { LeaderboardScreen } from './src/screens/LeaderboardScreen';
 import { AIChatScreen } from './src/screens/AIChatScreen';
 import { PaywallScreen } from './src/screens/PaywallScreen';
+import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
+import { TermsOfServiceScreen } from './src/screens/TermsOfServiceScreen';
 import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
+
+// Global error handler - prevents crashes on non-fatal errors
+const defaultHandler = (ErrorUtils as any).getGlobalHandler();
+(ErrorUtils as any).setGlobalHandler((error: any, isFatal: boolean) => {
+  console.error('[GLOBAL ERROR]', isFatal ? 'FATAL' : 'NON-FATAL', error?.message);
+  if (!isFatal && defaultHandler) {
+    defaultHandler(error, isFatal);
+  }
+});
 
 const WrappedFeed = () => (
   <ErrorBoundary screenName="FeedScreen"><FeedScreen /></ErrorBoundary>
@@ -108,6 +120,12 @@ const WrappedAIChat = (props: any) => (
 );
 const WrappedPaywall = (props: any) => (
   <ErrorBoundary screenName="PaywallScreen"><PaywallScreen {...props} /></ErrorBoundary>
+);
+const WrappedPrivacyPolicy = () => (
+  <ErrorBoundary screenName="PrivacyPolicyScreen"><PrivacyPolicyScreen /></ErrorBoundary>
+);
+const WrappedTermsOfService = () => (
+  <ErrorBoundary screenName="TermsOfServiceScreen"><TermsOfServiceScreen /></ErrorBoundary>
 );
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -334,6 +352,16 @@ export default function App() {
             presentation: 'modal',
             animation: 'slide_from_bottom',
           }}
+        />
+        <Stack.Screen
+          name="PrivacyPolicy"
+          component={WrappedPrivacyPolicy}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="TermsOfService"
+          component={WrappedTermsOfService}
+          options={{ animation: 'slide_from_right' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

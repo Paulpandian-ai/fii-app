@@ -60,14 +60,15 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     try {
       const data = await getSubscriptionStatus();
       set({
-        tier: data.tier ?? 'free',
-        label: data.label ?? 'Free',
-        expiresAt: data.expiresAt ?? '',
-        source: data.source ?? '',
-        trialUsed: data.trialUsed ?? false,
+        tier: data?.tier ?? 'free',
+        label: data?.label ?? 'Free',
+        expiresAt: data?.expiresAt ?? '',
+        source: data?.source ?? '',
+        trialUsed: data?.trialUsed ?? false,
       });
-      await AsyncStorage.setItem('@fii_tier', data.tier ?? 'free');
-    } catch {
+      await AsyncStorage.setItem('@fii_tier', data?.tier ?? 'free');
+    } catch (error) {
+      console.error('[SubscriptionStore] loadSubscription failed:', error);
       // Fall back to cached tier
       const cached = await AsyncStorage.getItem('@fii_tier');
       if (cached) set({ tier: cached as Tier });
@@ -80,11 +81,12 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     try {
       const data = await getSubscriptionUsage();
       set({
-        signalViews: data.signalViews ?? { used: 0, limit: 3 },
-        chat: data.chat ?? { used: 0, limit: 3 },
-        onDemandAnalyses: data.onDemandAnalyses ?? { used: 0, limit: 0 },
+        signalViews: data?.signalViews ?? { used: 0, limit: 3 },
+        chat: data?.chat ?? { used: 0, limit: 3 },
+        onDemandAnalyses: data?.onDemandAnalyses ?? { used: 0, limit: 0 },
       });
-    } catch {
+    } catch (error) {
+      console.error('[SubscriptionStore] loadUsage failed:', error);
       // Keep existing usage data
     }
   },

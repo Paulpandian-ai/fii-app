@@ -284,17 +284,17 @@ export const FeedScreen: React.FC = () => {
       <StatusBar barStyle="light-content" />
 
       {/* Settings gear */}
-      <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')}>
+      <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')} accessibilityRole="button" accessibilityLabel="Open settings">
         <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
       {/* Market Dashboard button */}
-      <TouchableOpacity style={styles.dashboardBtn} onPress={() => navigation.navigate('MarketDashboard')}>
+      <TouchableOpacity style={styles.dashboardBtn} onPress={() => navigation.navigate('MarketDashboard')} accessibilityRole="button" accessibilityLabel="Open market dashboard">
         <Ionicons name="stats-chart" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
       {/* Search button */}
-      <TouchableOpacity style={styles.searchBtn} onPress={() => setSearchVisible(true)}>
+      <TouchableOpacity style={styles.searchBtn} onPress={() => setSearchVisible(true)} accessibilityRole="button" accessibilityLabel="Search stocks">
         <Ionicons name="search" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
@@ -311,6 +311,8 @@ export const FeedScreen: React.FC = () => {
               });
             }}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${liveBannerEvent.ticker} signal alert`}
           >
             <View style={styles.liveBannerDot} />
             <View style={styles.liveBannerContent}>
@@ -321,7 +323,7 @@ export const FeedScreen: React.FC = () => {
                 {liveBannerEvent.summary}
               </Text>
             </View>
-            <TouchableOpacity onPress={dismissLiveBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <TouchableOpacity onPress={dismissLiveBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityRole="button" accessibilityLabel="Dismiss live banner">
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
             </TouchableOpacity>
           </TouchableOpacity>
@@ -332,7 +334,7 @@ export const FeedScreen: React.FC = () => {
         ref={flatListRef}
         data={feed}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
         pagingEnabled={true}
         snapToInterval={SCREEN_HEIGHT}
         snapToAlignment="start"
@@ -365,6 +367,8 @@ export const FeedScreen: React.FC = () => {
         style={styles.chatFab}
         onPress={() => navigation.navigate('AIChat', {})}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Open AI chat"
       >
         <Ionicons name="sparkles" size={22} color="#FFFFFF" />
       </TouchableOpacity>

@@ -87,11 +87,12 @@ export const useEventStore = create<EventStore>((set, get) => ({
       set((state) => ({
         tickerEvents: {
           ...state.tickerEvents,
-          [ticker]: data.events || [],
+          [ticker]: data?.events ?? [],
         },
         isLoadingEvents: false,
       }));
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] loadEventsForTicker failed:', error);
       set({ isLoadingEvents: false });
     }
   },
@@ -100,7 +101,7 @@ export const useEventStore = create<EventStore>((set, get) => ({
     set({ isLoadingFeed: true });
     try {
       const data = await getEventsFeed(50);
-      const events: StockEvent[] = data.events || [];
+      const events: StockEvent[] = data?.events ?? [];
       set({ feedEvents: events, isLoadingFeed: false });
 
       // Check for high-impact events to show as live banner
@@ -110,7 +111,8 @@ export const useEventStore = create<EventStore>((set, get) => ({
       if (highImpact) {
         set({ liveBannerEvent: highImpact, showLiveBanner: true });
       }
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] loadEventsFeed failed:', error);
       set({ isLoadingFeed: false });
     }
   },
@@ -119,10 +121,11 @@ export const useEventStore = create<EventStore>((set, get) => ({
     set({ isLoadingAlerts: true });
     try {
       const data = await getAlerts(20);
-      const alertsList: EventAlert[] = data.alerts || [];
+      const alertsList: EventAlert[] = data?.alerts ?? [];
       const unread = alertsList.filter((a) => !a.read).length;
       set({ alerts: alertsList, unreadCount: unread, isLoadingAlerts: false });
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] loadAlerts failed:', error);
       set({ isLoadingAlerts: false });
     }
   },
@@ -134,11 +137,12 @@ export const useEventStore = create<EventStore>((set, get) => ({
       set((state) => ({
         signalHistory: {
           ...state.signalHistory,
-          [ticker]: data.history || [],
+          [ticker]: data?.history ?? [],
         },
         isLoadingHistory: false,
       }));
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] loadSignalHistory failed:', error);
       set({ isLoadingHistory: false });
     }
   },
@@ -148,10 +152,11 @@ export const useEventStore = create<EventStore>((set, get) => ({
     try {
       const data = await getNotificationPreferences();
       set({
-        preferences: { ...DEFAULT_PREFS, ...data },
+        preferences: { ...DEFAULT_PREFS, ...(data ?? {}) },
         isLoadingPrefs: false,
       });
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] loadPreferences failed:', error);
       set({ isLoadingPrefs: false });
     }
   },
@@ -162,7 +167,8 @@ export const useEventStore = create<EventStore>((set, get) => ({
     set({ preferences: updated });
     try {
       await saveNotificationPreferences(updated);
-    } catch {
+    } catch (error) {
+      console.error('[EventStore] updatePreferences failed:', error);
       // Revert on failure
       set({ preferences: current });
     }

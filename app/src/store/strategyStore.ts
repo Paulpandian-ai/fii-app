@@ -104,12 +104,13 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isOptimizing: true, error: null });
     try {
       const data = await runOptimization(portfolioValue);
-      if (data.error) {
+      if (data?.error) {
         set({ isOptimizing: false, error: data.error });
       } else {
-        set({ optimization: data, isOptimizing: false, hasRun: true });
+        set({ optimization: data ?? null, isOptimizing: false, hasRun: true });
       }
-    } catch {
+    } catch (error) {
+      console.error('[StrategyStore] loadOptimization failed:', error);
       set({ isOptimizing: false, error: 'Optimization failed' });
     }
   },
@@ -118,8 +119,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isProjecting: true });
     try {
       const data = await runProjection(years, portfolioValue);
-      set({ projection: data, isProjecting: false });
-    } catch {
+      set({ projection: data ?? null, isProjecting: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadProjection failed:', error);
       set({ isProjecting: false, error: 'Projection failed' });
     }
   },
@@ -128,8 +130,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isScenariosLoading: true });
     try {
       const data = await runScenarios();
-      set({ scenarios: data.scenarios || [], isScenariosLoading: false });
-    } catch {
+      set({ scenarios: data?.scenarios ?? [], isScenariosLoading: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadScenarios failed:', error);
       set({ isScenariosLoading: false });
     }
   },
@@ -138,8 +141,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isRebalancing: true });
     try {
       const data = await runRebalance();
-      set({ moves: data.moves || [], isRebalancing: false });
-    } catch {
+      set({ moves: data?.moves ?? [], isRebalancing: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadRebalance failed:', error);
       set({ isRebalancing: false });
     }
   },
@@ -147,8 +151,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
   loadAchievements: async () => {
     try {
       const data = await getAchievements();
-      set({ achievements: data.achievements || [] });
-    } catch {
+      set({ achievements: data?.achievements ?? [] });
+    } catch (error) {
+      console.error('[StrategyStore] loadAchievements failed:', error);
       // silent
     }
   },
@@ -157,8 +162,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isDiversifying: true });
     try {
       const data = await runDiversification();
-      set({ diversification: data, isDiversifying: false });
-    } catch {
+      set({ diversification: data ?? null, isDiversifying: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadDiversification failed:', error);
       set({ isDiversifying: false });
     }
   },
@@ -168,8 +174,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isTaxLoading: true });
     try {
       const data = await runTaxHarvest(b);
-      set({ taxHarvest: data, isTaxLoading: false });
-    } catch {
+      set({ taxHarvest: data ?? null, isTaxLoading: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadTaxHarvest failed:', error);
       set({ isTaxLoading: false });
     }
   },
@@ -178,8 +185,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isAdviceLoading: true });
     try {
       const data = await getAdvice();
-      set({ advice: data.prescriptions || [], isAdviceLoading: false });
-    } catch {
+      set({ advice: data?.prescriptions ?? [], isAdviceLoading: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadAdvice failed:', error);
       set({ isAdviceLoading: false });
     }
   },
@@ -188,8 +196,9 @@ export const useStrategyStore = create<StrategyStore>((set, get) => ({
     set({ isReportCardLoading: true });
     try {
       const data = await getReportCard();
-      set({ reportCard: data, isReportCardLoading: false });
-    } catch {
+      set({ reportCard: data ?? null, isReportCardLoading: false });
+    } catch (error) {
+      console.error('[StrategyStore] loadReportCard failed:', error);
       set({ isReportCardLoading: false });
     }
   },

@@ -14,6 +14,8 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { runBacktest } from '../services/api';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 import type { BacktestResult, BacktestStats, PortfolioBacktest } from '../types';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -156,20 +158,23 @@ export const BacktestScreen: React.FC = () => {
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color="#60A5FA" size="large" />
+          <View style={{ padding: 16, gap: 16, width: '100%' }}>
+            <Skeleton width="100%" height={140} borderRadius={12} />
+            <Skeleton width="100%" height={100} borderRadius={12} />
+            <Skeleton width="100%" height={80} borderRadius={12} />
+            <Skeleton width="100%" height={80} borderRadius={12} />
+            <Skeleton width="100%" height={80} borderRadius={12} />
+          </View>
           <Text style={styles.loadingText}>Backtesting signals...</Text>
           <Text style={styles.loadingSubtext}>
             Comparing FII signals against actual stock performance
           </Text>
         </View>
       ) : error ? (
-        <View style={styles.loadingContainer}>
-          <Ionicons name="alert-circle" size={48} color="#EF4444" />
-          <Text style={[styles.loadingText, { color: '#EF4444' }]}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadBacktest}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
+        <ErrorState
+          message={error}
+          onRetry={loadBacktest}
+        />
       ) : (
         <ScrollView
           showsVerticalScrollIndicator={false}

@@ -89,7 +89,7 @@ export const TradeButton: React.FC<Props> = ({ ticker }) => {
 
   return (
     <>
-      <TouchableOpacity style={styles.tradeBtn} onPress={() => setVisible(true)} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.tradeBtn} onPress={() => setVisible(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`Trade ${ticker}`}>
         <Ionicons name="swap-horizontal" size={18} color="#FFF" />
         <Text style={styles.tradeBtnText}>Trade {ticker}</Text>
       </TouchableOpacity>
@@ -107,6 +107,8 @@ export const TradeButton: React.FC<Props> = ({ ticker }) => {
                 style={styles.brokerRow}
                 onPress={() => handleBrokerPress(broker)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Trade ${ticker} on ${broker.name}, ${broker.description}`}
               >
                 <View style={[styles.brokerIcon, { backgroundColor: broker.color + '20' }]}>
                   <Ionicons name={broker.icon} size={22} color={broker.color} />

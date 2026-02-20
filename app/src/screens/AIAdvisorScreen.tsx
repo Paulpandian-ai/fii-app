@@ -17,6 +17,8 @@ import { useStrategyStore } from '../store/strategyStore';
 import { DiversificationCoach } from '../components/DiversificationCoach';
 import { StrategyDashboard } from '../components/StrategyDashboard';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 
 export const AIAdvisorScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -26,6 +28,7 @@ export const AIAdvisorScreen: React.FC = () => {
     isAdviceLoading,
     reportCard,
     isReportCardLoading,
+    error: strategyError,
     loadAdvice,
     loadReportCard,
   } = useStrategyStore();
@@ -45,6 +48,44 @@ export const AIAdvisorScreen: React.FC = () => {
   }, [loadReportCard]);
 
   const isLoading = isAdviceLoading || isReportCardLoading;
+
+  const handleRetry = useCallback(() => {
+    loadAdvice();
+    loadReportCard();
+  }, [loadAdvice, loadReportCard]);
+
+  if (isLoading && !advice.length && !reportCard) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>AI Advisor</Text>
+        </View>
+        <View style={{ padding: 16, gap: 16 }}>
+          <Skeleton width="100%" height={120} borderRadius={12} />
+          <Skeleton width="100%" height={80} borderRadius={12} />
+          <Skeleton width="100%" height={80} borderRadius={12} />
+          <Skeleton width="100%" height={100} borderRadius={12} />
+        </View>
+      </LinearGradient>
+    );
+  }
+
+  if (strategyError && !advice.length && !reportCard) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>AI Advisor</Text>
+        </View>
+        <ErrorState message={strategyError} onRetry={handleRetry} />
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>

@@ -252,7 +252,7 @@ export const TrackRecordScreen: React.FC = () => {
                       ]}
                     >
                       {avgReturn >= 0 ? '+' : ''}
-                      {avgReturn.toFixed(1)}%
+                      {(avgReturn ?? 0).toFixed(1)}%
                     </Text>
                     <Text style={styles.bandReturnLabel}>avg 3M return</Text>
                     <Text style={styles.bandCount}>

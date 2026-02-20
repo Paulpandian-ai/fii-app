@@ -23,6 +23,7 @@ import { StockDiscovery } from '../components/StockDiscovery';
 import { TrendingSection } from '../components/TrendingSection';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 import type { Holding, RootStackParamList } from '../types';
 
 const formatMoney = (n: unknown): string => {
@@ -118,6 +119,7 @@ export const PortfolioScreen: React.FC = () => {
     dailyChange,
     dailyChangePercent,
     isLoading,
+    error,
     loadPortfolio,
     loadSummary,
     removeHolding,
@@ -389,6 +391,23 @@ export const PortfolioScreen: React.FC = () => {
           <View style={{ height: 12 }} />
           <Skeleton width={'85%'} height={60} borderRadius={12} />
         </View>
+      </LinearGradient>
+    );
+  }
+
+  if (error && holdings.length === 0) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.topTitle}>Portfolio</Text>
+        </View>
+        <ErrorState
+          message={error}
+          onRetry={() => {
+            loadPortfolio();
+            loadSummary();
+          }}
+        />
       </LinearGradient>
     );
   }

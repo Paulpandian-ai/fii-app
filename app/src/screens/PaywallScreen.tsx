@@ -135,6 +135,8 @@ export const PaywallScreen: React.FC = () => {
         ]}
         onPress={() => setBillingCycle('monthly')}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Monthly billing${billingCycle === 'monthly' ? ', selected' : ''}`}
       >
         <Text
           style={[
@@ -153,6 +155,8 @@ export const PaywallScreen: React.FC = () => {
         ]}
         onPress={() => setBillingCycle('annual')}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Annual billing, save 33%${billingCycle === 'annual' ? ', selected' : ''}`}
       >
         <Text
           style={[
@@ -262,6 +266,8 @@ export const PaywallScreen: React.FC = () => {
         style={styles.ctaButton}
         onPress={() => handlePurchase('Pro')}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Start 7-day free trial for Pro plan"
       >
         <LinearGradient
           colors={['#1E40AF', '#3B82F6']}
@@ -278,6 +284,8 @@ export const PaywallScreen: React.FC = () => {
         style={styles.ctaButton}
         onPress={() => handlePurchase('Premium')}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Subscribe to Premium plan"
       >
         <LinearGradient
           colors={['#7C3AED', '#A78BFA']}
@@ -314,6 +322,8 @@ export const PaywallScreen: React.FC = () => {
         style={styles.restoreButton}
         onPress={handleRestore}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Restore purchases"
       >
         <Text style={styles.restoreText}>Restore Purchases</Text>
       </TouchableOpacity>
@@ -329,6 +339,8 @@ export const PaywallScreen: React.FC = () => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
             <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>

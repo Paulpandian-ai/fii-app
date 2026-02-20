@@ -238,7 +238,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Close signal detail">
         <Ionicons name="close" size={28} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
@@ -512,6 +512,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               style={styles.healthCard}
               onPress={() => navigation.push('FinancialHealth', { ticker })}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`View financial health for ${ticker}`}
             >
               <View style={styles.healthCardLeft}>
                 <View style={[styles.healthGradeBadge, {
@@ -545,22 +547,24 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
 
         {/* Section 5b: Alternative Data Insights */}
-        {altData && altData.available.length > 0 && (
+        {altData && (altData.available ?? []).length > 0 && (
           <View style={styles.section}>
             <TouchableOpacity
               style={styles.altDataCard}
               onPress={() => navigation.push('AlternativeData', { ticker })}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`View alternative data insights for ${ticker}`}
             >
               <View style={styles.altDataLeft}>
                 <View style={styles.altDataIcons}>
-                  {altData.available.includes('patents') && (
+                  {(altData.available ?? []).includes('patents') && (
                     <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
                   )}
-                  {altData.available.includes('contracts') && (
+                  {(altData.available ?? []).includes('contracts') && (
                     <Ionicons name="business-outline" size={16} color="#60A5FA" />
                   )}
-                  {altData.available.includes('fda') && (
+                  {(altData.available ?? []).includes('fda') && (
                     <Ionicons name="medical-outline" size={16} color="#8B5CF6" />
                   )}
                 </View>
@@ -663,6 +667,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <TouchableOpacity
                 onPress={() => navigation.navigate('EventTimeline', { ticker })}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="View all events"
               >
                 <Text style={styles.viewAllLink}>View All</Text>
               </TouchableOpacity>
@@ -704,6 +710,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             <TouchableOpacity
               onPress={() => navigation.navigate('Discussion', { ticker })}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="View all discussions"
             >
               <Text style={styles.viewAllLink}>View All</Text>
             </TouchableOpacity>
@@ -712,6 +720,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             style={styles.discussionCard}
             onPress={() => navigation.navigate('Discussion', { ticker })}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Join the ${ticker} discussion`}
           >
             <Ionicons name="chatbubbles-outline" size={20} color="#60A5FA" />
             <View style={{ flex: 1, marginLeft: 12 }}>
@@ -743,6 +753,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         style={styles.chatFab}
         onPress={() => navigation.navigate('AIChat', { ticker })}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`Open AI chat about ${ticker}`}
       >
         <Ionicons name="sparkles" size={22} color="#FFFFFF" />
       </TouchableOpacity>

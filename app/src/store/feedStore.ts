@@ -22,7 +22,7 @@ export const useFeedStore = create<FeedStore>((set) => ({
   setItems: (items) => set({ items, error: null }),
 
   appendItems: (newItems) =>
-    set((state) => ({ items: [...state.items, ...newItems] })),
+    set((state) => ({ items: [...state.items, ...(newItems ?? [])] })),
 
   setCurrentIndex: (currentIndex) => set({ currentIndex }),
 

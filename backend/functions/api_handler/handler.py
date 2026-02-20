@@ -297,6 +297,26 @@ def _handle_market_movers(method):
         except Exception:
             pass
 
+    # If no PRICE# records exist, fall back to SIGNAL# records as "AI Favorites"
+    if not all_prices:
+        for ticker in STOCK_UNIVERSE:
+            try:
+                signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+                if signal_item:
+                    all_prices.append({
+                        "ticker": ticker,
+                        "companyName": COMPANY_NAMES.get(ticker, ticker),
+                        "price": 0.0,
+                        "change": 0.0,
+                        "changePercent": 0.0,
+                        "marketCap": 0.0,
+                        "sector": "",
+                        "aiScore": float(signal_item.get("compositeScore", 0)),
+                        "signal": signal_item.get("signal"),
+                    })
+            except Exception:
+                pass
+
     # Sort for different categories
     by_gain = sorted(all_prices, key=lambda x: x["changePercent"], reverse=True)
     by_loss = sorted(all_prices, key=lambda x: x["changePercent"])
@@ -331,11 +351,26 @@ def _handle_market_movers(method):
     ai_downgrades.sort(key=lambda x: x.get("scoreChange", 0))
 
     # Market summary indices (placeholder - would use real index data)
-    market_summary = {
-        "sp500": {"name": "S&P 500", "changePercent": round(sum(x["changePercent"] for x in by_cap[:50]) / max(len(by_cap[:50]), 1), 2)},
-        "nasdaq": {"name": "Nasdaq", "changePercent": round(sum(x["changePercent"] for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")) / max(len([x for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")]), 1), 2)},
-        "dow": {"name": "Dow Jones", "changePercent": round(sum(x["changePercent"] for x in by_cap[:30]) / max(len(by_cap[:30]), 1), 2)},
-    }
+    has_price_data = any(x["price"] > 0 for x in all_prices)
+    if has_price_data:
+        market_summary = {
+            "sp500": {"name": "S&P 500", "changePercent": round(sum(x["changePercent"] for x in by_cap[:50]) / max(len(by_cap[:50]), 1), 2)},
+            "nasdaq": {"name": "Nasdaq", "changePercent": round(sum(x["changePercent"] for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")) / max(len([x for x in all_prices if x.get("sector") in ("Information Technology", "Communication Services", "")]), 1), 2)},
+            "dow": {"name": "Dow Jones", "changePercent": round(sum(x["changePercent"] for x in by_cap[:30]) / max(len(by_cap[:30]), 1), 2)},
+        }
+    else:
+        market_summary = {
+            "sp500": {"name": "S&P 500", "changePercent": 0},
+            "nasdaq": {"name": "Nasdaq", "changePercent": 0},
+            "dow": {"name": "Dow Jones", "changePercent": 0},
+        }
+
+    # AI Favorites — top stocks by AI score
+    by_ai = sorted(
+        [x for x in all_prices if x.get("aiScore") is not None],
+        key=lambda x: x.get("aiScore", 0),
+        reverse=True,
+    )
 
     return _response(200, {
         "gainers": by_gain[:10],
@@ -343,6 +378,7 @@ def _handle_market_movers(method):
         "mostActive": by_cap[:10],
         "aiUpgrades": ai_upgrades[:5],
         "aiDowngrades": ai_downgrades[:5],
+        "aiFavorites": by_ai[:10],
         "marketSummary": market_summary,
         "totalStocks": len(all_prices),
     })
@@ -586,21 +622,28 @@ def _handle_feed(method, body, user_id):
         return _response(200, {"items": compiled["items"], "cursor": None})
 
     # Fallback: build feed from DynamoDB signal summaries
-    from models import STOCK_UNIVERSE
+    from models import STOCK_UNIVERSE, normalize_signals, determine_signal
 
     keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in STOCK_UNIVERSE]
     items = db.batch_get(keys)
 
+    # Collect all scores for normalization
+    all_scores = [float(item.get("compositeScore", 5.0)) for item in items]
+    mean, stddev = normalize_signals(all_scores)
+
     feed_items = []
     for item in items:
         top_factors = json.loads(item.get("topFactors", "[]"))
+        score = float(item.get("compositeScore", 5.0))
+        # Use normalized signal based on mean ± 0.5*stddev
+        normalized_signal = determine_signal(score, mean, stddev).value
         feed_items.append({
             "id": f"signal-{item.get('ticker', '')}",
             "type": "signal",
             "ticker": item.get("ticker", ""),
             "companyName": item.get("companyName", ""),
-            "compositeScore": float(item.get("compositeScore", 5.0)),
-            "signal": item.get("signal", "HOLD"),
+            "compositeScore": score,
+            "signal": normalized_signal,
             "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,
@@ -1514,6 +1557,7 @@ def _handle_screener(method, query_params):
     limit = min(int(query_params.get("limit", "50")), 100)
 
     # Gather data for all tracked stocks
+    from models import STOCK_SECTORS
     results = []
     for t in _SCREENER_UNIVERSE:
         signal = db.get_item(f"SIGNAL#{t}", "LATEST")
@@ -1532,7 +1576,8 @@ def _handle_screener(method, query_params):
         price = _safe_float((price_data or {}).get("price"))
         change = _safe_float((price_data or {}).get("change"))
         change_pct = _safe_float((price_data or {}).get("changePercent"))
-        sector = (price_data or {}).get("sector", "")
+        # Populate sector from STOCK_SECTORS mapping if not in PRICE# record
+        sector = (price_data or {}).get("sector", "") or STOCK_SECTORS.get(t, "")
         market_cap = _safe_float((price_data or {}).get("marketCap"))
         mcap_lbl = _mcap_label(market_cap) if market_cap else "unknown"
 
@@ -1594,7 +1639,15 @@ def _handle_screener(method, query_params):
             "marketCap": market_cap,
             "marketCapLabel": mcap_lbl,
             "peRatio": round(pe, 1) if pe else None,
+            "dataPending": not price_data or price == 0.0,
         })
+
+    # Normalize signals based on mean ± 0.5*stddev
+    from models import normalize_signals, determine_signal
+    all_scores = [r["aiScore"] for r in results]
+    mean, stddev = normalize_signals(all_scores)
+    for r in results:
+        r["signal"] = determine_signal(r["aiScore"], mean, stddev).value
 
     # Sort
     sort_key_map = {

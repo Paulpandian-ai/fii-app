@@ -1084,4 +1084,6 @@ export type RootStackParamList = {
   MarketDashboard: undefined;
   BasketList: undefined;
   Paywall: { feature?: string };
+  PrivacyPolicy: undefined;
+  TermsOfService: undefined;
 };

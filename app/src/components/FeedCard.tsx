@@ -135,6 +135,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       activeOpacity={0.95}
       onPress={onPress}
       style={styles.cardWrapper}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${item.signal} signal details for ${item.ticker}, ${item.companyName}, score ${score.toFixed(1)}`}
     >
       <LinearGradient
         colors={['#0D1B3E', '#1F3864']}
@@ -146,7 +148,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
 
         {/* Bookmark button */}
-        <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark}>
+        <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark} accessibilityRole="button" accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}>
           <Ionicons
             name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
             size={22}

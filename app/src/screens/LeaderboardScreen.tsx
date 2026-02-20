@@ -85,7 +85,7 @@ export const LeaderboardScreen: React.FC = () => {
       <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
         <SafeAreaView style={styles.safe}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back" size={24} color="#FFF" />
             </TouchableOpacity>
             <Text style={styles.title}>Leaderboard</Text>
@@ -112,7 +112,7 @@ export const LeaderboardScreen: React.FC = () => {
       <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
         <SafeAreaView style={styles.safe}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back" size={24} color="#FFF" />
             </TouchableOpacity>
             <Text style={styles.title}>Leaderboard</Text>
@@ -201,6 +201,7 @@ export const LeaderboardScreen: React.FC = () => {
           styles.row,
           { backgroundColor: isEven ? 'rgba(255,255,255,0.03)' : 'transparent' },
         ]}
+        accessibilityLabel={`Rank ${item.rank}, ${item.displayName}, score ${(item.disciplineScore ?? 0).toFixed(1)}, ${item.level} level`}
       >
         {/* Rank */}
         <View style={styles.rankCell}>
@@ -302,11 +303,15 @@ export const LeaderboardScreen: React.FC = () => {
 
         <FlatList
           data={rest}
-          keyExtractor={(item) => `row-${item.rank}`}
+          keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
           renderItem={renderRow}
           ListHeaderComponent={ListHeader}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

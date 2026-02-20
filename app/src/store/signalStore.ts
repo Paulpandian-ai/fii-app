@@ -41,8 +41,8 @@ export const useSignalStore = create<SignalStore>((set, get) => ({
   upsertSignals: (items) =>
     set((state) => {
       const updated = { ...state.signals };
-      for (const item of items) {
-        if (item.ticker && item.score != null && item.signal) {
+      for (const item of items ?? []) {
+        if (item?.ticker && item.score != null && item.signal) {
           updated[item.ticker] = item;
         }
       }

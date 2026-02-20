@@ -25,6 +25,8 @@ import { TimeMachine } from '../components/TimeMachine';
 import { BuildPortfolio } from '../components/BuildPortfolio';
 import { ShareResults } from '../components/ShareResults';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 
 type SectionId =
   | 'hero'
@@ -69,6 +71,7 @@ export const WealthSimulatorScreen: React.FC = () => {
     moves,
     isRebalancing,
     hasRun,
+    error: strategyError,
     runFullSimulation,
     loadProjection,
   } = useStrategyStore();
@@ -172,6 +175,20 @@ export const WealthSimulatorScreen: React.FC = () => {
       scrollToOptimal,
     ]
   );
+
+  if (strategyError && !optimization && !projection && hasRun) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Wealth Simulator</Text>
+        </View>
+        <ErrorState message={strategyError} onRetry={handleStartSimulation} />
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>

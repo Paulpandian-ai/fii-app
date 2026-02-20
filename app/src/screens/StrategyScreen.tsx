@@ -18,6 +18,8 @@ import type { RootStackParamList } from '../types';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useStrategyStore } from '../store/strategyStore';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Skeleton } from '../components/Skeleton';
+import { ErrorState } from '../components/ErrorState';
 
 const GRADE_COLORS: Record<string, string> = {
   'A+': '#10B981',
@@ -59,6 +61,7 @@ export const StrategyScreen: React.FC = () => {
     reportCard,
     isReportCardLoading,
     hasRun,
+    error: strategyError,
     runFullSimulation,
   } = useStrategyStore();
 
@@ -292,12 +295,24 @@ export const StrategyScreen: React.FC = () => {
         {/* Loading state when simulation is running */}
         {isAnyLoading && !hasRun && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator color="#60A5FA" size="large" />
+            <View style={{ width: '100%', paddingHorizontal: 16, gap: 12, marginBottom: 16 }}>
+              <Skeleton width="100%" height={80} borderRadius={12} />
+              <Skeleton width="100%" height={80} borderRadius={12} />
+              <Skeleton width="100%" height={60} borderRadius={12} />
+            </View>
             <Text style={styles.loadingText}>Running full analysis...</Text>
             <Text style={styles.loadingSubtext}>
               Optimizing portfolio, scanning taxes, analyzing diversification
             </Text>
           </View>
+        )}
+
+        {/* Error state when simulation fails */}
+        {strategyError && !isAnyLoading && !hasRun && (
+          <ErrorState
+            message={strategyError}
+            onRetry={handleRunSimulation}
+          />
         )}
 
         <DisclaimerBanner />

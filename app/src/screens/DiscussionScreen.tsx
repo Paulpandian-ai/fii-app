@@ -159,7 +159,7 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Go back">
         <Ionicons name="arrow-back" size={24} color="#FFF" />
       </TouchableOpacity>
       <View style={styles.headerCenter}>
@@ -189,7 +189,7 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
           </View>
           <View style={[styles.sentimentBadge, { backgroundColor: sentimentColor }]}>
             <Text style={styles.sentimentBadgeText}>
-              {item.sentiment.charAt(0).toUpperCase() + item.sentiment.slice(1)}
+              {((item.sentiment ?? 'neutral').charAt(0).toUpperCase() + (item.sentiment ?? 'neutral').slice(1))}
             </Text>
           </View>
         </View>
@@ -203,6 +203,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
             style={styles.reactionBtn}
             onPress={() => handleReaction(item.postId, 'bull')}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Bullish reaction, ${(item.bulls ?? 0).toFixed(0)} votes`}
           >
             <Ionicons name="trending-up" size={18} color="#10B981" />
             <Text style={[styles.reactionCount, { color: '#10B981' }]}>
@@ -214,6 +216,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
             style={styles.reactionBtn}
             onPress={() => handleReaction(item.postId, 'bear')}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Bearish reaction, ${(item.bears ?? 0).toFixed(0)} votes`}
           >
             <Ionicons name="trending-down" size={18} color="#EF4444" />
             <Text style={[styles.reactionCount, { color: '#EF4444' }]}>
@@ -257,6 +261,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
                 onPress={() => setSentiment(opt.key)}
                 disabled={submitting}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${opt.label} sentiment${selected ? ', selected' : ''}`}
               >
                 <Text
                   style={[
@@ -288,6 +294,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
             onPress={handleSubmit}
             disabled={!canSubmit}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Submit post"
           >
             {submitting ? (
               <Ionicons name="hourglass-outline" size={20} color="rgba(255,255,255,0.5)" />
@@ -365,11 +373,15 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
           <FlatList
             ref={flatListRef}
             data={posts}
-            keyExtractor={(item) => item.postId}
+            keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
             renderItem={renderPostCard}
             contentContainerStyle={styles.listContent}
             refreshing={refreshing}
             onRefresh={handleRefresh}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            initialNumToRender={10}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="chatbubble-outline" size={48} color="rgba(255,255,255,0.15)" />
