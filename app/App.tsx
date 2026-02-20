@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { ErrorUtils } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -39,15 +38,6 @@ import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
-
-// Global error handler - prevents crashes on non-fatal errors
-const defaultHandler = (ErrorUtils as any).getGlobalHandler();
-(ErrorUtils as any).setGlobalHandler((error: any, isFatal: boolean) => {
-  console.error('[GLOBAL ERROR]', isFatal ? 'FATAL' : 'NON-FATAL', error?.message);
-  if (!isFatal && defaultHandler) {
-    defaultHandler(error, isFatal);
-  }
-});
 
 const WrappedFeed = () => (
   <ErrorBoundary screenName="FeedScreen"><FeedScreen /></ErrorBoundary>
