@@ -14,6 +14,11 @@ _dynamodb = boto3.resource("dynamodb")
 _table = _dynamodb.Table(_table_name)
 
 
+def table():
+    """Return the underlying DynamoDB Table resource (for scans, etc.)."""
+    return _table
+
+
 def get_item(pk: str, sk: str) -> Optional[dict]:
     """Retrieve a single item by primary key."""
     response = _table.get_item(Key={"PK": pk, "SK": sk})

@@ -124,6 +124,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof RootTabParamList, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
   Feed: { focused: 'play-circle', unfocused: 'play-circle-outline' },
   Portfolio: { focused: 'briefcase', unfocused: 'briefcase-outline' },
+  Screener: { focused: 'funnel', unfocused: 'funnel-outline' },
   Strategy: { focused: 'bar-chart', unfocused: 'bar-chart-outline' },
   Coach: { focused: 'shield-checkmark', unfocused: 'shield-checkmark-outline' },
 };
@@ -159,6 +160,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Feed" component={WrappedFeed} />
       <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
+      <Tab.Screen name="Screener" component={WrappedScreener} />
       <Tab.Screen name="Strategy" component={WrappedStrategy} />
       <Tab.Screen
         name="Coach"
@@ -250,11 +252,6 @@ export default function App() {
         <Stack.Screen
           name="AlternativeData"
           component={WrappedAlternativeData}
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="Screener"
-          component={WrappedScreener}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

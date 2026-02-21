@@ -1541,8 +1541,9 @@ def _handle_screener_templates(method):
 def _handle_screener(method, query_params):
     """GET /screener — Multi-factor stock screener.
 
-    Fetches signal, price, technical, and fundamental data for tracked stocks,
-    applies filters from query params, sorts, and returns matching results.
+    Scans ALL PRICE# records from DynamoDB so every stock with price data
+    appears, even if it has no SIGNAL# record yet.  Optionally enriches
+    each row with signal, technical, and health data when available.
     """
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
@@ -1558,129 +1559,173 @@ def _handle_screener(method, query_params):
     grade_filter = [g.strip().upper() for g in query_params.get("fundamentalGrade", "").split(",") if g.strip()] or None
     mcap_filter = [m.strip().lower() for m in query_params.get("marketCap", "").split(",") if m.strip()] or None
 
-    sort_by = query_params.get("sortBy", "aiScore")
+    sort_by = query_params.get("sortBy", "changePercent")
     sort_dir = query_params.get("sortDir", "desc")
-    limit = min(int(query_params.get("limit", "20")), 50)
+    limit = min(int(query_params.get("limit", "50")), 50)
     offset = int(query_params.get("offset", "0"))
     show_etf = query_params.get("showETF", "true").lower() == "true"
     tier_filter = [t.strip() for t in query_params.get("tier", "").split(",") if t.strip()] or None
 
-    # Gather data for all tracked securities
+    # ── Step 1: Scan ALL PRICE# records from DynamoDB ──
     from models import STOCK_SECTORS, ETF_SET, get_tier
-    screener_universe = _get_screener_universe()
+    from decimal import Decimal
+
+    table = db.table()
+    all_price_items = []
+    scan_kwargs = {
+        "FilterExpression": "begins_with(PK, :pk) AND SK = :sk",
+        "ExpressionAttributeValues": {":pk": "PRICE#", ":sk": "LATEST"},
+    }
+    while True:
+        resp = table.scan(**scan_kwargs)
+        all_price_items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+
+    # ── Step 2: Build results from price records ──
     results = []
-    for t in screener_universe:
-        # ETF filter
-        is_etf = t in ETF_SET
+    for price_item in all_price_items:
+        pk = price_item.get("PK", "")
+        ticker = pk.replace("PRICE#", "") if pk.startswith("PRICE#") else ""
+        if not ticker:
+            continue
+
+        is_etf = ticker in ETF_SET
         if is_etf and not show_etf:
             continue
-        signal = db.get_item(f"SIGNAL#{t}", "LATEST")
-        if not signal:
-            continue
 
-        price_data = db.get_item(f"PRICE#{t}", "LATEST")
-        tech_data = db.get_item(f"TECHNICALS#{t}", "LATEST")
-        health_data = db.get_item(f"HEALTH#{t}", "LATEST")
-
-        ai_score = _safe_float(signal.get("compositeScore", 5.0))
-        sig = signal.get("signal", "HOLD")
-        conf = signal.get("confidence", "MEDIUM")
-        company = signal.get("companyName", t)
-
-        price = _safe_float((price_data or {}).get("price"))
-        change = _safe_float((price_data or {}).get("change"))
-        change_pct = _safe_float((price_data or {}).get("changePercent"))
-        # Populate sector from STOCK_SECTORS mapping if not in PRICE# record
-        sector = (price_data or {}).get("sector", "") or STOCK_SECTORS.get(t, "")
-        market_cap = _safe_float((price_data or {}).get("marketCap"))
+        price = _safe_float(price_item.get("price"))
+        change = _safe_float(price_item.get("change"))
+        change_pct = _safe_float(price_item.get("changePercent"))
+        company = price_item.get("companyName", "") or STOCK_SECTORS.get(ticker, ticker)
+        sector = price_item.get("sector", "") or STOCK_SECTORS.get(ticker, "")
+        market_cap = _safe_float(price_item.get("marketCap"))
         mcap_lbl = _mcap_label(market_cap) if market_cap else "unknown"
 
-        tech_score = _safe_float((tech_data or {}).get("technicalScore"))
-        indicators = (tech_data or {}).get("indicators") or {}
-        if isinstance(indicators, str):
-            try:
-                indicators = json.loads(indicators)
-            except Exception:
-                indicators = {}
-        rsi = _safe_float(indicators.get("rsi"))
+        # ── Step 3: Optionally enrich with SIGNAL# data ──
+        ai_score = None
+        sig = None
+        conf = None
+        try:
+            signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if signal_item:
+                ai_score = _safe_float(signal_item.get("compositeScore"), default=None)
+                sig = signal_item.get("signal")
+                conf = signal_item.get("confidence")
+                # Use company name from signal if price record didn't have one
+                if not company or company == ticker:
+                    company = signal_item.get("companyName", ticker)
+        except Exception:
+            pass
 
-        analysis = (health_data or {}).get("analysis") or {}
-        if isinstance(analysis, str):
-            try:
-                analysis = json.loads(analysis)
-            except Exception:
-                analysis = {}
-        grade = analysis.get("grade", "N/A")
-        ratios = analysis.get("ratios") or {}
-        if isinstance(ratios, str):
-            try:
-                ratios = json.loads(ratios)
-            except Exception:
-                ratios = {}
-        pe = _safe_float(ratios.get("peRatio"))
+        # Optionally enrich with TECHNICALS#
+        tech_score = None
+        rsi = None
+        try:
+            tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
+            if tech_data:
+                tech_score = _safe_float(tech_data.get("technicalScore"), default=None)
+                indicators = tech_data.get("indicators") or {}
+                if isinstance(indicators, str):
+                    try:
+                        indicators = json.loads(indicators)
+                    except Exception:
+                        indicators = {}
+                rsi = _safe_float(indicators.get("rsi"), default=None)
+        except Exception:
+            pass
 
-        # Apply filters
-        if ai_range and not _in_range(ai_score, ai_range):
+        # Optionally enrich with HEALTH#
+        grade = None
+        pe = None
+        try:
+            health_data = db.get_item(f"HEALTH#{ticker}", "LATEST")
+            if health_data:
+                analysis = health_data.get("analysis") or {}
+                if isinstance(analysis, str):
+                    try:
+                        analysis = json.loads(analysis)
+                    except Exception:
+                        analysis = {}
+                grade = analysis.get("grade")
+                ratios = analysis.get("ratios") or {}
+                if isinstance(ratios, str):
+                    try:
+                        ratios = json.loads(ratios)
+                    except Exception:
+                        ratios = {}
+                pe = _safe_float(ratios.get("peRatio"), default=None)
+        except Exception:
+            pass
+
+        # ── Step 4: Apply filters ──
+        if ai_range:
+            if ai_score is None:
+                continue
+            if not _in_range(ai_score, ai_range):
+                continue
+        if tech_range:
+            if tech_score is None:
+                continue
+            if not _in_range(tech_score, tech_range):
+                continue
+        if rsi_range and rsi is not None and not _in_range(rsi, rsi_range):
             continue
-        if tech_range and not _in_range(tech_score, tech_range):
+        if pe_range and pe is not None and not _in_range(pe, pe_range):
             continue
-        if rsi_range and rsi and not _in_range(rsi, rsi_range):
+        if signal_filter:
+            if sig is None or sig not in signal_filter:
+                continue
+        if sector_filter and not any(s.lower() in (sector or "").lower() for s in sector_filter):
             continue
-        if pe_range and pe and not _in_range(pe, pe_range):
-            continue
-        if signal_filter and sig not in signal_filter:
-            continue
-        if sector_filter and not any(s.lower() in sector.lower() for s in sector_filter):
-            continue
-        if grade_filter and grade not in grade_filter:
-            continue
+        if grade_filter:
+            if grade is None or grade not in grade_filter:
+                continue
         if mcap_filter and mcap_lbl not in mcap_filter:
             continue
 
-        stock_tier = get_tier(t)
-        # Tier filter
+        stock_tier = get_tier(ticker)
         if tier_filter and stock_tier not in tier_filter:
             continue
 
         results.append({
-            "ticker": t,
-            "companyName": company,
+            "ticker": ticker,
+            "companyName": company or ticker,
             "price": price,
-            "change": round(change, 2),
-            "changePercent": round(change_pct, 2),
-            "aiScore": round(ai_score, 1),
+            "change": round(change, 2) if change else 0.0,
+            "changePercent": round(change_pct, 2) if change_pct else 0.0,
+            "aiScore": round(ai_score, 1) if ai_score is not None else None,
             "signal": sig,
             "confidence": conf,
-            "technicalScore": round(tech_score, 1) if tech_score else None,
+            "technicalScore": round(tech_score, 1) if tech_score is not None else None,
             "fundamentalGrade": grade,
-            "rsi": round(rsi, 1) if rsi else None,
+            "rsi": round(rsi, 1) if rsi is not None else None,
             "sector": sector,
-            "marketCap": market_cap,
+            "marketCap": float(market_cap) if market_cap else None,
             "marketCapLabel": mcap_lbl,
-            "peRatio": round(pe, 1) if pe else None,
-            "dataPending": not price_data or price == 0.0,
+            "peRatio": round(pe, 1) if pe is not None else None,
             "tier": stock_tier,
             "isETF": is_etf,
         })
 
-    # Normalize signals based on mean ± 0.5*stddev
-    from models import normalize_signals, determine_signal
-    all_scores = [r["aiScore"] for r in results]
-    mean, stddev = normalize_signals(all_scores)
-    for r in results:
-        r["signal"] = determine_signal(r["aiScore"], mean, stddev).value
-
-    # Sort
+    # ── Step 5: Sort ──
     sort_key_map = {
-        "aiScore": lambda x: x.get("aiScore") or 0,
-        "technicalScore": lambda x: x.get("technicalScore") or 0,
+        "aiScore": lambda x: x.get("aiScore") if x.get("aiScore") is not None else -999,
+        "technicalScore": lambda x: x.get("technicalScore") if x.get("technicalScore") is not None else -999,
         "price": lambda x: x.get("price") or 0,
         "changePercent": lambda x: x.get("changePercent") or 0,
-        "volume": lambda x: x.get("marketCap") or 0,
+        "marketCap": lambda x: x.get("marketCap") or 0,
+        "ticker": lambda x: x.get("ticker", ""),
+        "signal": lambda x: {"BUY": 3, "HOLD": 2, "SELL": 1}.get(x.get("signal") or "", 0),
     }
-    key_fn = sort_key_map.get(sort_by, sort_key_map["aiScore"])
-    results.sort(key=key_fn, reverse=(sort_dir == "desc"))
+    key_fn = sort_key_map.get(sort_by, sort_key_map["changePercent"])
+    # For ticker sort, ascending is more natural (A-Z)
+    reverse = (sort_dir != "asc") if sort_by != "ticker" else (sort_dir == "desc")
+    results.sort(key=key_fn, reverse=reverse)
 
+    # ── Step 6: Paginate ──
     total = len(results)
     paginated = results[offset:offset + limit]
 

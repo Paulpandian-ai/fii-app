@@ -1057,6 +1057,7 @@ export interface ChatMessage {
 export type RootTabParamList = {
   Feed: undefined;
   Portfolio: undefined;
+  Screener: undefined;
   Strategy: undefined;
   Coach: undefined;
 };
@@ -1072,7 +1073,6 @@ export type RootStackParamList = {
   ProfileScreen: undefined;
   Leaderboard: undefined;
   AIChat: { ticker?: string };
-  Screener: undefined;
   Profile: undefined;
   WealthSimulator: undefined;
   TaxStrategy: undefined;

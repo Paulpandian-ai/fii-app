@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   FlatList,
   ScrollView,
@@ -50,7 +51,7 @@ type Grade = (typeof GRADES)[number];
 const MARKET_CAPS = ['Small', 'Mid', 'Large', 'Mega'] as const;
 type MarketCap = (typeof MARKET_CAPS)[number];
 
-const SORT_OPTIONS = ['AI Score', 'Tech Score', 'Price Change', 'Volume'] as const;
+const SORT_OPTIONS = ['Price Change', 'Ticker', 'AI Score', 'Tech Score', 'Market Cap'] as const;
 type SortOption = (typeof SORT_OPTIONS)[number];
 
 const SIGNAL_COLORS: Record<Signal, string> = {
@@ -133,14 +134,18 @@ interface ScreenerResult {
   ticker: string;
   companyName: string;
   price: number;
+  change: number;
   changePercent: number;
-  aiScore: number;
-  technicalScore: number;
-  fundamentalGrade: string;
-  signal: Signal;
+  aiScore: number | null;
+  technicalScore: number | null;
+  fundamentalGrade: string | null;
+  signal: Signal | null;
+  confidence: string | null;
   sector: string;
-  marketCap: string;
-  volume: number;
+  marketCap: number | null;
+  marketCapLabel: string;
+  tier: string;
+  isETF: boolean;
 }
 
 const DEFAULT_FILTERS: ScreenerFilters = {
@@ -152,7 +157,7 @@ const DEFAULT_FILTERS: ScreenerFilters = {
   sectors: [],
   grades: [],
   marketCaps: [],
-  sortBy: 'AI Score',
+  sortBy: 'Price Change',
 };
 
 // ─── Helpers ───
@@ -183,7 +188,8 @@ export const ScreenerScreen: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
-  const PAGE_SIZE = 20;
+  const [searchQuery, setSearchQuery] = useState('');
+  const PAGE_SIZE = 50;
 
   // ─── Data Fetching ───
 
@@ -200,10 +206,12 @@ export const ScreenerScreen: React.FC = () => {
     if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
     if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
     const sortMap: Record<string, string> = {
+      'Price Change': 'changePercent', 'Ticker': 'ticker',
       'AI Score': 'aiScore', 'Tech Score': 'technicalScore',
-      'Price Change': 'changePercent', 'Volume': 'volume',
+      'Market Cap': 'marketCap',
     };
-    if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'aiScore';
+    if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'changePercent';
+    if (appliedFilters.sortBy === 'Ticker') params.sortDir = 'asc';
     return params;
   }, []);
 
@@ -212,15 +220,16 @@ export const ScreenerScreen: React.FC = () => {
       ticker: item.ticker || '',
       companyName: item.companyName || item.company_name || '',
       price: item.price ?? 0,
+      change: item.change ?? 0,
       changePercent: item.changePercent ?? item.change_percent ?? 0,
-      aiScore: item.aiScore ?? item.compositeScore ?? item.score ?? 0,
-      technicalScore: item.technicalScore ?? item.techScore ?? 0,
-      fundamentalGrade: item.fundamentalGrade ?? item.grade ?? 'N/A',
-      signal: item.signal || 'HOLD',
+      aiScore: item.aiScore ?? null,
+      technicalScore: item.technicalScore ?? null,
+      fundamentalGrade: item.fundamentalGrade ?? null,
+      signal: item.signal || null,
+      confidence: item.confidence || null,
       sector: item.sector || '',
-      marketCap: item.marketCap || '',
-      volume: item.volume ?? 0,
-      dataPending: item.dataPending ?? false,
+      marketCap: item.marketCap ?? null,
+      marketCapLabel: item.marketCapLabel || '',
       tier: item.tier || 'TIER_3',
       isETF: item.isETF ?? false,
     }));
@@ -399,6 +408,18 @@ export const ScreenerScreen: React.FC = () => {
     return count;
   })();
 
+  // ─── Client-side search filter ───
+
+  const filteredResults = useMemo(() => {
+    if (!searchQuery.trim()) return results;
+    const q = searchQuery.trim().toLowerCase();
+    return results.filter(
+      (r) =>
+        r.ticker.toLowerCase().includes(q) ||
+        r.companyName.toLowerCase().includes(q),
+    );
+  }, [results, searchQuery]);
+
   // ─── Render: Template Chip ───
 
   const renderTemplateChip = useCallback(
@@ -433,9 +454,12 @@ export const ScreenerScreen: React.FC = () => {
     ({ item }: { item: ScreenerResult }) => {
       const changeColor = (item.changePercent ?? 0) >= 0 ? '#26a69a' : '#ef5350';
       const changeSign = (item.changePercent ?? 0) >= 0 ? '+' : '';
-      const aiColor = getAiScoreColor(item.aiScore ?? 0);
+      const hasSignal = item.signal != null;
+      const signalColor = hasSignal ? SIGNAL_COLORS[item.signal!] : '#8b949e';
+      const hasAiScore = item.aiScore != null;
+      const aiColor = hasAiScore ? getAiScoreColor(item.aiScore!) : '#8b949e';
       const gradeColor =
-        GRADE_COLORS[(item.fundamentalGrade ?? 'F') as Grade] || '#8b949e';
+        item.fundamentalGrade ? (GRADE_COLORS[item.fundamentalGrade as Grade] || '#8b949e') : '#8b949e';
 
       return (
         <TouchableOpacity
@@ -443,14 +467,14 @@ export const ScreenerScreen: React.FC = () => {
           onPress={() => handleResultPress(item)}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel={`${item.ticker} ${item.companyName}, ${item.signal} signal, AI score ${(item.aiScore ?? 0).toFixed(1)}`}
+          accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasSignal ? item.signal + ' signal' : 'no signal'}`}
         >
           <View style={styles.resultLeft}>
             <View style={styles.resultTickerRow}>
               <Text style={styles.resultTicker}>{item.ticker}</Text>
-              <View style={[styles.signalBadge, { backgroundColor: SIGNAL_COLORS[item.signal] + '20' }]}>
-                <Text style={[styles.signalBadgeText, { color: SIGNAL_COLORS[item.signal] }]}>
-                  {item.signal}
+              <View style={[styles.signalBadge, { backgroundColor: signalColor + '20' }]}>
+                <Text style={[styles.signalBadgeText, { color: signalColor }]}>
+                  {hasSignal ? item.signal : '—'}
                 </Text>
               </View>
             </View>
@@ -462,7 +486,7 @@ export const ScreenerScreen: React.FC = () => {
           <View style={styles.resultCenter}>
             <View style={styles.resultPriceCol}>
               <Text style={styles.resultPrice}>
-                {(item as any).dataPending ? 'Pending' : `$${(item.price ?? 0).toFixed(2)}`}
+                {item.price ? `$${item.price.toFixed(2)}` : '—'}
               </Text>
               <Text style={[styles.resultChange, { color: changeColor }]}>
                 {changeSign}{(item.changePercent ?? 0).toFixed(2)}%
@@ -473,17 +497,21 @@ export const ScreenerScreen: React.FC = () => {
           <View style={styles.resultRight}>
             <View style={[styles.aiScoreBadge, { backgroundColor: aiColor + '20' }]}>
               <Text style={[styles.aiScoreText, { color: aiColor }]}>
-                {(item.aiScore ?? 0).toFixed(1)}
+                {hasAiScore ? item.aiScore!.toFixed(1) : '—'}
               </Text>
             </View>
             <View style={styles.resultMetaRow}>
-              <Text style={styles.resultMetaLabel}>T:</Text>
-              <Text style={styles.resultMetaValue}>
-                {(item.technicalScore ?? 0).toFixed(1)}
-              </Text>
+              {item.technicalScore != null && (
+                <>
+                  <Text style={styles.resultMetaLabel}>T:</Text>
+                  <Text style={styles.resultMetaValue}>
+                    {item.technicalScore.toFixed(1)}
+                  </Text>
+                </>
+              )}
               <View style={[styles.gradeBadgeMini, { backgroundColor: gradeColor + '20' }]}>
                 <Text style={[styles.gradeBadgeMiniText, { color: gradeColor }]}>
-                  {item.fundamentalGrade || 'N/A'}
+                  {item.fundamentalGrade || '—'}
                 </Text>
               </View>
             </View>
@@ -556,7 +584,9 @@ export const ScreenerScreen: React.FC = () => {
   const renderHeader = () => (
     <View style={styles.resultHeader}>
       <Text style={styles.resultCount}>
-        {results.length} {results.length === 1 ? 'stock matches' : 'stocks match'}
+        {searchQuery.trim()
+          ? `${filteredResults.length} of ${totalCount} stocks`
+          : `Showing ${results.length} of ${totalCount} stocks`}
       </Text>
     </View>
   );
@@ -597,12 +627,7 @@ export const ScreenerScreen: React.FC = () => {
     <View style={styles.container}>
       {/* Header Bar */}
       <View style={styles.headerBar}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityRole="button" accessibilityLabel="Go back">
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.screenTitle}>Screener</Text>
-        </View>
+        <Text style={styles.screenTitle}>Screener</Text>
         <TouchableOpacity style={styles.filterButton} onPress={openFilterModal} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Open filters${activeFilterCount > 0 ? ', ' + activeFilterCount + ' active' : ''}`}>
           <Ionicons name="options-outline" size={18} color="#fff" />
           <Text style={styles.filterButtonText}>Filters</Text>
@@ -612,6 +637,26 @@ export const ScreenerScreen: React.FC = () => {
             </View>
           )}
         </TouchableOpacity>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={18} color="#8b949e" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by ticker or company..."
+          placeholderTextColor="#8b949e"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={18} color="#8b949e" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Template Chips */}
@@ -659,36 +704,36 @@ export const ScreenerScreen: React.FC = () => {
       )}
 
       {/* Results List */}
-      {loading && results.length === 0 ? (
+      {loading && filteredResults.length === 0 ? (
         renderSkeleton()
       ) : (
         <FlatList
-          data={results}
+          data={filteredResults}
           renderItem={renderResultItem}
-          keyExtractor={(item, index) => item.id ?? item.postId ?? item.ticker ?? 'item-' + index}
-          ListHeaderComponent={results.length > 0 ? renderHeader : null}
+          keyExtractor={(item, index) => item.ticker || 'item-' + index}
+          ListHeaderComponent={filteredResults.length > 0 ? renderHeader : null}
           ListEmptyComponent={renderEmpty}
-          onEndReached={loadMore}
+          onEndReached={searchQuery.trim() ? undefined : loadMore}
           onEndReachedThreshold={0.3}
-          ListFooterComponent={results.length > 0 ? (
+          ListFooterComponent={filteredResults.length > 0 ? (
             <>
-              {totalCount > 0 && (
-                <Text style={{ color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingVertical: 8, fontSize: 12 }}>
-                  Showing {results.length} of {totalCount} stocks
-                </Text>
-              )}
-              {loadingMore && (
+              {!searchQuery.trim() && loadingMore && (
                 <ActivityIndicator size="small" color="#60A5FA" style={{ paddingVertical: 12 }} />
+              )}
+              {!searchQuery.trim() && hasMore && !loadingMore && (
+                <Text style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 8, fontSize: 12 }}>
+                  Scroll for more...
+                </Text>
               )}
               <DisclaimerBanner />
             </>
           ) : null}
-          contentContainerStyle={results.length === 0 ? styles.emptyList : styles.resultList}
+          contentContainerStyle={filteredResults.length === 0 ? styles.emptyList : styles.resultList}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={5}
-          initialNumToRender={10}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          initialNumToRender={15}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -942,6 +987,25 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#161b22',
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#30363d',
+    gap: 10,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    padding: 0,
   },
   filterButton: {
     flexDirection: 'row',
