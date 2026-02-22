@@ -502,9 +502,9 @@ def _refresh_signals(ticker: str) -> None:
     composite = round(max(1.0, min(10.0, composite)), 1)
 
     # ── Signal thresholds ──
-    if composite >= 7.0:
+    if composite >= 6.2:
         signal = "BUY"
-    elif composite < 4.0:
+    elif composite < 4.8:
         signal = "SELL"
     else:
         signal = "HOLD"
