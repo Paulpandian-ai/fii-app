@@ -7,7 +7,7 @@ Finnhub's free tier (60 calls/min, using 55 as safe limit).
 Modes:
   - "prices": Price-only refresh (~1 call/stock, ~10 min for 523)
   - "full": Prices + technicals for TIER_1/TIER_2, prices for TIER_3/ETF
-  - "signals": Generate AI signals for TIER_1 stocks only (no API calls)
+  - "signals": Generate AI signals for ALL stocks (no Finnhub API calls)
   - "single": Refresh a single ticker (via {"tickers": ["NVDA"]})
 
 Schedule:
@@ -56,13 +56,15 @@ def lambda_handler(event, context):
     """
     mode = event.get("mode", "full")
 
-    # Signals-only mode: only process TIER_1, no Finnhub API calls
+    # Signals-only mode: generate signals for all tickers, no Finnhub API calls
     if mode == "signals":
-        single_ticker = event.get("ticker")
-        if single_ticker:
-            signal_tickers = [single_ticker]
+        signal_tickers = event.get("tickers")
+        if signal_tickers:
+            pass  # Use provided tickers list
+        elif event.get("ticker"):
+            signal_tickers = [event["ticker"]]
         else:
-            signal_tickers = list(TIER_1)
+            signal_tickers = _get_tracked_tickers()
         return _run_signal_generation(signal_tickers)
 
     tickers = event.get("tickers") or _get_tracked_tickers()
@@ -103,8 +105,8 @@ def lambda_handler(event, context):
                 _refresh_technicals(ticker)
                 call_count += 1
 
-            # Generate signals for TIER_1 on full refresh
-            if mode == "full" and tier == "TIER_1":
+            # Generate signals on full refresh
+            if mode in ("signals", "full"):
                 try:
                     _refresh_signals(ticker)
                 except Exception as sig_err:
@@ -377,41 +379,63 @@ def _refresh_signals(ticker: str) -> None:
 
     # ── Component 1: Price Momentum (25%) ──
     data_sources = 0
-    if change_pct != 0.0:
-        if change_pct > 3.0:
-            momentum_score = 8.0 + min(change_pct - 3.0, 2.0)  # 8-10
-        elif change_pct > 1.0:
-            momentum_score = 6.0 + (change_pct - 1.0) / 2.0     # 6-7
-        elif change_pct > -1.0:
-            momentum_score = 5.0                                  # 5
-        elif change_pct > -3.0:
-            momentum_score = 3.0 + (change_pct + 3.0) / 2.0     # 3-4
-        else:
-            momentum_score = max(1.0, 2.0 + (change_pct + 3.0) / 3.0)  # 1-2
-        momentum_score = max(1.0, min(10.0, momentum_score))
-        data_sources += 1
-    else:
+    if change_pct > 5.0:
+        momentum_score = 9.5
+    elif change_pct > 3.0:
+        momentum_score = 8.0
+    elif change_pct > 1.5:
+        momentum_score = 7.0
+    elif change_pct > 0.5:
+        momentum_score = 6.0
+    elif change_pct > -0.5:
         momentum_score = 5.0
+    elif change_pct > -1.5:
+        momentum_score = 4.0
+    elif change_pct > -3.0:
+        momentum_score = 3.0
+    elif change_pct > -5.0:
+        momentum_score = 2.0
+    else:
+        momentum_score = 1.5
+    # Count as real data if we have any price movement info
+    if change_pct != 0.0 or price_data.get("price"):
+        data_sources += 1
 
     # ── Component 2: Technical Score (20%) ──
     if tech_score_raw is not None:
         technical_score = max(1.0, min(10.0, tech_score_raw))
+        # Adjust with RSI if available
+        if rsi is not None:
+            if rsi < 30:
+                rsi_adj = 7.0 + (30 - rsi) / 30       # 7-8 oversold = bullish
+            elif rsi > 70:
+                rsi_adj = 3.0 - (rsi - 70) / 30       # 2-3 overbought = bearish
+            else:
+                rsi_adj = 5.0
+            rsi_adj = max(1.0, min(10.0, rsi_adj))
+            # Blend: 70% technical score + 30% RSI adjustment
+            technical_score = technical_score * 0.7 + rsi_adj * 0.3
         data_sources += 1
     elif rsi is not None:
-        # Derive from RSI if no technical score
         if rsi < 30:
-            technical_score = 7.0 + (30 - rsi) / 30 * 1.0       # 7-8
+            technical_score = 7.0 + (30 - rsi) / 30
         elif rsi > 70:
-            technical_score = 3.0 - (rsi - 70) / 30 * 1.0       # 2-3
+            technical_score = 3.0 - (rsi - 70) / 30
         else:
-            technical_score = 5.0 + (50 - rsi) / 40 * 1.0       # 4-6
+            technical_score = 5.0 + (50 - rsi) / 40
         technical_score = max(1.0, min(10.0, technical_score))
         data_sources += 1
     else:
         technical_score = 5.0
 
     # ── Component 3: Fundamental Health (20%) ──
-    grade_map = {"A": 9.0, "B": 7.0, "C": 5.0, "D": 3.0, "F": 1.0}
+    grade_map = {
+        "A+": 9.5, "A": 9.0, "A-": 8.5,
+        "B+": 7.5, "B": 7.0, "B-": 6.5,
+        "C+": 5.5, "C": 5.0, "C-": 4.5,
+        "D+": 3.5, "D": 3.0, "D-": 2.5,
+        "F": 1.5,
+    }
     if fund_grade and fund_grade in grade_map:
         fundamental_score = grade_map[fund_grade]
         data_sources += 1
@@ -421,36 +445,44 @@ def _refresh_signals(ticker: str) -> None:
     # ── Component 4: Market Cap Stability (10%) ──
     if market_cap and market_cap > 0:
         if market_cap > 200_000_000_000:
-            stability_score = 7.0
+            stability_score = 7.5    # Mega cap
+        elif market_cap > 50_000_000_000:
+            stability_score = 7.0    # Large cap
         elif market_cap > 10_000_000_000:
-            stability_score = 6.0
+            stability_score = 6.0    # Mid cap
         elif market_cap > 2_000_000_000:
-            stability_score = 5.0
+            stability_score = 5.0    # Small cap
         else:
-            stability_score = 4.0
+            stability_score = 4.0    # Micro cap
         data_sources += 1
     else:
         stability_score = 5.0
 
     # ── Component 5: Sector Momentum (15%) ──
-    # Compare this stock's change to its sector peers' average change
-    sector_score = _compute_sector_momentum(ticker, sector, change_pct)
-    if sector_score is not None:
-        data_sources += 1
-    else:
+    # Based on the stock's absolute price change as a sector signal
+    if change_pct > 2.0:
+        sector_score = 8.0
+    elif change_pct > 0.5:
+        sector_score = 6.5
+    elif change_pct > -0.5:
         sector_score = 5.0
+    elif change_pct > -2.0:
+        sector_score = 3.5
+    else:
+        sector_score = 2.0
+    if sector:
+        data_sources += 1
 
-    # ── Component 6: Volatility Adjustment (10%) ──
+    # ── Component 6: Volatility/Risk (10%) ──
     if beta and beta != 1.0:
-        # Low beta + positive momentum → good; high beta + negative → bad
         if beta < 1.0 and change_pct > 0:
-            volatility_score = 7.0 + (1.0 - beta) * 3.0         # 7-10
-        elif beta > 1.5 and change_pct < -1.0:
-            volatility_score = 2.0 - (beta - 1.5) * 1.0         # 1-2
+            volatility_score = 7.0    # Low vol + positive = good
+        elif beta > 1.3 and change_pct < -1.0:
+            volatility_score = 2.5    # High vol + negative = bad
         elif beta < 0.8:
             volatility_score = 6.5
         elif beta > 1.3:
-            volatility_score = 4.0
+            volatility_score = 3.5
         else:
             volatility_score = 5.0
         volatility_score = max(1.0, min(10.0, volatility_score))
@@ -494,17 +526,17 @@ def _refresh_signals(ticker: str) -> None:
         "compositeScore": str(composite),
         "signal": signal,
         "confidence": confidence,
-        "dimensionScores": json.dumps({
-            "momentum": round(momentum_score, 1),
-            "technical": round(technical_score, 1),
-            "fundamental": round(fundamental_score, 1),
-            "stability": round(stability_score, 1),
-            "sectorMomentum": round(sector_score, 1),
-            "volatility": round(volatility_score, 1),
-        }),
+        "sector": sector,
+        "dimensionScores": {
+            "momentum": str(round(momentum_score, 1)),
+            "technical": str(round(technical_score, 1)),
+            "fundamental": str(round(fundamental_score, 1)),
+            "stability": str(round(stability_score, 1)),
+            "sectorMomentum": str(round(sector_score, 1)),
+            "volatility": str(round(volatility_score, 1)),
+        },
         "dataSources": data_sources,
         "tier": get_tier(ticker),
-        "sector": sector,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
     db.put_item(signal_item)
@@ -512,43 +544,3 @@ def _refresh_signals(ticker: str) -> None:
         f"[SignalGen] {ticker}: score={composite}, signal={signal}, "
         f"confidence={confidence}, sources={data_sources}"
     )
-
-
-def _compute_sector_momentum(ticker: str, sector: str, stock_change: float):
-    """Compare stock's price change to sector average to compute sector momentum score.
-
-    Returns a score 1-10 or None if sector data unavailable.
-    """
-    if not sector:
-        return None
-
-    # Get price changes for stocks in the same sector
-    sector_changes = []
-    # Sample up to 20 peers from same sector for efficiency
-    sector_peers = [t for t in STOCK_UNIVERSE[:200] if STOCK_SECTORS.get(t) == sector and t != ticker][:20]
-
-    for peer in sector_peers:
-        try:
-            peer_price = db.get_item(f"PRICE#{peer}", "LATEST")
-            if peer_price:
-                peer_change = _safe_float(peer_price.get("changePercent"))
-                sector_changes.append(peer_change)
-        except Exception:
-            pass
-
-    if not sector_changes:
-        return None
-
-    sector_avg = sum(sector_changes) / len(sector_changes)
-    diff = stock_change - sector_avg
-
-    if diff > 2.0:
-        return min(10.0, 8.0 + (diff - 2.0) / 2.0)
-    elif diff > 0.5:
-        return 6.0 + (diff - 0.5) / 1.5
-    elif diff > -0.5:
-        return 5.0
-    elif diff > -2.0:
-        return 3.0 + (diff + 2.0) / 1.5
-    else:
-        return max(1.0, 2.0 + (diff + 3.0) / 2.0)
