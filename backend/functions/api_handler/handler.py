@@ -34,6 +34,8 @@ Routes:
   POST /strategy/scenarios           — What-if scenario battles
   POST /strategy/rebalance           — Rebalancing suggestions
   GET  /strategy/achievements        — User achievement badges
+  GET  /stock/<ticker>/stress-test   — Macro stress-test (single scenario)
+  GET  /stock/<ticker>/stress-test/all — Macro stress-test (all scenarios)
 """
 
 import json
@@ -60,6 +62,7 @@ import factor_engine
 import patent_engine
 import contract_engine
 import fda_engine
+import stress_engine
 
 
 def lambda_handler(event, context):
@@ -151,6 +154,8 @@ def lambda_handler(event, context):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
+        elif path.startswith("/stock/") and "/stress-test" in path:
+            return _handle_stress_test(http_method, path, query_params)
         else:
             print(f"[Router] No route matched for path={path} method={http_method}")
             return _response(404, {"error": "Not found", "path": path, "method": http_method})
@@ -4488,6 +4493,49 @@ def _handle_coach_weekly(user_id):
         "claudeLine": claude_line,
         "updatedAt": datetime.utcnow().isoformat(),
     })
+
+
+# ─── Stress Test ───
+
+
+def _handle_stress_test(method, path, query_params):
+    """GET /stock/<ticker>/stress-test[/all] — Macro stress-test scenarios."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    # Parse ticker from /stock/{ticker}/stress-test...
+    parts = path.strip("/").split("/")
+    if len(parts) < 3 or parts[0] != "stock":
+        return _response(400, {"error": "Invalid path"})
+
+    ticker = parts[1].upper()
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    run_all = len(parts) >= 4 and parts[3] == "all"
+
+    # Fetch data from DynamoDB
+    price_data = db.get_item(f"PRICE#{ticker}", "LATEST")
+    tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
+    health_data = db.get_item(f"HEALTH#{ticker}", "LATEST")
+    signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+
+    if not price_data or not price_data.get("price"):
+        return _response(404, {"error": f"No price data for {ticker}"})
+
+    if run_all:
+        results = stress_engine.run_all_scenarios(
+            ticker, price_data, tech_data, health_data, signal_data
+        )
+        return _response(200, {"ticker": ticker, "scenarios": results})
+
+    scenario_key = query_params.get("scenario", "severely_adverse")
+    result = stress_engine.run_stress_test(
+        ticker, scenario_key, price_data, tech_data, health_data, signal_data
+    )
+    if "error" in result:
+        return _response(400, result)
+    return _response(200, result)
 
 
 # ─── Response Helper ───
