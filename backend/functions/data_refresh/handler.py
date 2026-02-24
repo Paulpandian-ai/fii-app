@@ -332,10 +332,11 @@ def _safe_float(val, default=0.0):
 
 
 def _refresh_signals(ticker: str) -> None:
-    """Generate AI signal for a single ticker using existing DynamoDB data.
+    """Generate AI signal for a single ticker using rich DynamoDB data.
 
     Computes a composite score from 6 weighted components using real
-    PRICE#, TECHNICALS#, and HEALTH# records. No external API calls.
+    PRICE#, TECHNICALS# (full indicator suite), and HEALTH# (grade + ratios)
+    records. No external API calls.
     """
     # ── Gather existing data ──
     price_data = db.get_item(f"PRICE#{ticker}", "LATEST")
@@ -346,16 +347,16 @@ def _refresh_signals(ticker: str) -> None:
     tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
     health_data = db.get_item(f"HEALTH#{ticker}", "LATEST")
 
-    # Extract price fields
+    # ── Parse price fields ──
+    price = _safe_float(price_data.get("price"))
     change_pct = _safe_float(price_data.get("changePercent"))
     market_cap = _safe_float(price_data.get("marketCap"))
     sector = price_data.get("sector", "") or STOCK_SECTORS.get(ticker, "")
     company_name = price_data.get("companyName", "") or COMPANY_NAMES.get(ticker, ticker)
-    beta = _safe_float(price_data.get("beta"), default=1.0)
 
-    # Extract technical fields
+    # ── Parse technical indicators ──
+    indicators = {}
     tech_score_raw = None
-    rsi = None
     if tech_data:
         tech_score_raw = _safe_float(tech_data.get("technicalScore"), default=None)
         indicators = tech_data.get("indicators") or {}
@@ -364,10 +365,44 @@ def _refresh_signals(ticker: str) -> None:
                 indicators = json.loads(indicators)
             except Exception:
                 indicators = {}
-        rsi = _safe_float(indicators.get("rsi"), default=None)
 
-    # Extract health/fundamental fields
+    rsi = _safe_float(indicators.get("rsi"), default=None)
+    sma20 = _safe_float(indicators.get("sma20"), default=None)
+    sma50 = _safe_float(indicators.get("sma50"), default=None)
+    sma200 = _safe_float(indicators.get("sma200"), default=None)
+    adx = _safe_float(indicators.get("adx"), default=None)
+    atr = _safe_float(indicators.get("atr"), default=None)
+    obv = _safe_float(indicators.get("obv"), default=None)
+
+    macd_data = indicators.get("macd") or {}
+    if isinstance(macd_data, str):
+        try:
+            macd_data = json.loads(macd_data)
+        except Exception:
+            macd_data = {}
+    macd_histogram = _safe_float(macd_data.get("histogram"), default=None)
+
+    stoch_data = indicators.get("stochastic") or {}
+    if isinstance(stoch_data, str):
+        try:
+            stoch_data = json.loads(stoch_data)
+        except Exception:
+            stoch_data = {}
+    stoch_k = _safe_float(stoch_data.get("k"), default=None)
+
+    bb_data = indicators.get("bollingerBands") or {}
+    if isinstance(bb_data, str):
+        try:
+            bb_data = json.loads(bb_data)
+        except Exception:
+            bb_data = {}
+    bb_upper = _safe_float(bb_data.get("upper"), default=None)
+    bb_lower = _safe_float(bb_data.get("lower"), default=None)
+
+    # ── Parse fundamental / health data ──
     fund_grade = None
+    f_score = None
+    ratios = {}
     if health_data:
         analysis = health_data.get("analysis") or {}
         if isinstance(analysis, str):
@@ -376,59 +411,150 @@ def _refresh_signals(ticker: str) -> None:
             except Exception:
                 analysis = {}
         fund_grade = analysis.get("grade")
+        f_score = _safe_float(analysis.get("fScore"), default=None)
+        ratios = analysis.get("ratios") or {}
+        if isinstance(ratios, str):
+            try:
+                ratios = json.loads(ratios)
+            except Exception:
+                ratios = {}
 
-    # ── Component 1: Price Momentum (25%) ──
+    pe_ratio = _safe_float(ratios.get("peRatio"), default=None)
+    roe = _safe_float(ratios.get("roe"), default=None)
+    debt_to_equity = _safe_float(ratios.get("debtToEquity"), default=None)
+
+    # ─────────────────────────────────────────────────
+    # Component 1: Multi-Timeframe Momentum (25%)
+    # ─────────────────────────────────────────────────
     data_sources = 0
-    if change_pct > 5.0:
-        momentum_score = 9.5
-    elif change_pct > 3.0:
-        momentum_score = 8.0
-    elif change_pct > 1.5:
-        momentum_score = 7.0
-    elif change_pct > 0.5:
-        momentum_score = 6.0
+    momentum_signals = 0  # count of bullish vs bearish signals
+    momentum_total = 0    # total signals checked
+    has_sma_data = False
+
+    # SMA20 crossover (short-term trend)
+    if sma20 and price:
+        has_sma_data = True
+        momentum_total += 1
+        if price > sma20:
+            momentum_signals += 1  # bullish
+        # else bearish (0)
+
+    # SMA50 crossover (medium-term trend)
+    if sma50 and price:
+        has_sma_data = True
+        momentum_total += 1
+        if price > sma50:
+            momentum_signals += 1
+
+    # Golden/Death Cross: SMA50 vs SMA200
+    if sma50 and sma200:
+        has_sma_data = True
+        momentum_total += 1
+        if sma50 > sma200:
+            momentum_signals += 1  # golden cross
+
+    # MACD histogram
+    if macd_histogram is not None:
+        has_sma_data = True
+        momentum_total += 1
+        if macd_histogram > 0:
+            momentum_signals += 1  # bullish momentum
+
+    # Daily changePercent (always available)
+    momentum_total += 1
+    if change_pct > 0.5:
+        momentum_signals += 1
     elif change_pct > -0.5:
-        momentum_score = 5.0
-    elif change_pct > -1.5:
-        momentum_score = 4.0
-    elif change_pct > -3.0:
-        momentum_score = 3.0
-    elif change_pct > -5.0:
-        momentum_score = 2.0
+        momentum_signals += 0.5  # neutral gets half
+
+    if momentum_total > 0:
+        # Convert ratio to 1-10: 0 signals = 1.0, all bullish = 9.5
+        ratio = momentum_signals / momentum_total
+        momentum_score = 1.0 + ratio * 8.5
     else:
-        momentum_score = 1.5
-    # Count as real data if we have any price movement info
-    if change_pct != 0.0 or price_data.get("price"):
+        momentum_score = 5.0
+
+    if has_sma_data or change_pct != 0.0:
         data_sources += 1
 
-    # ── Component 2: Technical Score (20%) ──
+    # ─────────────────────────────────────────────────
+    # Component 2: Technical Score (20%)
+    # ─────────────────────────────────────────────────
+    tech_parts = []
+    has_tech_data = False
+
+    # 40% pre-computed technicalScore
     if tech_score_raw is not None:
-        technical_score = max(1.0, min(10.0, tech_score_raw))
-        # Adjust with RSI if available
-        if rsi is not None:
-            if rsi < 30:
-                rsi_adj = 7.0 + (30 - rsi) / 30       # 7-8 oversold = bullish
-            elif rsi > 70:
-                rsi_adj = 3.0 - (rsi - 70) / 30       # 2-3 overbought = bearish
-            else:
-                rsi_adj = 5.0
-            rsi_adj = max(1.0, min(10.0, rsi_adj))
-            # Blend: 70% technical score + 30% RSI adjustment
-            technical_score = technical_score * 0.7 + rsi_adj * 0.3
-        data_sources += 1
-    elif rsi is not None:
-        if rsi < 30:
-            technical_score = 7.0 + (30 - rsi) / 30
-        elif rsi > 70:
-            technical_score = 3.0 - (rsi - 70) / 30
+        tech_parts.append(("tech", 0.40, max(1.0, min(10.0, tech_score_raw))))
+        has_tech_data = True
+
+    # 25% RSI signal
+    if rsi is not None:
+        has_tech_data = True
+        if rsi < 25:
+            rsi_score = 9.0
+        elif rsi < 30:
+            rsi_score = 7.5
+        elif rsi < 40:
+            rsi_score = 6.0
+        elif rsi <= 60:
+            rsi_score = 5.0
+        elif rsi <= 70:
+            rsi_score = 4.0
+        elif rsi <= 75:
+            rsi_score = 3.0
         else:
-            technical_score = 5.0 + (50 - rsi) / 40
+            rsi_score = 1.5
+        tech_parts.append(("rsi", 0.25, rsi_score))
+
+    # 20% Stochastic K
+    if stoch_k is not None:
+        has_tech_data = True
+        if stoch_k < 20:
+            stoch_score = 8.0
+        elif stoch_k < 40:
+            stoch_score = 6.0
+        elif stoch_k <= 60:
+            stoch_score = 5.0
+        elif stoch_k <= 80:
+            stoch_score = 4.0
+        else:
+            stoch_score = 2.0
+        tech_parts.append(("stoch", 0.20, stoch_score))
+
+    # 15% ADX as trend strength multiplier (applied later)
+    adx_multiplier = 1.0
+    if adx is not None:
+        has_tech_data = True
+        if adx > 40:
+            adx_multiplier = 1.3
+        elif adx > 25:
+            adx_multiplier = 1.1
+        elif adx < 15:
+            adx_multiplier = 0.8
+
+    if tech_parts:
+        # Weighted average of available tech parts, renormalized
+        total_weight = sum(w for _, w, _ in tech_parts)
+        technical_score = sum(w * s for _, w, s in tech_parts) / total_weight
+        # Apply ADX multiplier: amplify distance from neutral (5.0)
+        distance = technical_score - 5.0
+        technical_score = 5.0 + distance * adx_multiplier
         technical_score = max(1.0, min(10.0, technical_score))
+        data_sources += 1
+    elif has_tech_data:
+        technical_score = 5.0
         data_sources += 1
     else:
         technical_score = 5.0
 
-    # ── Component 3: Fundamental Health (20%) ──
+    # ─────────────────────────────────────────────────
+    # Component 3: Fundamental Health (20%)
+    # ─────────────────────────────────────────────────
+    fund_parts = []
+    has_fund_data = False
+
+    # 40% grade score
     grade_map = {
         "A+": 9.5, "A": 9.0, "A-": 8.5,
         "B+": 7.5, "B": 7.0, "B-": 6.5,
@@ -437,29 +563,95 @@ def _refresh_signals(ticker: str) -> None:
         "F": 1.5,
     }
     if fund_grade and fund_grade in grade_map:
-        fundamental_score = grade_map[fund_grade]
+        fund_parts.append(("grade", 0.40, grade_map[fund_grade]))
+        has_fund_data = True
+
+    # 15% P/E ratio
+    if pe_ratio is not None:
+        has_fund_data = True
+        if pe_ratio < 0:
+            pe_score = 2.0
+        elif pe_ratio < 12:
+            pe_score = 8.5
+        elif pe_ratio < 20:
+            pe_score = 7.0
+        elif pe_ratio < 30:
+            pe_score = 5.5
+        elif pe_ratio < 50:
+            pe_score = 4.0
+        else:
+            pe_score = 2.5
+        fund_parts.append(("pe", 0.15, pe_score))
+
+    # 15% ROE
+    if roe is not None:
+        has_fund_data = True
+        if roe > 25:
+            roe_score = 9.0
+        elif roe > 15:
+            roe_score = 7.5
+        elif roe > 10:
+            roe_score = 6.0
+        elif roe > 0:
+            roe_score = 4.5
+        else:
+            roe_score = 2.0
+        fund_parts.append(("roe", 0.15, roe_score))
+
+    # 15% Debt/Equity
+    if debt_to_equity is not None:
+        has_fund_data = True
+        if debt_to_equity < 0.3:
+            de_score = 8.5
+        elif debt_to_equity < 0.7:
+            de_score = 7.0
+        elif debt_to_equity < 1.5:
+            de_score = 5.5
+        elif debt_to_equity < 3.0:
+            de_score = 3.5
+        else:
+            de_score = 2.0
+        fund_parts.append(("de", 0.15, de_score))
+
+    # 15% Piotroski F-Score (0-9 mapped to 1-10)
+    if f_score is not None and 0 <= f_score <= 9:
+        has_fund_data = True
+        piotroski_score = 1.0 + f_score * (9.0 / 9.0)  # 0→1.0, 9→10.0
+        fund_parts.append(("fscore", 0.15, piotroski_score))
+
+    if fund_parts:
+        total_weight = sum(w for _, w, _ in fund_parts)
+        fundamental_score = sum(w * s for _, w, s in fund_parts) / total_weight
+        fundamental_score = max(1.0, min(10.0, fundamental_score))
+        data_sources += 1
+    elif has_fund_data:
+        fundamental_score = 5.0
         data_sources += 1
     else:
         fundamental_score = 5.0
 
-    # ── Component 4: Market Cap Stability (10%) ──
+    # ─────────────────────────────────────────────────
+    # Component 4: Market Cap Stability (10%)
+    # ─────────────────────────────────────────────────
     if market_cap and market_cap > 0:
         if market_cap > 200_000_000_000:
-            stability_score = 7.5    # Mega cap
+            stability_score = 7.5
         elif market_cap > 50_000_000_000:
-            stability_score = 7.0    # Large cap
+            stability_score = 7.0
         elif market_cap > 10_000_000_000:
-            stability_score = 6.0    # Mid cap
+            stability_score = 6.0
         elif market_cap > 2_000_000_000:
-            stability_score = 5.0    # Small cap
+            stability_score = 5.0
         else:
-            stability_score = 4.0    # Micro cap
+            stability_score = 4.0
         data_sources += 1
     else:
         stability_score = 5.0
 
-    # ── Component 5: Sector Momentum (15%) ──
-    # Based on the stock's absolute price change as a sector signal
+    # ─────────────────────────────────────────────────
+    # Component 5: Sector Momentum + Bollinger (15%)
+    # ─────────────────────────────────────────────────
+    # Base score from changePercent
     if change_pct > 2.0:
         sector_score = 8.0
     elif change_pct > 0.5:
@@ -470,21 +662,41 @@ def _refresh_signals(ticker: str) -> None:
         sector_score = 3.5
     else:
         sector_score = 2.0
+
+    # Adjust with Bollinger Band position
+    if bb_upper and bb_lower and price and bb_upper != bb_lower:
+        bb_position = (price - bb_lower) / (bb_upper - bb_lower)
+        bb_position = max(0.0, min(1.0, bb_position))
+        if bb_position < 0.2:
+            sector_score += 1.5   # near bottom = oversold opportunity
+        elif bb_position > 0.8:
+            sector_score -= 1.0   # near top = stretched
+        sector_score = max(1.0, min(10.0, sector_score))
+
     if sector:
         data_sources += 1
 
-    # ── Component 6: Volatility/Risk (10%) ──
-    if beta and beta != 1.0:
-        if beta < 1.0 and change_pct > 0:
-            volatility_score = 7.0    # Low vol + positive = good
-        elif beta > 1.3 and change_pct < -1.0:
-            volatility_score = 2.5    # High vol + negative = bad
-        elif beta < 0.8:
-            volatility_score = 6.5
-        elif beta > 1.3:
-            volatility_score = 3.5
+    # ─────────────────────────────────────────────────
+    # Component 6: Volume & Volatility (10%)
+    # ─────────────────────────────────────────────────
+    if atr is not None and price and price > 0:
+        vol_pct = atr / price * 100  # volatility as % of price
+        if vol_pct < 2.0 and change_pct > 0:
+            volatility_score = 7.5   # low vol + up
+        elif vol_pct < 2.0 and change_pct < 0:
+            volatility_score = 5.5   # low vol + down (mild concern)
+        elif vol_pct > 4.0 and change_pct < -1.0:
+            volatility_score = 2.5   # high vol + down
+        elif vol_pct > 4.0 and change_pct > 1.0:
+            volatility_score = 6.0   # high vol + up (risky but bullish)
         else:
             volatility_score = 5.0
+        # OBV confirmation
+        if obv is not None:
+            if obv > 0 and change_pct > 0:
+                volatility_score += 0.5  # volume confirms up move
+            elif obv < 0 and change_pct < 0:
+                volatility_score -= 0.5  # volume confirms down move
         volatility_score = max(1.0, min(10.0, volatility_score))
         data_sources += 1
     else:
