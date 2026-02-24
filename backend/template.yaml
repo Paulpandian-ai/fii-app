@@ -682,6 +682,10 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fii/*
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:fii-*-${Stage}
 
   # ─── Event Handler Function (event/notification API routes) ───
 
@@ -1112,6 +1116,68 @@ Resources:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
         - S3CrudPolicy:
             BucketName: !If [CreateBucket, !Ref FiiDataBucket, !Ref ExistingBucketName]
+
+  # ─── Agent Scheduler Function (EventBridge-triggered orchestrator) ───
+
+  SchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-scheduler-${Stage}
+      Handler: handler.lambda_handler
+      CodeUri: functions/scheduler/
+      Description: Agent orchestrator — triggers data refresh Lambdas on schedule
+      Timeout: 60
+      MemorySize: 256
+      Events:
+        PriceRefreshMarketOpen:
+          Type: Schedule
+          Properties:
+            Schedule: cron(45 14 ? * MON-FRI *)
+            Description: Price refresh at market open (9:45 AM ET)
+            Enabled: true
+            Input: '{"agent": "price_refresh", "trigger": "market_open"}'
+        TechnicalsRefreshDaily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 21 ? * MON-FRI *)
+            Description: Technicals refresh after market close (4:30 PM ET)
+            Enabled: true
+            Input: '{"agent": "technicals_refresh", "trigger": "daily"}'
+        SignalGenerationDaily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 22 ? * MON-FRI *)
+            Description: AI signal generation (6:00 PM ET weekdays)
+            Enabled: true
+            Input: '{"agent": "signal_generation", "trigger": "daily"}'
+        SignalGenerationWeekly:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 ? * SAT *)
+            Description: Full signal recompute (Saturday 4 AM ET)
+            Enabled: true
+            Input: '{"agent": "signal_generation", "trigger": "weekly_full"}'
+        FundamentalsRefreshWeekly:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 10 ? * SUN *)
+            Description: Fundamentals refresh (Sunday 6 AM ET)
+            Enabled: true
+            Input: '{"agent": "fundamentals_refresh", "trigger": "weekly"}'
+        FeedCompileDaily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 10 ? * MON-FRI *)
+            Description: Compile daily signal feed (6:30 AM ET)
+            Enabled: true
+            Input: '{"agent": "feed_compile", "trigger": "daily"}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:fii-*-${Stage}
 
 Conditions:
   HasAppleConfig: !Not [!Equals [!Ref AppleTeamId, '']]

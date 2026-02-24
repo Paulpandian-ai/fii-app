@@ -179,6 +179,23 @@ def lambda_handler(event, context):
         f"{results['errors']} errors in {elapsed_total:.0f}s"
     )
 
+    # Write AGENT_RUN# record for scheduler tracking
+    try:
+        agent_id = {"prices": "price_refresh", "full": "technicals_refresh",
+                     "signals": "signal_generation", "fundamentals": "fundamentals_refresh"
+                     }.get(mode, mode)
+        db.put_item({
+            "PK": f"AGENT_RUN#{agent_id}",
+            "SK": datetime.now(timezone.utc).isoformat(),
+            "status": "completed",
+            "duration": round(elapsed_total, 1),
+            "processed": results["refreshed"],
+            "errors": results["errors"],
+            "trigger": event.get("trigger", "manual"),
+        })
+    except Exception:
+        pass
+
     return {
         "statusCode": 200,
         "body": json.dumps(results),
@@ -317,6 +334,21 @@ def _run_signal_generation(tickers: list[str]) -> dict:
         f"(BUY={buy_count}, HOLD={hold_count}, SELL={sell_count}) "
         f"in {elapsed:.1f}s"
     )
+
+    # Write AGENT_RUN# record for scheduler tracking
+    try:
+        db.put_item({
+            "PK": "AGENT_RUN#signal_generation",
+            "SK": datetime.now(timezone.utc).isoformat(),
+            "status": "completed",
+            "duration": round(elapsed, 1),
+            "processed": results["generated"],
+            "errors": results["errors"],
+            "trigger": "signals",
+            "detail": f"BUY={buy_count} HOLD={hold_count} SELL={sell_count}",
+        })
+    except Exception:
+        pass
 
     return {"statusCode": 200, "body": json.dumps(results, default=str)}
 

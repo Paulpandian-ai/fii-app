@@ -36,6 +36,9 @@ Routes:
   GET  /strategy/achievements        — User achievement badges
   GET  /stock/<ticker>/stress-test   — Macro stress-test (single scenario)
   GET  /stock/<ticker>/stress-test/all — Macro stress-test (all scenarios)
+  GET  /admin/agents                 — List agents with schedules & last run
+  POST /admin/agents/<id>/run        — Manually trigger an agent
+  GET  /admin/agents/<id>/history    — View agent run history
 """
 
 import json
@@ -156,6 +159,8 @@ def lambda_handler(event, context):
             return _handle_coach(http_method, path, body, user_id)
         elif path.startswith("/stock/") and "/stress-test" in path:
             return _handle_stress_test(http_method, path, query_params)
+        elif path.startswith("/admin/"):
+            return _handle_admin(http_method, path, body, query_params)
         else:
             print(f"[Router] No route matched for path={path} method={http_method}")
             return _response(404, {"error": "Not found", "path": path, "method": http_method})
@@ -4536,6 +4541,138 @@ def _handle_stress_test(method, path, query_params):
     if "error" in result:
         return _response(400, result)
     return _response(200, result)
+
+
+# ─── Admin: Agent Scheduling ───
+
+# Import agent definitions inline so the module doesn't depend on scheduler pkg
+_STAGE = os.environ.get("STAGE", "dev")
+_AGENTS = {
+    "price_refresh": {
+        "name": "Price Refresh",
+        "description": "Refresh stock prices from Finnhub",
+        "target_lambda": f"fii-data-refresh-{_STAGE}",
+        "mode": "prices",
+        "schedules": {
+            "market_open": "cron(45 14 ? * MON-FRI *)",
+            "intraday": "rate(30 minutes)",
+            "market_close": "cron(30 20 ? * MON-FRI *)",
+        },
+    },
+    "technicals_refresh": {
+        "name": "Technicals Refresh",
+        "description": "Compute technical indicators from candle data",
+        "target_lambda": f"fii-data-refresh-{_STAGE}",
+        "mode": "full",
+        "schedules": {"daily": "cron(30 21 ? * MON-FRI *)"},
+    },
+    "signal_generation": {
+        "name": "Signal Generation",
+        "description": "Generate AI BUY/HOLD/SELL signals from all data",
+        "target_lambda": f"fii-data-refresh-{_STAGE}",
+        "mode": "signals",
+        "schedules": {
+            "daily": "cron(0 22 ? * MON-FRI *)",
+            "weekly_full": "cron(0 8 ? * SAT *)",
+        },
+    },
+    "fundamentals_refresh": {
+        "name": "Fundamentals Refresh",
+        "description": "Refresh fundamental data from SEC EDGAR",
+        "target_lambda": f"fii-data-refresh-{_STAGE}",
+        "mode": "fundamentals",
+        "schedules": {"weekly": "cron(0 10 ? * SUN *)"},
+    },
+    "feed_compile": {
+        "name": "Feed Compile",
+        "description": "Compile the daily signal feed from latest data",
+        "target_lambda": f"fii-feed-compiler-{_STAGE}",
+        "mode": None,
+        "schedules": {"daily": "cron(30 10 ? * MON-FRI *)"},
+    },
+}
+
+
+def _handle_admin(method, path, body, query_params):
+    """Routes: /admin/agents, /admin/agents/{id}/run, /admin/agents/{id}/history."""
+    from datetime import datetime, timezone
+    parts = path.strip("/").split("/")
+
+    # GET /admin/agents — list all agents
+    if len(parts) == 2 and parts[1] == "agents" and method == "GET":
+        agents_out = []
+        for aid, a in _AGENTS.items():
+            # Get last run
+            runs = db.query(f"AGENT_RUN#{aid}", limit=1, scan_forward=False)
+            last_run = runs[0] if runs else None
+            agents_out.append({
+                "id": aid,
+                "name": a["name"],
+                "description": a["description"],
+                "schedules": a["schedules"],
+                "lastRun": {
+                    "timestamp": last_run.get("SK", ""),
+                    "status": last_run.get("status", ""),
+                    "duration": float(last_run.get("duration", 0)),
+                    "processed": int(last_run.get("processed", 0)),
+                    "errors": int(last_run.get("errors", 0)),
+                    "trigger": last_run.get("trigger", ""),
+                } if last_run else None,
+            })
+        return _response(200, {"agents": agents_out})
+
+    # POST /admin/agents/{id}/run — manually trigger an agent
+    if len(parts) == 4 and parts[1] == "agents" and parts[3] == "run" and method == "POST":
+        agent_id = parts[2]
+        if agent_id not in _AGENTS:
+            return _response(404, {"error": f"Unknown agent: {agent_id}"})
+        agent = _AGENTS[agent_id]
+        # Invoke target Lambda async
+        try:
+            import boto3
+            lam = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+            payload = {"trigger": "manual"}
+            if agent["mode"]:
+                payload["mode"] = agent["mode"]
+            lam.invoke(
+                FunctionName=agent["target_lambda"],
+                InvocationType="Event",
+                Payload=json.dumps(payload),
+            )
+            db.put_item({
+                "PK": f"AGENT_RUN#{agent_id}",
+                "SK": datetime.now(timezone.utc).isoformat(),
+                "status": "invoked",
+                "trigger": "manual",
+                "duration": 0,
+                "processed": 0,
+                "errors": 0,
+            })
+            return _response(200, {"message": f"Agent {agent_id} triggered", "target": agent["target_lambda"]})
+        except Exception as e:
+            return _response(500, {"error": str(e)})
+
+    # GET /admin/agents/{id}/history — run history
+    if len(parts) == 4 and parts[1] == "agents" and parts[3] == "history" and method == "GET":
+        agent_id = parts[2]
+        if agent_id not in _AGENTS:
+            return _response(404, {"error": f"Unknown agent: {agent_id}"})
+        limit = int(query_params.get("limit", "20"))
+        runs = db.query(f"AGENT_RUN#{agent_id}", limit=min(limit, 100), scan_forward=False)
+        history = []
+        for r in runs:
+            history.append({
+                "timestamp": r.get("SK", ""),
+                "status": r.get("status", ""),
+                "duration": float(r.get("duration", 0)),
+                "processed": int(r.get("processed", 0)),
+                "errors": int(r.get("errors", 0)),
+                "trigger": r.get("trigger", ""),
+                "detail": r.get("detail", ""),
+            })
+        return _response(200, {"agentId": agent_id, "history": history})
+
+    return _response(404, {"error": "Admin route not found"})
 
 
 # ─── Response Helper ───
