@@ -5,10 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
-import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
-import { DisclaimerBanner } from './DisclaimerBanner';
-import { getPrice, getTechnicals, getFundamentals, getAltData } from '../services/api';
+import { getPrice, getTechnicals, getFundamentals } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -25,7 +23,12 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   LOW: '#EF4444',
 };
 
-/** Safe number: coerce anything to a finite number or 0. */
+const SIGNAL_COLORS: Record<string, string> = {
+  BUY: '#10B981',
+  HOLD: '#F59E0B',
+  SELL: '#EF4444',
+};
+
 const safeNum = (v: unknown): number => {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   const n = Number(v);
@@ -44,7 +47,6 @@ const formatTimeAgo = (isoDate: string | undefined | null): string => {
 };
 
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
-  // Defensive defaults for all fields that may arrive as null/undefined
   const topFactors = Array.isArray(item.topFactors) ? item.topFactors.slice(0, 3) : [];
   const score = safeNum(item.compositeScore);
 
@@ -62,64 +64,64 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     }
   }, [isBookmarked, item.ticker, item.companyName, activeWatchlistId, addTicker, removeTicker]);
 
-  const [priceData, setPriceData] = useState<{
-    price: number | null;
-    change: number;
-    changePercent: number;
-  } | null>(null);
+  const [price, setPrice] = useState<number | null>(null);
+  const [changePercent, setChangePercent] = useState<number>(0);
+  const [change, setChange] = useState<number>(0);
   const [techScore, setTechScore] = useState<number | null>(null);
   const [techTrend, setTechTrend] = useState<string | null>(null);
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
-  const [altDataTypes, setAltDataTypes] = useState<string[]>([]);
-  const [altInsight, setAltInsight] = useState<string | null>(null);
+  const [peRatio, setPeRatio] = useState<number | null>(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
-    getPrice(item.ticker)
-      .then((data) => {
-        const p = typeof data.price === 'number' && Number.isFinite(data.price) ? data.price : null;
-        setPriceData({
-          price: p,
-          change: safeNum(data.change),
-          changePercent: safeNum(data.changePercent || data.change_percent),
-        });
-      })
-      .catch(() => {});
-    getTechnicals(item.ticker)
-      .then((data) => {
-        if (data && data.indicatorCount > 0) {
-          setTechScore(safeNum(data.technicalScore));
-          setTechTrend(data.signals?.trend || null);
+    let mounted = true;
+    Promise.allSettled([
+      getPrice(item.ticker),
+      getTechnicals(item.ticker),
+      getFundamentals(item.ticker),
+    ]).then(([priceResult, techResult, healthResult]) => {
+      if (!mounted) return;
+      // Price
+      if (priceResult.status === 'fulfilled' && priceResult.value) {
+        const d = priceResult.value;
+        const p = typeof d.price === 'number' && Number.isFinite(d.price) ? d.price : null;
+        setPrice(p);
+        setChange(safeNum(d.change));
+        setChangePercent(safeNum(d.changePercent || d.change_percent));
+      }
+      // Technicals
+      if (techResult.status === 'fulfilled' && techResult.value) {
+        const d = techResult.value;
+        if (d.indicatorCount > 0) {
+          setTechScore(safeNum(d.technicalScore));
+          setTechTrend(d.signals?.trend || null);
         }
-      })
-      .catch(() => {});
-    getFundamentals(item.ticker)
-      .then((data) => {
-        if (data && data.grade && data.grade !== 'N/A') {
-          setHealthGrade(data.grade);
-        }
-      })
-      .catch(() => {});
-    getAltData(item.ticker)
-      .then((data) => {
-        if (data && data.available && data.available.length > 0) {
-          setAltDataTypes(data.available);
-          // Build one-line insight
-          if (data.patents && data.patents.score > 0) {
-            const v = safeNum(data.patents.velocity);
-            setAltInsight(`Patents ${v >= 0 ? '+' : ''}${v.toFixed(0)}% YoY`);
-          } else if (data.fda && data.fda.score > 0) {
-            setAltInsight(`${data.fda.pdufaWithin90Days || 0} PDUFA <90d`);
-          } else if (data.contracts && data.contracts.score > 0) {
-            const g = safeNum(data.contracts.awardGrowth);
-            setAltInsight(`Contracts ${g >= 0 ? '+' : ''}${g.toFixed(0)}%`);
-          }
-        }
-      })
-      .catch(() => {});
+      }
+      // Fundamentals
+      if (healthResult.status === 'fulfilled' && healthResult.value) {
+        const d = healthResult.value;
+        if (d.grade && d.grade !== 'N/A') setHealthGrade(d.grade);
+        if (d.peRatio || d.analysis?.peRatio) setPeRatio(safeNum(d.peRatio || d.analysis?.peRatio));
+      }
+      setDataLoaded(true);
+    });
+    return () => { mounted = false; };
   }, [item.ticker]);
 
   const confidence = item.confidence;
-  const hasPriceToShow = priceData && priceData.price != null;
+  const signalColor = SIGNAL_COLORS[item.signal] || '#F59E0B';
+  const isPositive = change >= 0;
+
+  // Derive health grade color
+  const gradeColor = healthGrade
+    ? (healthGrade.startsWith('A') || healthGrade.startsWith('B')
+      ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444')
+    : 'rgba(255,255,255,0.3)';
+
+  // Tech trend color
+  const trendColor = techTrend
+    ? (techTrend.includes('bullish') ? '#10B981' : techTrend.includes('bearish') ? '#EF4444' : '#94A3B8')
+    : 'rgba(255,255,255,0.3)';
 
   return (
     <TouchableOpacity
@@ -135,168 +137,137 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
       >
-        {/* Timestamp */}
-        <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
-
-        {/* Bookmark button */}
-        <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark} accessibilityRole="button" accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}>
-          <Ionicons
-            name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
-            size={22}
-            color={isBookmarked ? '#60A5FA' : 'rgba(255,255,255,0.4)'}
-          />
-        </TouchableOpacity>
-
-        {/* Score Visual — consistent dial for all cards */}
-        <View style={styles.scoreContainer}>
-          <ScoreRing score={score} size={130} />
+        {/* ── Top Row: bookmark + timestamp ── */}
+        <View style={styles.topRow}>
+          <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark} accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}>
+            <Ionicons
+              name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
+              size={20}
+              color={isBookmarked ? '#60A5FA' : 'rgba(255,255,255,0.4)'}
+            />
+          </TouchableOpacity>
+          <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
         </View>
 
-        {/* Ticker & Company */}
+        {/* ── Score Dial ── */}
+        <View style={styles.scoreContainer}>
+          <ScoreRing score={score} size={120} />
+        </View>
+
+        {/* ── Ticker & Company ── */}
         <Text style={styles.ticker}>{item.ticker}</Text>
-        <Text style={styles.companyName}>{item.companyName}</Text>
+        <Text style={styles.companyName} numberOfLines={1}>{item.companyName}</Text>
 
-        {/* AI Insight Summary (truncated) */}
-        {item.insight && (
-          <Text style={styles.aiSummaryLine} numberOfLines={1}>
-            {item.insight.length > 60 ? item.insight.substring(0, 57) + '...' : item.insight}
-          </Text>
-        )}
-
-        {/* Portfolio ownership badge */}
+        {/* ── Portfolio badge (conditional but doesn't affect layout) ── */}
         {ownedShares > 0 && (
           <View style={styles.ownedBadge}>
-            <Ionicons name="briefcase" size={12} color="#60A5FA" />
+            <Ionicons name="briefcase" size={11} color="#60A5FA" />
             <Text style={styles.ownedText}>You own {ownedShares} shares</Text>
           </View>
         )}
 
-        {/* Price — only shown when we have a real numeric price */}
-        {hasPriceToShow && (
-          <View style={styles.priceRow}>
-            <Text style={styles.price}>${(priceData.price as number).toFixed(2)}</Text>
-            <Text
-              style={[
-                styles.priceChange,
-                { color: priceData.change >= 0 ? '#10B981' : '#EF4444' },
-              ]}
-            >
-              {priceData.change >= 0 ? '+' : ''}
-              {priceData.changePercent.toFixed(1)}%
+        {/* ── Price Row (ALWAYS shown) ── */}
+        <View style={styles.priceRow}>
+          <Text style={styles.price}>
+            {price != null ? `$${price.toFixed(2)}` : '--'}
+          </Text>
+          <View style={[styles.changePill, { backgroundColor: isPositive ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }]}>
+            <Ionicons
+              name={isPositive ? 'caret-up' : 'caret-down'}
+              size={12}
+              color={isPositive ? '#10B981' : '#EF4444'}
+            />
+            <Text style={[styles.changeText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+              {dataLoaded ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '--'}
             </Text>
           </View>
-        )}
+        </View>
 
-        {/* Signal Badge + Confidence */}
+        {/* ── Signal Badge + Confidence ── */}
         <View style={styles.signalRow}>
           <SignalBadge signal={item.signal || 'HOLD'} />
           {confidence && (
-            <View
-              style={[
-                styles.confidencePill,
-                { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#F59E0B') + '30' },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.confidenceText,
-                  { color: CONFIDENCE_COLORS[confidence] || '#F59E0B' },
-                ]}
-              >
+            <View style={[styles.confidencePill, { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#F59E0B') + '30' }]}>
+              <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] || '#F59E0B' }]}>
                 {confidence}
               </Text>
             </View>
           )}
-          {(item as any).tierLabel && (
-            <View style={[styles.confidencePill, { backgroundColor: (item as any).isETF ? '#8B5CF620' : '#60A5FA20' }]}>
-              <Text style={[styles.confidenceText, { color: (item as any).isETF ? '#8B5CF6' : '#60A5FA' }]}>
-                {(item as any).tierLabel}
-              </Text>
-            </View>
-          )}
         </View>
 
-        {/* Technical Indicator Badge */}
-        {techScore != null && (
-          <View style={styles.techBadge}>
-            <Ionicons name="analytics-outline" size={12} color="#60A5FA" />
-            <Text style={styles.techBadgeText}>
-              Tech: {techScore.toFixed(1)}/10
+        {/* ── Metrics Row (ALWAYS shown — 3 columns) ── */}
+        <View style={styles.metricsRow}>
+          <View style={styles.metricItem}>
+            <Ionicons name="analytics-outline" size={14} color="#60A5FA" />
+            <Text style={styles.metricValue}>
+              {techScore != null ? techScore.toFixed(1) : '--'}
             </Text>
+            <Text style={styles.metricLabel}>Technical</Text>
             {techTrend && (
-              <Text style={[styles.techTrendText, {
-                color: techTrend.includes('bullish') ? '#10B981' : techTrend.includes('bearish') ? '#EF4444' : '#94A3B8'
-              }]}>
+              <Text style={[styles.metricSub, { color: trendColor }]} numberOfLines={1}>
                 {techTrend}
               </Text>
             )}
           </View>
-        )}
-
-        {/* Health Grade Badge */}
-        {healthGrade && (
-          <View style={[styles.healthBadge, {
-            borderColor: healthGrade.startsWith('A') || healthGrade.startsWith('B')
-              ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444',
-          }]}>
-            <Text style={[styles.healthBadgeText, {
-              color: healthGrade.startsWith('A') || healthGrade.startsWith('B')
-                ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444',
-            }]}>
-              {healthGrade}
+          <View style={styles.metricDivider} />
+          <View style={styles.metricItem}>
+            <Ionicons name="shield-checkmark-outline" size={14} color={gradeColor} />
+            <Text style={[styles.metricValue, { color: gradeColor }]}>
+              {healthGrade || '--'}
             </Text>
-            <Text style={styles.healthBadgeLabel}>Health</Text>
+            <Text style={styles.metricLabel}>Health</Text>
           </View>
-        )}
-
-        {/* Alt Data Badges */}
-        {altDataTypes.length > 0 && (
-          <View style={styles.altBadgeRow}>
-            {altDataTypes.includes('patents') && (
-              <View style={[styles.altBadge, { backgroundColor: 'rgba(245,158,11,0.12)' }]}>
-                <Ionicons name="bulb-outline" size={11} color="#F59E0B" />
-              </View>
-            )}
-            {altDataTypes.includes('contracts') && (
-              <View style={[styles.altBadge, { backgroundColor: 'rgba(96,165,250,0.12)' }]}>
-                <Ionicons name="business-outline" size={11} color="#60A5FA" />
-              </View>
-            )}
-            {altDataTypes.includes('fda') && (
-              <View style={[styles.altBadge, { backgroundColor: 'rgba(139,92,246,0.12)' }]}>
-                <Ionicons name="medical-outline" size={11} color="#8B5CF6" />
-              </View>
-            )}
-            {altInsight && (
-              <Text style={styles.altInsightText} numberOfLines={1}>{altInsight}</Text>
-            )}
+          <View style={styles.metricDivider} />
+          <View style={styles.metricItem}>
+            <Ionicons name="bar-chart-outline" size={14} color="rgba(255,255,255,0.5)" />
+            <Text style={styles.metricValue}>
+              {peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}
+            </Text>
+            <Text style={styles.metricLabel}>P/E</Text>
           </View>
-        )}
+        </View>
 
-        {/* Insight */}
+        {/* ── AI Insight (ALWAYS shown) ── */}
         <Text style={styles.insight} numberOfLines={2}>
-          {item.insight || ''}
+          {item.insight || `AI analysis for ${item.ticker} — tap for full details.`}
         </Text>
 
-        {/* Factor Bars (compact) */}
+        {/* ── Top Factor Pills (ALWAYS shown — use placeholders) ── */}
         <View style={styles.factorsRow}>
-          {topFactors.map((f, i) => (
-            <React.Fragment key={f.name || `f-${i}`}>
-              {i > 0 && <Text style={styles.separator}>|</Text>}
-              <FactorBar factor={f} compact={true} />
-            </React.Fragment>
-          ))}
+          {topFactors.length > 0 ? (
+            topFactors.map((f, i) => {
+              const fScore = f.score ?? 0;
+              const fColor = fScore >= 1 ? '#10B981' : fScore <= -1 ? '#EF4444' : '#F59E0B';
+              return (
+                <View key={f.name || `f-${i}`} style={[styles.factorPill, { borderColor: fColor + '60' }]}>
+                  <Text style={[styles.factorName, { color: fColor }]}>{f.name}</Text>
+                  <Text style={[styles.factorScore, { color: fColor }]}>
+                    {fScore >= 0 ? '+' : ''}{fScore.toFixed(1)}
+                  </Text>
+                </View>
+              );
+            })
+          ) : (
+            <>
+              <View style={[styles.factorPill, { borderColor: 'rgba(255,255,255,0.15)' }]}>
+                <Text style={styles.factorPlaceholder}>Tap for factors</Text>
+              </View>
+            </>
+          )}
         </View>
 
-        {/* Tap hint */}
-        <View style={styles.tapHint}>
-          <Text style={styles.tapHintText}>Tap for full analysis</Text>
-        </View>
+        {/* ── Tap for full analysis CTA ── */}
+        <TouchableOpacity style={styles.ctaButton} onPress={onPress} activeOpacity={0.8}>
+          <Ionicons name="arrow-forward-circle" size={18} color="#60A5FA" />
+          <Text style={styles.ctaText}>Tap for full analysis</Text>
+        </TouchableOpacity>
 
-        {/* Disclaimer */}
-        <DisclaimerBanner />
+        {/* ── Disclaimer ── */}
+        <Text style={styles.disclaimer}>
+          Not financial advice. AI-generated analysis for informational purposes only.
+        </Text>
 
-        {/* Swipe hint */}
+        {/* ── Swipe hint ── */}
         <View style={styles.hintContainer}>
           <SwipeHint />
         </View>
@@ -316,85 +287,101 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  timestamp: {
+
+  // Top row
+  topRow: {
     position: 'absolute',
-    top: 60,
-    right: 20,
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
-    fontWeight: '500',
+    top: 54,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   bookmarkBtn: {
-    position: 'absolute',
-    top: 56,
-    left: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  timestamp: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+
+  // Score
   scoreContainer: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  aiSummaryLine: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 24,
-    maxWidth: 300,
-  },
+
+  // Ticker
   ticker: {
     color: '#FFFFFF',
-    fontSize: 48,
+    fontSize: 42,
     fontWeight: '800',
     letterSpacing: 2,
   },
   companyName: {
     color: 'rgba(255,255,255,0.5)',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '400',
-    marginTop: 4,
+    marginTop: 2,
+    maxWidth: 280,
+    textAlign: 'center',
   },
+
+  // Owned badge
   ownedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(96,165,250,0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 8,
-    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginTop: 6,
+    gap: 4,
   },
   ownedText: {
     color: '#60A5FA',
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
   },
+
+  // Price
   priceRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    marginTop: 8,
-    gap: 8,
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 10,
   },
   price: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
   },
-  priceChange: {
-    fontSize: 14,
-    fontWeight: '600',
+  changePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 3,
   },
+  changeText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  // Signal
   signalRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 12,
-    marginBottom: 16,
-    gap: 10,
+    marginBottom: 14,
+    gap: 8,
   },
   confidencePill: {
     paddingHorizontal: 10,
@@ -406,96 +393,124 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
-  insight: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 16,
+
+  // Metrics row
+  metricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    width: '100%',
     maxWidth: 320,
+    marginBottom: 14,
   },
-  factorsRow: {
-    flexDirection: 'row',
+  metricItem: {
+    flex: 1,
     alignItems: 'center',
-    marginTop: 24,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    gap: 2,
   },
-  separator: {
-    color: 'rgba(255,255,255,0.2)',
-    fontSize: 14,
-    marginHorizontal: 6,
+  metricValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
-  tapHint: {
-    marginTop: 20,
-  },
-  tapHintText: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  hintContainer: {
-    position: 'absolute',
-    bottom: 40,
-    alignSelf: 'center',
-  },
-  healthBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 5,
-    marginBottom: 8,
-  },
-  healthBadgeText: {
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  healthBadgeLabel: {
+  metricLabel: {
     color: 'rgba(255,255,255,0.4)',
     fontSize: 10,
     fontWeight: '600',
+    letterSpacing: 0.5,
   },
-  techBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(96,165,250,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
-    gap: 6,
-    marginBottom: 12,
-  },
-  techBadgeText: {
-    color: '#60A5FA',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  techTrendText: {
-    fontSize: 11,
+  metricSub: {
+    fontSize: 9,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
-  altBadgeRow: {
+  metricDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+
+  // Insight
+  insight: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
+    lineHeight: 19,
+    paddingHorizontal: 12,
+    maxWidth: 320,
+    marginBottom: 12,
+  },
+
+  // Factor pills
+  factorsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  altBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
     justifyContent: 'center',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 16,
   },
-  altInsightText: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 10,
+  factorPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    gap: 5,
+  },
+  factorName: {
+    fontSize: 11,
     fontWeight: '600',
-    marginLeft: 2,
+  },
+  factorScore: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  factorPlaceholder: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+
+  // CTA button
+  ctaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.25)',
+    gap: 8,
+    marginBottom: 10,
+  },
+  ctaText: {
+    color: '#60A5FA',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  // Disclaimer
+  disclaimer: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 9,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+    lineHeight: 13,
+  },
+
+  // Swipe hint
+  hintContainer: {
+    position: 'absolute',
+    bottom: 36,
+    alignSelf: 'center',
   },
 });
