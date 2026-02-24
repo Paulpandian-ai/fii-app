@@ -2,14 +2,13 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import type { FeedItem, TechnicalAnalysis, DimensionScores } from '../types';
+import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
-import { RadarScore } from './RadarScore';
 import { SignalBadge } from './SignalBadge';
 import { FactorBar } from './FactorBar';
 import { SwipeHint } from './SwipeHint';
 import { DisclaimerBanner } from './DisclaimerBanner';
-import { getPrice, getTechnicals, getFundamentals, getFactors, getAltData } from '../services/api';
+import { getPrice, getTechnicals, getFundamentals, getAltData } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -71,7 +70,6 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [techScore, setTechScore] = useState<number | null>(null);
   const [techTrend, setTechTrend] = useState<string | null>(null);
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
-  const [dimScores, setDimScores] = useState<DimensionScores | null>(null);
   const [altDataTypes, setAltDataTypes] = useState<string[]>([]);
   const [altInsight, setAltInsight] = useState<string | null>(null);
 
@@ -98,13 +96,6 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       .then((data) => {
         if (data && data.grade && data.grade !== 'N/A') {
           setHealthGrade(data.grade);
-        }
-      })
-      .catch(() => {});
-    getFactors(item.ticker)
-      .then((data) => {
-        if (data && data.dimensionScores) {
-          setDimScores(data.dimensionScores);
         }
       })
       .catch(() => {});
@@ -156,23 +147,9 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           />
         </TouchableOpacity>
 
-        {/* Score Visual — Radar if available, else Ring */}
+        {/* Score Visual — consistent dial for all cards */}
         <View style={styles.scoreContainer}>
-          {dimScores ? (
-            <View style={styles.radarWithScore}>
-              <RadarScore
-                scores={dimScores}
-                size={100}
-                signal={item.signal || 'HOLD'}
-                mini
-              />
-              <View style={styles.miniScoreOverlay}>
-                <Text style={styles.miniScoreText}>{score.toFixed(1)}</Text>
-              </View>
-            </View>
-          ) : (
-            <ScoreRing score={score} size={130} />
-          )}
+          <ScoreRing score={score} size={130} />
         </View>
 
         {/* Ticker & Company */}
@@ -360,23 +337,6 @@ const styles = StyleSheet.create({
   },
   scoreContainer: {
     marginBottom: 24,
-  },
-  radarWithScore: {
-    position: 'relative',
-    width: 100,
-    height: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  miniScoreOverlay: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  miniScoreText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '900',
   },
   aiSummaryLine: {
     color: 'rgba(255,255,255,0.45)',

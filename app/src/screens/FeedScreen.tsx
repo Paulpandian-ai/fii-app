@@ -9,8 +9,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   Animated,
-  ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import type { ViewToken } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -18,17 +16,16 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FeedCard } from '../components/FeedCard';
-import { StockMiniCard } from '../components/StockMiniCard';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
 import { Skeleton } from '../components/Skeleton';
 import { useFeedStore } from '../store/feedStore';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useEventStore } from '../store/eventStore';
-import { getFeed, getMarketMovers, getScreener, batchSignals } from '../services/api';
-import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal, MarketMover } from '../types';
+import { getFeed, getScreener } from '../services/api';
+import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const isEducationalCard = (entry: FeedEntry): entry is EducationalCard => {
   return entry.type === 'educational';
@@ -87,54 +84,62 @@ const PLACEHOLDER_FEED: FeedItem[] = [
   },
 ];
 
-// ─── Section Header Component ───
+/**
+ * Build a smart-ordered feed from screener results:
+ * 1. First 3: biggest movers (highest absolute changePercent)
+ * 2. Next 3: top BUY signals (highest aiScore with signal=BUY)
+ * 3. Next 2: top SELL signals (stocks to watch / avoid)
+ * 4. Remaining: HOLD stocks sorted by absolute changePercent
+ */
+function buildSmartFeed(results: any[]): FeedItem[] {
+  const seen = new Set<string>();
+  const ordered: FeedItem[] = [];
 
-const SectionHeader: React.FC<{
-  title: string;
-  icon: string;
-  iconColor?: string;
-  onSeeAll?: () => void;
-}> = React.memo(({ title, icon, iconColor = '#60A5FA', onSeeAll }) => (
-  <View style={styles.sectionHeader}>
-    <View style={styles.sectionHeaderLeft}>
-      <Ionicons name={icon as any} size={18} color={iconColor} />
-      <Text style={styles.sectionTitle}>{title}</Text>
-    </View>
-    {onSeeAll && (
-      <TouchableOpacity onPress={onSeeAll} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Text style={styles.seeAll}>See All</Text>
-      </TouchableOpacity>
-    )}
-  </View>
-));
+  const toFeedItem = (r: any): FeedItem => ({
+    id: `sc-${r.ticker}`,
+    type: 'signal',
+    ticker: r.ticker,
+    companyName: r.companyName || '',
+    compositeScore: r.aiScore || r.compositeScore || 5,
+    signal: r.signal || 'HOLD',
+    confidence: r.confidence || undefined,
+    insight: r.insight || '',
+    topFactors: r.topFactors || [],
+    updatedAt: r.updatedAt || new Date().toISOString(),
+  });
 
-// ─── Horizontal Stock Row ───
+  const add = (item: FeedItem) => {
+    if (!seen.has(item.ticker)) {
+      seen.add(item.ticker);
+      ordered.push(item);
+    }
+  };
 
-const HorizontalStockRow: React.FC<{
-  data: MarketMover[];
-  onPress: (ticker: string) => void;
-}> = React.memo(({ data, onPress }) => (
-  <FlatList
-    horizontal
-    data={data}
-    keyExtractor={(item) => item.ticker}
-    renderItem={({ item }) => (
-      <StockMiniCard
-        ticker={item.ticker}
-        companyName={item.companyName}
-        price={item.price}
-        changePercent={item.changePercent}
-        signal={item.signal}
-        aiScore={item.aiScore}
-        onPress={() => onPress(item.ticker)}
-      />
-    )}
-    showsHorizontalScrollIndicator={false}
-    contentContainerStyle={styles.horizontalList}
-  />
-));
+  // 1. Biggest movers (top 3 by absolute changePercent)
+  const movers = [...results]
+    .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0));
+  for (const r of movers.slice(0, 3)) add(toFeedItem(r));
 
-// ─── Main FeedScreen ───
+  // 2. Top BUY signals (top 3 by aiScore)
+  const buys = results
+    .filter((r) => r.signal === 'BUY')
+    .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
+  for (const r of buys.slice(0, 3)) add(toFeedItem(r));
+
+  // 3. Top SELL signals (top 2)
+  const sells = results
+    .filter((r) => r.signal === 'SELL')
+    .sort((a, b) => (a.aiScore || 10) - (b.aiScore || 10));
+  for (const r of sells.slice(0, 2)) add(toFeedItem(r));
+
+  // 4. Remaining: sorted by absolute changePercent (most interesting first)
+  const rest = results
+    .filter((r) => !seen.has(r.ticker))
+    .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0));
+  for (const r of rest) add(toFeedItem(r));
+
+  return ordered;
+}
 
 export const FeedScreen: React.FC = () => {
   const { setItems, setCurrentIndex, isLoading, setLoading, setError } = useFeedStore();
@@ -150,29 +155,10 @@ export const FeedScreen: React.FC = () => {
   const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  // Section data
-  const [moversGainers, setMoversGainers] = useState<MarketMover[]>([]);
-  const [moversLosers, setMoversLosers] = useState<MarketMover[]>([]);
-  const [buySignals, setBuySignals] = useState<MarketMover[]>([]);
-  const [sellSignals, setSellSignals] = useState<MarketMover[]>([]);
-  const [portfolioAlerts, setPortfolioAlerts] = useState<MarketMover[]>([]);
-  const [sectionsLoaded, setSectionsLoaded] = useState(false);
-
-  // ─── Mode: 'sections' = scrollable sections, 'cards' = full-screen pager ───
-  const [viewMode, setViewMode] = useState<'sections' | 'cards'>('sections');
-
   useEffect(() => {
     loadFeed();
     loadEventsFeed();
-    loadSections();
   }, []);
-
-  // Re-fetch portfolio alerts when portfolio changes
-  useEffect(() => {
-    if (portfolioTickers.length > 0 && sectionsLoaded) {
-      loadPortfolioAlerts();
-    }
-  }, [portfolioTickers.length, sectionsLoaded]);
 
   // Animate live event banner
   useEffect(() => {
@@ -210,93 +196,22 @@ export const FeedScreen: React.FC = () => {
     return [...owned, ...rest];
   };
 
-  const loadSections = async () => {
-    // Fetch movers first (highest priority), then screener sections
-    try {
-      const movers = await getMarketMovers();
-      setMoversGainers((movers.gainers || []).slice(0, 5));
-      setMoversLosers((movers.losers || []).slice(0, 5));
-    } catch {
-      // Movers unavailable — leave empty
-    }
-
-    // Fetch BUY and SELL signals from screener in parallel
-    try {
-      const [buyData, sellData] = await Promise.all([
-        getScreener({ signal: 'BUY', sortBy: 'aiScore', sortDir: 'desc', limit: '10' }),
-        getScreener({ signal: 'SELL', sortBy: 'aiScore', sortDir: 'asc', limit: '5' }),
-      ]);
-      setBuySignals(
-        (buyData.results || []).map((r: any) => ({
-          ticker: r.ticker,
-          companyName: r.companyName,
-          price: r.price,
-          change: r.change,
-          changePercent: r.changePercent,
-          marketCap: r.marketCap,
-          sector: r.sector,
-          aiScore: r.aiScore,
-          signal: r.signal,
-        })),
-      );
-      setSellSignals(
-        (sellData.results || []).map((r: any) => ({
-          ticker: r.ticker,
-          companyName: r.companyName,
-          price: r.price,
-          change: r.change,
-          changePercent: r.changePercent,
-          marketCap: r.marketCap,
-          sector: r.sector,
-          aiScore: r.aiScore,
-          signal: r.signal,
-        })),
-      );
-    } catch {
-      // Screener unavailable
-    }
-
-    setSectionsLoaded(true);
-  };
-
-  const loadPortfolioAlerts = async () => {
-    if (portfolioTickers.length === 0) return;
-    try {
-      const data = await batchSignals(portfolioTickers.slice(0, 20));
-      const signals = data.signals || [];
-      setPortfolioAlerts(
-        signals.map((s: any) => ({
-          ticker: s.ticker,
-          companyName: s.companyName || s.ticker,
-          price: s.price || 0,
-          change: s.change || 0,
-          changePercent: s.changePercent || 0,
-          marketCap: 0,
-          sector: '',
-          aiScore: s.compositeScore || s.score || null,
-          signal: s.signal || null,
-        })),
-      );
-    } catch {
-      // Portfolio signals unavailable
-    }
-  };
-
   const loadFeed = async () => {
     setLoading(true);
     try {
-      const data = await getFeed();
-      const raw = data?.items || data?.feed || [];
+      // Fetch feed + screener in parallel for maximum stock coverage
+      const [feedData, screenerData] = await Promise.all([
+        getFeed().catch(() => null),
+        getScreener({ limit: '50', sortBy: 'changePercent', sortDir: 'desc' }).catch(() => null),
+      ]);
 
-      if (raw.length === 0) {
-        usePlaceholder();
-        return;
-      }
-
-      const feedItems: FeedItem[] = [];
+      // Build feed items from both sources
+      const feedItemMap = new Map<string, FeedItem>();
       const allEntries: FeedEntry[] = [];
 
-      for (const entry of raw) {
+      // Process original feed items first (they have richer data: insight, topFactors)
+      const rawFeed = feedData?.items || feedData?.feed || [];
+      for (const entry of rawFeed) {
         if (entry.type === 'educational') {
           allEntries.push(entry as EducationalCard);
         } else {
@@ -312,12 +227,42 @@ export const FeedScreen: React.FC = () => {
             topFactors: entry.topFactors || entry.top_factors || [],
             updatedAt: entry.updatedAt || entry.updated_at || new Date().toISOString(),
           };
-          feedItems.push(feedItem);
-          allEntries.push(feedItem);
+          feedItemMap.set(feedItem.ticker, feedItem);
         }
       }
 
+      // Build smart-ordered cards from screener results
+      const screenerResults = screenerData?.results || [];
+      if (screenerResults.length > 0) {
+        const smartFeed = buildSmartFeed(screenerResults);
+        for (const item of smartFeed) {
+          // Prefer feed-sourced data (richer insight) when available
+          const existing = feedItemMap.get(item.ticker);
+          if (existing) {
+            allEntries.push(existing);
+            feedItemMap.delete(item.ticker);
+          } else {
+            allEntries.push(item);
+          }
+        }
+        // Append any remaining original feed items not already in screener
+        for (const item of feedItemMap.values()) {
+          allEntries.push(item);
+        }
+      } else {
+        // No screener data — use original feed items only
+        for (const item of feedItemMap.values()) {
+          allEntries.push(item);
+        }
+      }
+
+      if (allEntries.length === 0) {
+        usePlaceholder();
+        return;
+      }
+
       const sorted = prioritizePortfolioStocks(allEntries);
+      const feedItems = sorted.filter((e): e is FeedItem => !isEducationalCard(e));
       setItems(feedItems);
       setFeed(sorted);
     } catch {
@@ -347,18 +292,9 @@ export const FeedScreen: React.FC = () => {
     }
   }, [navigation]);
 
-  const handleStockPress = useCallback((ticker: string) => {
-    navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
-  }, [navigation]);
-
   const handleSearchSelect = useCallback((ticker: string) => {
     setSearchVisible(false);
     navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
-  }, [navigation]);
-
-  const handleSeeAllScreener = useCallback((filters: Record<string, string>) => {
-    // Navigate to screener tab — the Screener tab index is 2
-    navigation.getParent()?.navigate('Screener');
   }, [navigation]);
 
   const renderItem = useCallback(
@@ -406,11 +342,11 @@ export const FeedScreen: React.FC = () => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadFeed(), loadSections()]);
+    await loadFeed();
     setRefreshing(false);
   }, []);
 
-  if (isLoading && feed.length === 0 && !sectionsLoaded) {
+  if (isLoading && feed.length === 0) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -431,222 +367,9 @@ export const FeedScreen: React.FC = () => {
     );
   }
 
-  // ─── Sections View (default) ───
-  if (viewMode === 'sections') {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-
-        {/* Top bar */}
-        <View style={styles.topBar}>
-          <Text style={styles.topBarTitle}>FII</Text>
-          <View style={styles.topBarActions}>
-            <TouchableOpacity style={styles.topBarBtn} onPress={() => setViewMode('cards')} accessibilityLabel="Switch to card view">
-              <Ionicons name="layers-outline" size={20} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.topBarBtn} onPress={() => setSearchVisible(true)} accessibilityLabel="Search stocks">
-              <Ionicons name="search" size={20} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('MarketDashboard')} accessibilityLabel="Open market dashboard">
-              <Ionicons name="stats-chart" size={20} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('Settings')} accessibilityLabel="Open settings">
-              <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Live event banner */}
-        {showLiveBanner && liveBannerEvent && (
-          <Animated.View style={[styles.liveBanner, { transform: [{ translateY: bannerAnim }] }]}>
-            <TouchableOpacity
-              style={styles.liveBannerInner}
-              onPress={() => {
-                dismissLiveBanner();
-                navigation.navigate('SignalDetail', {
-                  ticker: liveBannerEvent.ticker,
-                  feedItemId: liveBannerEvent.ticker,
-                });
-              }}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`View ${liveBannerEvent.ticker} signal alert`}
-            >
-              <View style={styles.liveBannerDot} />
-              <View style={styles.liveBannerContent}>
-                <Text style={styles.liveBannerTitle} numberOfLines={1}>
-                  {liveBannerEvent.ticker} Signal Alert
-                </Text>
-                <Text style={styles.liveBannerText} numberOfLines={1}>
-                  {liveBannerEvent.summary}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={dismissLiveBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel="Dismiss live banner">
-                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        <ScrollView
-          style={styles.sectionsScroll}
-          contentContainerStyle={styles.sectionsContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60A5FA" />
-          }
-        >
-          {/* Today's Movers — Gainers */}
-          {moversGainers.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Top Gainers"
-                icon="trending-up"
-                iconColor="#10B981"
-                onSeeAll={() => navigation.navigate('MarketDashboard')}
-              />
-              <HorizontalStockRow data={moversGainers} onPress={handleStockPress} />
-            </View>
-          )}
-
-          {/* Today's Movers — Losers */}
-          {moversLosers.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Top Losers"
-                icon="trending-down"
-                iconColor="#EF4444"
-                onSeeAll={() => navigation.navigate('MarketDashboard')}
-              />
-              <HorizontalStockRow data={moversLosers} onPress={handleStockPress} />
-            </View>
-          )}
-
-          {/* New BUY Signals */}
-          {buySignals.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="BUY Signals"
-                icon="arrow-up-circle"
-                iconColor="#10B981"
-                onSeeAll={() => handleSeeAllScreener({ signal: 'BUY' })}
-              />
-              <HorizontalStockRow data={buySignals} onPress={handleStockPress} />
-            </View>
-          )}
-
-          {/* Stocks to Watch (SELL) */}
-          {sellSignals.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Stocks to Watch"
-                icon="warning"
-                iconColor="#EF4444"
-                onSeeAll={() => handleSeeAllScreener({ signal: 'SELL' })}
-              />
-              <HorizontalStockRow data={sellSignals} onPress={handleStockPress} />
-            </View>
-          )}
-
-          {/* Portfolio Alerts */}
-          {portfolioAlerts.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Your Portfolio"
-                icon="briefcase"
-                iconColor="#F59E0B"
-              />
-              <HorizontalStockRow data={portfolioAlerts} onPress={handleStockPress} />
-            </View>
-          )}
-
-          {/* Signal Feed — show feed items as compact rows */}
-          {feed.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Signal Feed"
-                icon="pulse"
-                onSeeAll={() => setViewMode('cards')}
-              />
-              {feed
-                .filter((e): e is FeedItem => !isEducationalCard(e))
-                .slice(0, 15)
-                .map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.feedRow}
-                    onPress={() => handleCardPress(item)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.feedRowLeft}>
-                      <Text style={styles.feedRowTicker}>{item.ticker}</Text>
-                      <Text style={styles.feedRowCompany} numberOfLines={1}>
-                        {item.companyName}
-                      </Text>
-                    </View>
-                    <View style={styles.feedRowCenter}>
-                      <Text style={styles.feedRowScore}>
-                        {item.compositeScore.toFixed(1)}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.feedRowSignal,
-                        {
-                          backgroundColor:
-                            item.signal === 'BUY'
-                              ? '#10B981'
-                              : item.signal === 'SELL'
-                              ? '#EF4444'
-                              : '#F59E0B',
-                        },
-                      ]}
-                    >
-                      <Text style={[
-                        styles.feedRowSignalText,
-                        { color: item.signal === 'HOLD' ? '#000' : '#FFF' },
-                      ]}>
-                        {item.signal}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-            </View>
-          )}
-
-          {/* Spacer for tab bar */}
-          <View style={{ height: 100 }} />
-        </ScrollView>
-
-        <SearchOverlay
-          visible={searchVisible}
-          onClose={() => setSearchVisible(false)}
-          onSelectTicker={handleSearchSelect}
-        />
-
-        {/* Floating AI Chat Bubble */}
-        <TouchableOpacity
-          style={styles.chatFab}
-          onPress={() => navigation.navigate('AIChat', {})}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Open AI chat"
-        >
-          <Ionicons name="sparkles" size={22} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ─── Cards View (original full-screen pager) ───
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-
-      {/* Top bar with back-to-sections button */}
-      <TouchableOpacity style={styles.backToSections} onPress={() => setViewMode('sections')} accessibilityLabel="Back to sections view">
-        <Ionicons name="grid-outline" size={20} color="rgba(255,255,255,0.7)" />
-      </TouchableOpacity>
 
       {/* Settings gear */}
       <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')} accessibilityRole="button" accessibilityLabel="Open settings">
@@ -748,130 +471,6 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // ─── Top Bar (sections mode) ───
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 54,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  topBarTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  topBarActions: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  topBarBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // ─── Sections scroll ───
-  sectionsScroll: {
-    flex: 1,
-  },
-  sectionsContent: {
-    paddingTop: 4,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  seeAll: {
-    color: '#60A5FA',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  horizontalList: {
-    paddingHorizontal: 16,
-  },
-
-  // ─── Feed rows (compact list in sections view) ───
-  feedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  feedRowLeft: {
-    flex: 1,
-    marginRight: 12,
-  },
-  feedRowTicker: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  feedRowCompany: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  feedRowCenter: {
-    marginRight: 12,
-  },
-  feedRowScore: {
-    color: '#60A5FA',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  feedRowSignal: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  feedRowSignalText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-
-  // ─── Cards mode buttons ───
-  backToSections: {
-    position: 'absolute',
-    top: 54,
-    left: 16,
-    zIndex: 10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
