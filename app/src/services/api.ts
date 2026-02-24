@@ -293,6 +293,18 @@ export const getReportCard = async () => {
   return data;
 };
 
+// ─── Stress Test ───
+
+export const getStressTest = async (ticker: string, scenario: string = 'severely_adverse') => {
+  const { data } = await api.get(`/stock/${ticker}/stress-test`, { params: { scenario } });
+  return data;
+};
+
+export const getStressTestAll = async (ticker: string) => {
+  const { data } = await api.get(`/stock/${ticker}/stress-test/all`);
+  return data;
+};
+
 // ─── Coach ───
 
 export const getCoachDaily = async () => {

@@ -17,7 +17,7 @@ import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { TradeButton } from '../components/TradeButton';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory, getStressTestAll } from '../services/api';
 import { StockChart } from '../components/StockChart';
 import type { ChartData } from '../components/StockChart';
 import type { StockEvent, SignalHistoryPoint } from '../types';
@@ -114,6 +114,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<StockEvent[]>([]);
   const [signalHistory, setSignalHistory] = useState<SignalHistoryPoint[]>([]);
+  const [stressData, setStressData] = useState<any[] | null>(null);
+  const [stressExpanded, setStressExpanded] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -139,12 +141,15 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
       if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult);
 
-      // Load events and signal history (non-blocking)
+      // Load events, signal history, and stress test (non-blocking)
       getEventsForTicker(ticker, { limit: '5' })
         .then((d) => setRecentEvents(d.events || []))
         .catch(() => {});
       getSignalHistory(ticker, 30)
         .then((d) => setSignalHistory(d.history || []))
+        .catch(() => {});
+      getStressTestAll(ticker)
+        .then((d) => setStressData(d.scenarios || []))
         .catch(() => {});
     } finally {
       setLoading(false);
@@ -586,6 +591,143 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         )}
 
+        {/* Section 5c: Macro Stress Test */}
+        {stressData && stressData.length > 0 && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.stressHeader}
+              onPress={() => setStressExpanded(!stressExpanded)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.stressHeaderLeft}>
+                <Ionicons name="shield-checkmark-outline" size={20} color="#F59E0B" />
+                <Text style={styles.stressTitle}>Macro Stress Test</Text>
+              </View>
+              <Ionicons
+                name={stressExpanded ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color="rgba(255,255,255,0.4)"
+              />
+            </TouchableOpacity>
+            {!stressExpanded && stressData.length > 0 && (() => {
+              const severe = stressData.find((s: any) => s.scenarioKey === 'severely_adverse') || stressData[stressData.length - 1];
+              return (
+                <View style={styles.stressPreview}>
+                  <Text style={styles.stressPreviewLabel}>Severely Adverse</Text>
+                  <View style={styles.stressPreviewRow}>
+                    <Text style={[styles.stressPreviewImpact, { color: '#EF4444' }]}>
+                      {severe.priceImpact > 0 ? '+' : ''}{severe.priceImpact}%
+                    </Text>
+                    <View style={[styles.stressResilienceBadge, {
+                      backgroundColor: severe.resilienceScore >= 7
+                        ? 'rgba(16,185,129,0.15)'
+                        : severe.resilienceScore >= 5
+                        ? 'rgba(245,158,11,0.15)'
+                        : 'rgba(239,68,80,0.15)',
+                    }]}>
+                      <Text style={[styles.stressResilienceText, {
+                        color: severe.resilienceScore >= 7
+                          ? '#10B981'
+                          : severe.resilienceScore >= 5
+                          ? '#F59E0B'
+                          : '#EF4444',
+                      }]}>
+                        {severe.resilienceScore.toFixed(1)} / 10
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.stressPreviewRec}>{severe.recommendation}</Text>
+                </View>
+              );
+            })()}
+            {stressExpanded && stressData.map((scenario: any, idx: number) => (
+              <View key={scenario.scenarioKey || idx} style={styles.stressScenarioCard}>
+                <View style={styles.stressScenarioHeader}>
+                  <Text style={styles.stressScenarioName}>{scenario.scenario}</Text>
+                  <View style={[styles.stressResilienceBadge, {
+                    backgroundColor: scenario.resilienceScore >= 7
+                      ? 'rgba(16,185,129,0.15)'
+                      : scenario.resilienceScore >= 5
+                      ? 'rgba(245,158,11,0.15)'
+                      : 'rgba(239,68,80,0.15)',
+                  }]}>
+                    <Text style={[styles.stressResilienceText, {
+                      color: scenario.resilienceScore >= 7
+                        ? '#10B981'
+                        : scenario.resilienceScore >= 5
+                        ? '#F59E0B'
+                        : '#EF4444',
+                    }]}>
+                      {scenario.resilienceScore.toFixed(1)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.stressScenarioDesc}>{scenario.scenarioDescription}</Text>
+                <View style={styles.stressPriceRow}>
+                  <View style={styles.stressPriceCol}>
+                    <Text style={styles.stressPriceLabel}>Current</Text>
+                    <Text style={styles.stressPriceValue}>${scenario.currentPrice}</Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.3)" />
+                  <View style={styles.stressPriceCol}>
+                    <Text style={styles.stressPriceLabel}>Stressed</Text>
+                    <Text style={[styles.stressPriceValue, { color: '#EF4444' }]}>
+                      ${scenario.stressedPrice}
+                    </Text>
+                  </View>
+                  <View style={[styles.stressImpactPill, {
+                    backgroundColor: scenario.priceImpact > -10
+                      ? 'rgba(16,185,129,0.15)'
+                      : scenario.priceImpact > -30
+                      ? 'rgba(245,158,11,0.15)'
+                      : 'rgba(239,68,80,0.15)',
+                  }]}>
+                    <Text style={[styles.stressImpactText, {
+                      color: scenario.priceImpact > -10
+                        ? '#10B981'
+                        : scenario.priceImpact > -30
+                        ? '#F59E0B'
+                        : '#EF4444',
+                    }]}>
+                      {scenario.priceImpact > 0 ? '+' : ''}{scenario.priceImpact}%
+                    </Text>
+                  </View>
+                </View>
+                {scenario.breakdown && (
+                  <View style={styles.stressBreakdown}>
+                    <View style={styles.stressBreakdownRow}>
+                      <Text style={styles.stressBreakdownLabel}>Equity Impact</Text>
+                      <Text style={styles.stressBreakdownValue}>{scenario.breakdown.equityImpact}%</Text>
+                    </View>
+                    <View style={styles.stressBreakdownRow}>
+                      <Text style={styles.stressBreakdownLabel}>Sector Mult.</Text>
+                      <Text style={styles.stressBreakdownValue}>{scenario.breakdown.sectorMultiplier}x</Text>
+                    </View>
+                    <View style={styles.stressBreakdownRow}>
+                      <Text style={styles.stressBreakdownLabel}>Health Mult.</Text>
+                      <Text style={styles.stressBreakdownValue}>{scenario.breakdown.healthMultiplier}x</Text>
+                    </View>
+                    <View style={styles.stressBreakdownRow}>
+                      <Text style={styles.stressBreakdownLabel}>Rate Impact</Text>
+                      <Text style={styles.stressBreakdownValue}>{scenario.breakdown.rateImpact}%</Text>
+                    </View>
+                    <View style={styles.stressBreakdownRow}>
+                      <Text style={styles.stressBreakdownLabel}>Spread Impact</Text>
+                      <Text style={styles.stressBreakdownValue}>{scenario.breakdown.spreadImpact}%</Text>
+                    </View>
+                  </View>
+                )}
+                <Text style={styles.stressRec}>{scenario.recommendation}</Text>
+              </View>
+            ))}
+            {stressExpanded && (
+              <Text style={styles.stressDisclaimer}>
+                Based on Fed 2026 DFAST scenarios. For educational purposes only.
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* Section 6: Alternatives */}
         {showAlternatives && (
           <View style={styles.section}>
@@ -943,5 +1085,60 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#60A5FA', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
+  },
+
+  // Stress Test
+  stressHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(245,158,11,0.06)', borderRadius: 12,
+    padding: 14, borderWidth: 1, borderColor: 'rgba(245,158,11,0.15)',
+  },
+  stressHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stressTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  stressPreview: {
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10,
+    padding: 12, marginTop: 8,
+  },
+  stressPreviewLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  stressPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
+  stressPreviewImpact: { fontSize: 22, fontWeight: '800' },
+  stressPreviewRec: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 6 },
+  stressResilienceBadge: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+  },
+  stressResilienceText: { fontSize: 13, fontWeight: '800' },
+  stressScenarioCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12,
+    padding: 14, marginTop: 8,
+  },
+  stressScenarioHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 6,
+  },
+  stressScenarioName: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', flex: 1 },
+  stressScenarioDesc: { color: 'rgba(255,255,255,0.5)', fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  stressPriceRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 10,
+  },
+  stressPriceCol: { alignItems: 'center' },
+  stressPriceLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '600', textTransform: 'uppercase' },
+  stressPriceValue: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginTop: 2 },
+  stressImpactPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginLeft: 'auto' },
+  stressImpactText: { fontSize: 14, fontWeight: '800' },
+  stressBreakdown: { marginTop: 10 },
+  stressBreakdownRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  stressBreakdownLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
+  stressBreakdownValue: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
+  stressRec: {
+    color: '#F59E0B', fontSize: 12, fontWeight: '700', marginTop: 10,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  stressDisclaimer: {
+    color: 'rgba(255,255,255,0.25)', fontSize: 10, textAlign: 'center',
+    marginTop: 8, fontStyle: 'italic',
   },
 });
