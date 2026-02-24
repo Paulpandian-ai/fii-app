@@ -604,6 +604,16 @@ def _normalize_signals() -> None:
         old_signal = item.get("signal", "HOLD")
         if new_signal != old_signal:
             db.update_item(f"SIGNAL#{ticker}", "LATEST", {"signal": new_signal})
+
+            # Also update the S3 detail file so the detail view stays in sync
+            try:
+                s3_data = s3.read_json(f"signals/{ticker}.json")
+                if s3_data:
+                    s3_data["signal"] = new_signal
+                    s3.write_json(f"signals/{ticker}.json", s3_data)
+            except Exception as e:
+                logger.warning(f"[SignalEngine] Failed to update S3 for {ticker}: {e}")
+
             updated += 1
             logger.info(f"[SignalEngine] {ticker}: {old_signal} -> {new_signal} (score={score:.1f})")
 

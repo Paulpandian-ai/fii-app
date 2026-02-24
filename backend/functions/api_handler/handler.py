@@ -427,6 +427,18 @@ def _handle_signal(method, ticker, user_id):
             "lastUpdated": summary.get("lastUpdated", ""),
         }
 
+    # DynamoDB signal is the source of truth (updated by normalization),
+    # so always overlay it onto the S3 result to prevent stale mismatches.
+    db_signal = summary.get("signal")
+    if db_signal and result.get("signal") != db_signal:
+        result["signal"] = db_signal
+    db_score = summary.get("compositeScore")
+    if db_score:
+        try:
+            result["compositeScore"] = float(db_score)
+        except (ValueError, TypeError):
+            pass
+
     # Add signal freshness indicator
     from datetime import datetime, timezone
     last_updated = result.get("lastUpdated") or result.get("analyzedAt") or ""
@@ -1491,42 +1503,42 @@ _SCREENER_TEMPLATES = [
         "name": "AI Top Picks",
         "description": "Stocks with highest AI confidence scores",
         "icon": "sparkles",
-        "filters": {"aiScore": "8,10"},
+        "filters": {"aiScore": "6,10", "signal": "BUY"},
     },
     {
         "id": "value_plays",
         "name": "Value Plays",
-        "description": "Strong fundamentals at reasonable valuations",
+        "description": "Large-cap BUY signals with strong AI scores",
         "icon": "diamond",
-        "filters": {"fundamentalGrade": "A,B", "aiScore": "5,10"},
+        "filters": {"signal": "BUY", "marketCap": "large,mega"},
     },
     {
         "id": "momentum_leaders",
         "name": "Momentum Leaders",
-        "description": "Strong technical momentum with bullish signals",
+        "description": "BUY signals with strongest price momentum",
         "icon": "trending-up",
-        "filters": {"technicalScore": "7,10", "signal": "BUY"},
+        "filters": {"signal": "BUY", "sortBy": "changePercent"},
     },
     {
         "id": "dividend_stars",
         "name": "Dividend Stars",
-        "description": "Reliable income with strong fundamentals",
+        "description": "Reliable large and mega cap stocks",
         "icon": "star",
-        "filters": {"fundamentalGrade": "A,B"},
+        "filters": {"marketCap": "large,mega"},
     },
     {
         "id": "undervalued_ai",
         "name": "Undervalued by AI",
         "description": "AI sees upside the market hasn't priced in",
         "icon": "eye",
-        "filters": {"aiScore": "7,10"},
+        "filters": {"aiScore": "6,10"},
     },
     {
         "id": "risk_alerts",
         "name": "Risk Alerts",
         "description": "Stocks with warning signals from AI analysis",
         "icon": "warning",
-        "filters": {"aiScore": "1,3"},
+        "filters": {"aiScore": "1,5", "signal": "SELL"},
     },
 ]
 

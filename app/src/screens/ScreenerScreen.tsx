@@ -82,37 +82,37 @@ const TEMPLATES: Template[] = [
     id: 'ai-top-picks',
     label: 'AI Top Picks',
     icon: 'sparkles',
-    filters: { aiScoreMin: 8, aiScoreMax: 10, signals: ['BUY'], sortBy: 'AI Score' },
+    filters: { aiScoreMin: 6, aiScoreMax: 10, signals: ['BUY'], sortBy: 'AI Score' },
   },
   {
     id: 'value-plays',
     label: 'Value Plays',
     icon: 'diamond-outline',
-    filters: { grades: ['A', 'B'], signals: ['BUY'], sortBy: 'AI Score' },
+    filters: { signals: ['BUY'], marketCaps: ['Large', 'Mega'], sortBy: 'AI Score' },
   },
   {
     id: 'momentum-leaders',
     label: 'Momentum Leaders',
     icon: 'rocket-outline',
-    filters: { techScoreMin: 7, techScoreMax: 10, sortBy: 'Tech Score' },
+    filters: { signals: ['BUY'], sortBy: 'Price Change' },
   },
   {
     id: 'dividend-stars',
     label: 'Dividend Stars',
     icon: 'cash-outline',
-    filters: { grades: ['A', 'B'], marketCaps: ['Large', 'Mega'], sortBy: 'AI Score' },
+    filters: { marketCaps: ['Large', 'Mega'], sortBy: 'AI Score' },
   },
   {
     id: 'undervalued-ai',
     label: 'Undervalued by AI',
     icon: 'trending-up-outline',
-    filters: { aiScoreMin: 7, aiScoreMax: 10, grades: ['A', 'B', 'C'], sortBy: 'AI Score' },
+    filters: { aiScoreMin: 6, aiScoreMax: 10, sortBy: 'AI Score' },
   },
   {
     id: 'risk-alerts',
     label: 'Risk Alerts',
     icon: 'warning-outline',
-    filters: { aiScoreMin: 1, aiScoreMax: 4, signals: ['SELL'], sortBy: 'AI Score' },
+    filters: { aiScoreMin: 1, aiScoreMax: 5, signals: ['SELL'], sortBy: 'AI Score' },
   },
 ];
 
