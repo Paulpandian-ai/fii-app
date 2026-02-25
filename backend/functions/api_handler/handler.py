@@ -4663,26 +4663,85 @@ _AGENTS = {
         "mode": None,
         "schedules": {"daily": "cron(30 10 ? * MON-FRI *)"},
     },
+    "ai_agent": {
+        "name": "AI Agent",
+        "description": "Agentic AI monitor — detects changes & generates insights",
+        "target_lambda": f"fii-ai-agent-{_STAGE}",
+        "mode": None,
+        "schedules": {
+            "hourly": "rate(1 hour)",
+            "market_close": "cron(15 21 ? * MON-FRI *)",
+        },
+    },
+}
+
+# Human-friendly schedule labels for the frontend
+_SCHEDULE_LABELS = {
+    "cron(45 14 ? * MON-FRI *)": "9:45 AM ET weekdays",
+    "rate(30 minutes)": "Every 30 min",
+    "cron(30 20 ? * MON-FRI *)": "3:30 PM ET weekdays",
+    "cron(30 21 ? * MON-FRI *)": "4:30 PM ET weekdays",
+    "cron(0 22 ? * MON-FRI *)": "6:00 PM ET weekdays",
+    "cron(0 8 ? * SAT *)": "4:00 AM ET Saturday",
+    "cron(0 10 ? * SUN *)": "6:00 AM ET Sunday",
+    "cron(30 10 ? * MON-FRI *)": "6:30 AM ET weekdays",
+    "rate(1 hour)": "Every hour",
+    "cron(15 21 ? * MON-FRI *)": "4:15 PM ET weekdays",
 }
 
 
+def _get_agent_config(agent_id):
+    """Load persisted agent config from DynamoDB (enabled state, custom schedule)."""
+    try:
+        item = db.get_item("AGENT_CONFIG", agent_id)
+        if item:
+            return {
+                "enabled": item.get("enabled", True),
+                "customSchedule": item.get("customSchedule", None),
+            }
+    except Exception:
+        pass
+    return {"enabled": True, "customSchedule": None}
+
+
+def _save_agent_config(agent_id, config):
+    """Persist agent config to DynamoDB."""
+    db.put_item({
+        "PK": "AGENT_CONFIG",
+        "SK": agent_id,
+        "enabled": config.get("enabled", True),
+        "customSchedule": config.get("customSchedule", None),
+        "updatedAt": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    })
+
+
 def _handle_admin(method, path, body, query_params):
-    """Routes: /admin/agents, /admin/agents/{id}/run, /admin/agents/{id}/history."""
+    """Routes: /admin/agents, /admin/agents/{id}/run, /admin/agents/{id}/history, /admin/agents/{id}/config."""
     from datetime import datetime, timezone
     parts = path.strip("/").split("/")
 
-    # GET /admin/agents — list all agents
+    # GET /admin/agents — list all agents with config
     if len(parts) == 2 and parts[1] == "agents" and method == "GET":
         agents_out = []
         for aid, a in _AGENTS.items():
             # Get last run
             runs = db.query(f"AGENT_RUN#{aid}", limit=1, scan_forward=False)
             last_run = runs[0] if runs else None
+            config = _get_agent_config(aid)
+            # Build human-readable schedule labels
+            schedule_labels = {}
+            for skey, sval in a["schedules"].items():
+                schedule_labels[skey] = _SCHEDULE_LABELS.get(sval, sval)
             agents_out.append({
                 "id": aid,
                 "name": a["name"],
                 "description": a["description"],
                 "schedules": a["schedules"],
+                "scheduleLabels": schedule_labels,
+                "enabled": config["enabled"],
+                "customSchedule": config["customSchedule"],
                 "lastRun": {
                     "timestamp": last_run.get("SK", ""),
                     "status": last_run.get("status", ""),
@@ -4744,6 +4803,27 @@ def _handle_admin(method, path, body, query_params):
                 "detail": r.get("detail", ""),
             })
         return _response(200, {"agentId": agent_id, "history": history})
+
+    # GET /admin/agents/{id}/config — get agent config
+    if len(parts) == 4 and parts[1] == "agents" and parts[3] == "config" and method == "GET":
+        agent_id = parts[2]
+        if agent_id not in _AGENTS:
+            return _response(404, {"error": f"Unknown agent: {agent_id}"})
+        config = _get_agent_config(agent_id)
+        return _response(200, {"agentId": agent_id, **config})
+
+    # PUT /admin/agents/{id}/config — update agent config (enabled, customSchedule)
+    if len(parts) == 4 and parts[1] == "agents" and parts[3] == "config" and method in ("PUT", "POST"):
+        agent_id = parts[2]
+        if agent_id not in _AGENTS:
+            return _response(404, {"error": f"Unknown agent: {agent_id}"})
+        current = _get_agent_config(agent_id)
+        if "enabled" in body:
+            current["enabled"] = bool(body["enabled"])
+        if "customSchedule" in body:
+            current["customSchedule"] = body["customSchedule"]
+        _save_agent_config(agent_id, current)
+        return _response(200, {"agentId": agent_id, **current, "message": "Config updated"})
 
     return _response(404, {"error": "Admin route not found"})
 

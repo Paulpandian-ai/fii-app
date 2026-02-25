@@ -10,6 +10,7 @@ import {
   Share,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,8 +21,77 @@ import type { RootStackParamList } from '../types';
 import { DisclaimerFull } from '../components/DisclaimerBanner';
 import { useEventStore } from '../store/eventStore';
 import { useSubscriptionStore } from '../store/subscriptionStore';
+import { getAdminAgents, updateAdminAgentConfig, runAdminAgent } from '../services/api';
 
 const TAX_BRACKETS = [10, 12, 22, 24, 32, 35, 37];
+
+// Pre-defined schedule presets for agent time settings
+const SCHEDULE_PRESETS: Record<string, { label: string; value: string }[]> = {
+  price_refresh: [
+    { label: 'Market hours (default)', value: 'default' },
+    { label: 'Every 15 min', value: 'rate(15 minutes)' },
+    { label: 'Every hour', value: 'rate(1 hour)' },
+  ],
+  technicals_refresh: [
+    { label: '4:30 PM ET (default)', value: 'default' },
+    { label: '1:00 PM ET', value: 'cron(0 18 ? * MON-FRI *)' },
+    { label: '8:00 PM ET', value: 'cron(0 1 ? * TUE-SAT *)' },
+  ],
+  signal_generation: [
+    { label: '6:00 PM ET (default)', value: 'default' },
+    { label: '5:00 PM ET', value: 'cron(0 22 ? * MON-FRI *)' },
+    { label: '9:00 PM ET', value: 'cron(0 2 ? * TUE-SAT *)' },
+  ],
+  fundamentals_refresh: [
+    { label: 'Sunday 6 AM ET (default)', value: 'default' },
+    { label: 'Saturday 6 AM ET', value: 'cron(0 10 ? * SAT *)' },
+    { label: 'Daily 7 AM ET', value: 'cron(0 12 ? * MON-FRI *)' },
+  ],
+  feed_compile: [
+    { label: '6:30 AM ET (default)', value: 'default' },
+    { label: '7:30 AM ET', value: 'cron(30 12 ? * MON-FRI *)' },
+    { label: '5:30 AM ET', value: 'cron(30 10 ? * MON-FRI *)' },
+  ],
+  ai_agent: [
+    { label: 'Every hour (default)', value: 'default' },
+    { label: 'Every 30 min', value: 'rate(30 minutes)' },
+    { label: 'Every 2 hours', value: 'rate(2 hours)' },
+    { label: '4x daily', value: 'cron(0 14,17,20,23 ? * MON-FRI *)' },
+  ],
+};
+
+const AGENT_ICONS: Record<string, string> = {
+  price_refresh: 'trending-up',
+  technicals_refresh: 'analytics',
+  signal_generation: 'flash',
+  fundamentals_refresh: 'document-text',
+  feed_compile: 'newspaper',
+  ai_agent: 'sparkles',
+};
+
+const AGENT_COLORS: Record<string, string> = {
+  price_refresh: '#10B981',
+  technicals_refresh: '#60A5FA',
+  signal_generation: '#FBBF24',
+  fundamentals_refresh: '#F97316',
+  feed_compile: '#8B5CF6',
+  ai_agent: '#A78BFA',
+};
+
+interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  schedules: Record<string, string>;
+  scheduleLabels: Record<string, string>;
+  enabled: boolean;
+  customSchedule: string | null;
+  lastRun: {
+    timestamp: string;
+    status: string;
+    trigger: string;
+  } | null;
+}
 const RISK_PROFILES = [
   { id: 'conservative', label: 'Conservative', color: '#60A5FA' },
   { id: 'moderate', label: 'Moderate', color: '#FBBF24' },
@@ -151,6 +221,65 @@ export const SettingsScreen: React.FC = () => {
     loadSubscription();
     loadUsage();
   }, [loadSubscription, loadUsage]);
+
+  // ─── Agent Control state ───
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [runningAgent, setRunningAgent] = useState<string | null>(null);
+
+  const loadAgents = useCallback(async () => {
+    setAgentsLoading(true);
+    try {
+      const data = await getAdminAgents();
+      setAgents(data.agents || []);
+    } catch {
+      // API unavailable — show nothing
+    } finally {
+      setAgentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAgents();
+  }, [loadAgents]);
+
+  const handleToggleAgent = useCallback(async (agentId: string, enabled: boolean) => {
+    // Optimistic update
+    setAgents((prev) => prev.map((a) => a.id === agentId ? { ...a, enabled } : a));
+    try {
+      await updateAdminAgentConfig(agentId, { enabled });
+    } catch {
+      // Revert on failure
+      setAgents((prev) => prev.map((a) => a.id === agentId ? { ...a, enabled: !enabled } : a));
+      Alert.alert('Error', 'Failed to update agent toggle.');
+    }
+  }, []);
+
+  const handleChangeSchedule = useCallback(async (agentId: string, schedule: string) => {
+    const customSchedule = schedule === 'default' ? null : schedule;
+    setAgents((prev) => prev.map((a) => a.id === agentId ? { ...a, customSchedule } : a));
+    try {
+      await updateAdminAgentConfig(agentId, { customSchedule });
+    } catch {
+      Alert.alert('Error', 'Failed to update schedule.');
+      loadAgents(); // Reload to revert
+    }
+  }, [loadAgents]);
+
+  const handleRunAgent = useCallback(async (agentId: string) => {
+    setRunningAgent(agentId);
+    try {
+      await runAdminAgent(agentId);
+      Alert.alert('Triggered', `Agent "${agentId}" has been manually triggered.`);
+      // Refresh to show updated lastRun
+      setTimeout(() => loadAgents(), 2000);
+    } catch {
+      Alert.alert('Error', 'Failed to trigger agent.');
+    } finally {
+      setRunningAgent(null);
+    }
+  }, [loadAgents]);
 
   const tierColors: Record<string, string> = { free: '#6B7280', pro: '#60A5FA', premium: '#A78BFA' };
   const tierColor = tierColors[tier] ?? '#6B7280';
@@ -410,6 +539,157 @@ export const SettingsScreen: React.FC = () => {
             No push notifications between {preferences.quietHoursStart}:00 – {preferences.quietHoursEnd}:00
           </Text>
         </View>
+
+        {/* ─── Agent Control ─── */}
+        <Text style={styles.sectionHeader}>AI Agent Control</Text>
+        {agentsLoading ? (
+          <View style={styles.agentLoadingRow}>
+            <ActivityIndicator size="small" color="#60A5FA" />
+            <Text style={styles.agentLoadingText}>Loading agents...</Text>
+          </View>
+        ) : agents.length === 0 ? (
+          <View style={styles.agentLoadingRow}>
+            <Ionicons name="cloud-offline-outline" size={18} color="rgba(255,255,255,0.3)" />
+            <Text style={styles.agentLoadingText}>Agent data unavailable</Text>
+          </View>
+        ) : (
+          agents.map((agent) => {
+            const agentColor = AGENT_COLORS[agent.id] || '#60A5FA';
+            const iconName = (AGENT_ICONS[agent.id] || 'cube') as any;
+            const isExpanded = expandedAgent === agent.id;
+            const presets = SCHEDULE_PRESETS[agent.id] || [];
+            const activeSchedule = agent.customSchedule || 'default';
+            const isRunning = runningAgent === agent.id;
+
+            // Format last run info
+            let lastRunLabel = 'Never run';
+            if (agent.lastRun) {
+              const ts = new Date(agent.lastRun.timestamp);
+              const diff = Date.now() - ts.getTime();
+              const hours = Math.floor(diff / (1000 * 60 * 60));
+              if (hours < 1) lastRunLabel = 'Ran just now';
+              else if (hours < 24) lastRunLabel = `Ran ${hours}h ago`;
+              else lastRunLabel = `Ran ${Math.floor(hours / 24)}d ago`;
+              if (agent.lastRun.status === 'error') lastRunLabel += ' (error)';
+            }
+
+            // Primary schedule display
+            const primaryScheduleKey = Object.keys(agent.scheduleLabels || {})[0];
+            const scheduleDisplay = agent.customSchedule
+              ? presets.find((p) => p.value === agent.customSchedule)?.label || agent.customSchedule
+              : (primaryScheduleKey ? agent.scheduleLabels[primaryScheduleKey] : 'No schedule');
+
+            return (
+              <View key={agent.id} style={[styles.agentCard, { borderColor: agent.enabled ? agentColor + '30' : 'rgba(255,255,255,0.06)' }]}>
+                {/* Agent header row — tap to expand */}
+                <TouchableOpacity
+                  style={styles.agentHeaderRow}
+                  onPress={() => setExpandedAgent(isExpanded ? null : agent.id)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.agentIconWrap, { backgroundColor: agentColor + '18' }]}>
+                    <Ionicons name={iconName} size={18} color={agentColor} />
+                  </View>
+                  <View style={styles.agentHeaderText}>
+                    <Text style={[styles.agentName, !agent.enabled && styles.agentNameDisabled]}>
+                      {agent.name}
+                    </Text>
+                    <Text style={styles.agentScheduleLabel}>{scheduleDisplay}</Text>
+                  </View>
+                  <Switch
+                    value={agent.enabled}
+                    onValueChange={(v) => handleToggleAgent(agent.id, v)}
+                    trackColor={{ false: 'rgba(255,255,255,0.1)', true: agentColor + '40' }}
+                    thumbColor={agent.enabled ? agentColor : '#666'}
+                  />
+                </TouchableOpacity>
+
+                {/* Expanded details */}
+                {isExpanded && (
+                  <View style={styles.agentDetails}>
+                    <Text style={styles.agentDescription}>{agent.description}</Text>
+
+                    {/* Last run status */}
+                    <View style={styles.agentStatusRow}>
+                      <Ionicons
+                        name={agent.lastRun?.status === 'error' ? 'alert-circle' : 'checkmark-circle'}
+                        size={14}
+                        color={agent.lastRun?.status === 'error' ? '#EF4444' : 'rgba(255,255,255,0.3)'}
+                      />
+                      <Text style={styles.agentStatusText}>{lastRunLabel}</Text>
+                      {agent.lastRun?.trigger && (
+                        <View style={styles.agentTriggerPill}>
+                          <Text style={styles.agentTriggerText}>{agent.lastRun.trigger}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Schedule presets */}
+                    {presets.length > 0 && (
+                      <>
+                        <Text style={styles.agentSubHeader}>Schedule</Text>
+                        <View style={styles.agentPresetRow}>
+                          {presets.map((preset) => (
+                            <TouchableOpacity
+                              key={preset.value}
+                              style={[
+                                styles.agentPresetPill,
+                                activeSchedule === preset.value && {
+                                  borderColor: agentColor + '60',
+                                  backgroundColor: agentColor + '12',
+                                },
+                              ]}
+                              onPress={() => handleChangeSchedule(agent.id, preset.value)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.agentPresetText,
+                                activeSchedule === preset.value && { color: agentColor },
+                              ]}>
+                                {preset.label}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </>
+                    )}
+
+                    {/* All schedules */}
+                    {Object.keys(agent.scheduleLabels || {}).length > 1 && (
+                      <>
+                        <Text style={styles.agentSubHeader}>All Schedules</Text>
+                        {Object.entries(agent.scheduleLabels).map(([key, label]) => (
+                          <View key={key} style={styles.agentScheduleDetailRow}>
+                            <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.25)" />
+                            <Text style={styles.agentScheduleKey}>{key.replace(/_/g, ' ')}</Text>
+                            <Text style={styles.agentScheduleValue}>{label}</Text>
+                          </View>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Manual run button */}
+                    <TouchableOpacity
+                      style={[styles.agentRunBtn, { borderColor: agentColor + '40' }]}
+                      onPress={() => handleRunAgent(agent.id)}
+                      disabled={isRunning || !agent.enabled}
+                      activeOpacity={0.7}
+                    >
+                      {isRunning ? (
+                        <ActivityIndicator size="small" color={agentColor} />
+                      ) : (
+                        <Ionicons name="play" size={14} color={agent.enabled ? agentColor : '#666'} />
+                      )}
+                      <Text style={[styles.agentRunText, { color: agent.enabled ? agentColor : '#666' }]}>
+                        {isRunning ? 'Running...' : 'Run Now'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          })
+        )}
 
         {/* Community */}
         <Text style={styles.sectionHeader}>Community</Text>
@@ -689,5 +969,156 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'right',
     marginLeft: 12,
+  },
+
+  // ─── Agent Control ───
+  agentLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  agentLoadingText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  agentCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  agentHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    gap: 12,
+  },
+  agentIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  agentHeaderText: {
+    flex: 1,
+  },
+  agentName: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  agentNameDisabled: {
+    color: 'rgba(255,255,255,0.35)',
+  },
+  agentScheduleLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  agentDetails: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.04)',
+  },
+  agentDescription: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  agentStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  agentStatusText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  agentTriggerPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 'auto',
+  },
+  agentTriggerText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  agentSubHeader: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  agentPresetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  agentPresetPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  agentPresetText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  agentScheduleDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  agentScheduleKey: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'capitalize',
+  },
+  agentScheduleValue: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 'auto',
+  },
+  agentRunBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 8,
+  },
+  agentRunText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

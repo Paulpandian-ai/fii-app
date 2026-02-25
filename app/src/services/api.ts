@@ -494,4 +494,31 @@ export const getAffiliateLink = async (broker: string, ticker: string) => {
   return data;
 };
 
+// ─── Admin: Agent Control ───
+
+export const getAdminAgents = async () => {
+  const { data } = await api.get('/admin/agents');
+  return data;
+};
+
+export const runAdminAgent = async (agentId: string) => {
+  const { data } = await api.post(`/admin/agents/${agentId}/run`);
+  return data;
+};
+
+export const getAdminAgentHistory = async (agentId: string, limit: number = 10) => {
+  const { data } = await api.get(`/admin/agents/${agentId}/history`, { params: { limit: String(limit) } });
+  return data;
+};
+
+export const getAdminAgentConfig = async (agentId: string) => {
+  const { data } = await api.get(`/admin/agents/${agentId}/config`);
+  return data;
+};
+
+export const updateAdminAgentConfig = async (agentId: string, config: { enabled?: boolean; customSchedule?: string | null }) => {
+  const { data } = await api.put(`/admin/agents/${agentId}/config`, config);
+  return data;
+};
+
 export default api;
