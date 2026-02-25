@@ -106,6 +106,11 @@ export const getAltData = async (ticker: string) => {
   return data;
 };
 
+export const getFairPrice = async (ticker: string) => {
+  const { data } = await api.get(`/fair-price/${ticker}`);
+  return data;
+};
+
 // ─── Charts ───
 
 export const getChartData = async (ticker: string, resolution: string = 'D', range: string = '6M') => {

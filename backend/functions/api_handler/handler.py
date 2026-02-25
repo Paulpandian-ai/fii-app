@@ -65,6 +65,7 @@ import finnhub_client
 import technical_engine
 import fundamentals_engine
 import factor_engine
+import fair_price_engine
 import patent_engine
 import contract_engine
 import fda_engine
@@ -125,6 +126,9 @@ def lambda_handler(event, context):
         elif path.startswith("/factors/"):
             ticker = path.split("/factors/")[-1].strip("/").upper()
             return _handle_factors(http_method, ticker)
+        elif path.startswith("/fair-price/"):
+            ticker = path.split("/fair-price/")[-1].strip("/").upper()
+            return _handle_fair_price(http_method, ticker)
         elif path.startswith("/altdata/"):
             ticker = path.split("/altdata/")[-1].strip("/").upper()
             return _handle_altdata(http_method, ticker)
@@ -827,6 +831,95 @@ def _handle_signal(method, ticker, user_id):
             result["factorCount"] = factor_data.get("factorCount", 0)
             result["scoringMethodology"] = factor_data.get("scoringMethodology", {})
 
+    # ── Enrich with fair price (cache → live compute) ──
+    if "fairPrice" not in result:
+        fp_data = None
+
+        # Try DynamoDB cache first
+        try:
+            fp_cached = db.get_item(f"FAIRPRICE#{ticker}", "LATEST")
+            if fp_cached:
+                fp_data = fp_cached.get("fairPrice", {})
+        except Exception:
+            pass
+
+        # If cache is empty, compute live
+        if not fp_data or not fp_data.get("fairPrice"):
+            try:
+                # Get EPS from Finnhub
+                eps_ttm = None
+                sector = None
+                try:
+                    fin = finnhub_client.get_basic_financials(ticker)
+                    eps_ttm = fin.get("epsTTM")
+                except Exception:
+                    pass
+                try:
+                    profile = finnhub_client.get_company_profile(ticker)
+                    sector = profile.get("sector", "")
+                except Exception:
+                    pass
+
+                # Get current price from result or fetch
+                cp = None
+                ta = result.get("technicalAnalysis", {})
+                if ta and ta.get("sma20"):
+                    cp = ta["sma20"]  # approximate if we have SMA
+                try:
+                    quote = finnhub_client.get_quote(ticker)
+                    cp = quote.get("price") or cp
+                except Exception:
+                    pass
+
+                # Get DCF from enriched fundamentals
+                dcf_fv = result.get("fairValue")
+                dcf_gr = None
+                dcf_dr = None
+                dcf_tg = None
+                if not dcf_fv:
+                    try:
+                        h = db.get_item(f"HEALTH#{ticker}", "LATEST")
+                        if h:
+                            dcf = (h.get("analysis") or {}).get("dcf")
+                            if dcf:
+                                dcf_fv = dcf.get("fairValue")
+                                dcf_gr = dcf.get("growthRate")
+                                dcf_dr = dcf.get("discountRate")
+                                dcf_tg = dcf.get("terminalGrowth")
+                    except Exception:
+                        pass
+
+                fp_data = fair_price_engine.compute_fair_price(
+                    ticker=ticker,
+                    current_price=cp,
+                    sector=sector,
+                    eps_ttm=eps_ttm,
+                    dcf_fair_value=dcf_fv,
+                    dcf_growth_rate=dcf_gr,
+                    dcf_discount_rate=dcf_dr,
+                    dcf_terminal_growth=dcf_tg,
+                )
+                # Cache for next time
+                if fp_data and fp_data.get("fairPrice"):
+                    try:
+                        db.put_item({
+                            "PK": f"FAIRPRICE#{ticker}",
+                            "SK": "LATEST",
+                            "fairPrice": fp_data,
+                            "cachedAt": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Signal] Live fair price failed for {ticker}: {e}")
+
+        if fp_data and fp_data.get("fairPrice"):
+            result["fairPrice"] = fp_data["fairPrice"]
+            result["fairPriceLabel"] = fp_data.get("label", "fair")
+            result["fairPriceUpside"] = fp_data.get("upside")
+            result["fairPriceMethod"] = fp_data.get("method", "")
+            result["fairPriceDisclaimer"] = "Fair value is a model estimate. Not investment advice."
+
     return _response(200, result)
 
 
@@ -1408,6 +1501,143 @@ def _handle_factors(method, ticker):
             "dimensionScores": {},
             "factorContributions": [],
         })
+
+
+# ─── Fair Price Endpoint ───
+
+
+def _handle_fair_price(method, ticker):
+    """GET /fair-price/<ticker> — Blended DCF + Relative fair value estimate."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    from datetime import datetime, timezone
+
+    # 1) Check DynamoDB cache (6-hour TTL for fair price)
+    cached = db.get_item(f"FAIRPRICE#{ticker}", "LATEST")
+    if cached:
+        cached_at = cached.get("cachedAt", "")
+        try:
+            ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age_seconds < 21600:  # 6-hour TTL
+                data = cached.get("fairPrice", {})
+                data["source"] = "cache"
+                return _response(200, data)
+        except Exception:
+            pass
+
+    # 2) Gather inputs
+    current_price = None
+    sector = None
+    eps_ttm = None
+    dcf_fair_value = None
+    dcf_growth_rate = None
+    dcf_discount_rate = None
+    dcf_terminal_growth = None
+
+    try:
+        quote = finnhub_client.get_quote(ticker)
+        current_price = quote.get("price")
+    except Exception:
+        pass
+
+    try:
+        profile = finnhub_client.get_company_profile(ticker)
+        sector = profile.get("sector", "")
+    except Exception:
+        pass
+
+    try:
+        financials = finnhub_client.get_basic_financials(ticker)
+        eps_ttm = financials.get("epsTTM")
+    except Exception:
+        pass
+
+    # Get DCF from fundamentals cache or compute fresh
+    try:
+        health_cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
+        if health_cached:
+            analysis = health_cached.get("analysis", {})
+            dcf = analysis.get("dcf")
+            if dcf and dcf.get("fairValue"):
+                dcf_fair_value = dcf["fairValue"]
+                dcf_growth_rate = dcf.get("growthRate")
+                dcf_discount_rate = dcf.get("discountRate")
+                dcf_terminal_growth = dcf.get("terminalGrowth")
+    except Exception:
+        pass
+
+    # If no DCF from cache, try computing fresh fundamentals
+    if dcf_fair_value is None:
+        try:
+            market_cap = None
+            beta = 1.0
+            shares_outstanding = None
+            try:
+                profile = finnhub_client.get_company_profile(ticker)
+                market_cap = profile.get("marketCap")
+                fin = finnhub_client.get_basic_financials(ticker)
+                beta = fin.get("beta") or 1.0
+                if market_cap and current_price and current_price > 0:
+                    shares_outstanding = market_cap / current_price
+            except Exception:
+                pass
+            fund_result = fundamentals_engine.analyze(
+                ticker,
+                market_cap=market_cap,
+                beta=beta,
+                current_price=current_price,
+                shares_outstanding=shares_outstanding,
+            )
+            if fund_result and not fund_result.get("error"):
+                dcf = fund_result.get("dcf")
+                if dcf and dcf.get("fairValue"):
+                    dcf_fair_value = dcf["fairValue"]
+                    dcf_growth_rate = dcf.get("growthRate")
+                    dcf_discount_rate = dcf.get("discountRate")
+                    dcf_terminal_growth = dcf.get("terminalGrowth")
+        except Exception as e:
+            print(f"[FairPrice] Fundamentals computation failed for {ticker}: {e}")
+
+    # 3) Compute fair price
+    result = fair_price_engine.compute_fair_price(
+        ticker=ticker,
+        current_price=current_price,
+        sector=sector,
+        eps_ttm=eps_ttm,
+        dcf_fair_value=dcf_fair_value,
+        dcf_growth_rate=dcf_growth_rate,
+        dcf_discount_rate=dcf_discount_rate,
+        dcf_terminal_growth=dcf_terminal_growth,
+    )
+
+    if not result:
+        if cached:
+            data = cached.get("fairPrice", {})
+            data["source"] = "stale_cache"
+            return _response(200, data)
+        return _response(200, {
+            "ticker": ticker,
+            "error": "Insufficient data for fair value estimate",
+        })
+
+    # 4) Cache to DynamoDB
+    try:
+        db.put_item({
+            "PK": f"FAIRPRICE#{ticker}",
+            "SK": "LATEST",
+            "fairPrice": result,
+            "cachedAt": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+
+    result["source"] = "live"
+    return _response(200, result)
 
 
 # ─── Alternative Data Helpers ───

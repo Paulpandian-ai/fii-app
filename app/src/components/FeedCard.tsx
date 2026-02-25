@@ -6,7 +6,7 @@ import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
-import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getInsightsForTicker } from '../services/api';
+import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -95,6 +95,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
   const [peRatio, setPeRatio] = useState<number | null>(null);
   const [fairValueUpside, setFairValueUpside] = useState<number | null>(null);
+  const [fairPriceDollars, setFairPriceDollars] = useState<number | null>(null);
+  const [fairPriceLabel, setFairPriceLabel] = useState<string | null>(null);
   const [zScore, setZScore] = useState<number | null>(null);
   const [fScoreVal, setFScoreVal] = useState<number | null>(null);
   const [dimensionScores, setDimensionScores] = useState<Record<string, number>>({});
@@ -119,7 +121,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       getFundamentals(item.ticker),             // [3] fallback for fundamentals
       getFactors(item.ticker),                  // [4] fallback for factors/dimensions
       getInsightsForTicker(item.ticker, 1),     // [5]
-    ]).then(([priceR, signalR, techR, fundR, factorR, insightR]) => {
+      getFairPrice(item.ticker),               // [6] fair price estimate
+    ]).then(([priceR, signalR, techR, fundR, factorR, insightR, fairPriceR]) => {
       if (!mounted) return;
 
       // Filter out error responses (HTTP 200 with {error: "..."}) — treat as null
@@ -175,8 +178,20 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       if (pe > 0) setPeRatio(safeNum(pe));
 
       // ── Fair Value Upside: signal → fundamentals.dcf.upside ──
-      const fvu = sig?.fairValueUpside ?? fund?.dcf?.upside;
+      const fvu = sig?.fairValueUpside ?? sig?.fairPriceUpside ?? fund?.dcf?.upside;
       if (fvu != null) setFairValueUpside(safeNum(fvu));
+
+      // ── Fair Price (dollar amount): signal → fair-price endpoint ──
+      const fpData = fairPriceR?.status === 'fulfilled' ? fairPriceR.value : null;
+      const fp = sig?.fairPrice ?? fpData?.fairPrice;
+      if (fp != null && fp > 0) setFairPriceDollars(safeNum(fp));
+      const fpLabel = sig?.fairPriceLabel ?? fpData?.label;
+      if (fpLabel) setFairPriceLabel(fpLabel);
+      // If we got fair price upside from this endpoint but not from fundamentals
+      if (fvu == null) {
+        const fpUpside = sig?.fairPriceUpside ?? fpData?.upside;
+        if (fpUpside != null) setFairValueUpside(safeNum(fpUpside));
+      }
 
       // ── Z-Score: signal → fundamentals.zScore.value ──
       const z = sig?.zScore ?? fund?.zScore?.value;
@@ -242,10 +257,12 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     ? (rsi >= 70 ? '#EF4444' : rsi <= 30 ? '#10B981' : '#94A3B8')
     : 'rgba(255,255,255,0.3)';
 
-  // Fair value color
-  const fvColor = fairValueUpside != null
-    ? (fairValueUpside > 10 ? '#10B981' : fairValueUpside < -10 ? '#EF4444' : '#F59E0B')
-    : 'rgba(255,255,255,0.3)';
+  // Fair value / fair price color
+  const fvColor = fairPriceLabel
+    ? (fairPriceLabel === 'undervalued' ? '#10B981' : fairPriceLabel === 'overvalued' ? '#EF4444' : '#F59E0B')
+    : fairValueUpside != null
+      ? (fairValueUpside > 10 ? '#10B981' : fairValueUpside < -10 ? '#EF4444' : '#F59E0B')
+      : 'rgba(255,255,255,0.3)';
 
   // Z-Score color
   const zColor = zScore != null
@@ -389,9 +406,10 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
             <View style={styles.metricItem}>
               <Ionicons name="trending-up-outline" size={13} color={fvColor} />
               <Text style={[styles.metricValue, { color: fvColor }]}>
-                {fairValueUpside != null ? `${fairValueUpside > 0 ? '+' : ''}${fairValueUpside.toFixed(0)}%` : '--'}
+                {fairPriceDollars != null ? `$${fairPriceDollars >= 1000 ? `${(fairPriceDollars / 1000).toFixed(1)}K` : fairPriceDollars.toFixed(0)}` : fairValueUpside != null ? `${fairValueUpside > 0 ? '+' : ''}${fairValueUpside.toFixed(0)}%` : '--'}
               </Text>
-              <Text style={styles.metricLabel}>Fair Value</Text>
+              <Text style={styles.metricLabel}>Fair Price</Text>
+              {fairPriceLabel && <Text style={[styles.metricSub, { color: fvColor }]}>{fairPriceLabel}</Text>}
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
@@ -469,6 +487,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         {/* ── Disclaimer ── */}
         <Text style={styles.disclaimer}>
           Not financial advice. AI-generated analysis for informational purposes only.
+          {fairPriceDollars != null ? ' Fair value is a model estimate.' : ''}
         </Text>
 
         {/* ── Swipe hint ── */}
