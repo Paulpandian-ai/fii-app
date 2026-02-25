@@ -134,7 +134,7 @@ def _score_technical_factors(technicals):
     """
     results = []
 
-    if not technicals or technicals.get("indicatorCount", 0) == 0:
+    if not technicals or technicals.get("error") or technicals.get("indicatorCount", 0) == 0:
         return _default_scores("technical")
 
     # TE1: Trend Score — SMA alignment + ADX
@@ -292,7 +292,11 @@ def _score_technical_factors(technicals):
 
 
 def _score_fundamental_factors(fundamentals):
-    """Score 5 fundamental sub-factors from fundamentals_engine output."""
+    """Score 5 fundamental sub-factors from fundamentals_engine output.
+
+    Handles both full SEC EDGAR data and partial Finnhub fallback data
+    (where zScore/fScore/mScore may be None but ratios and grade exist).
+    """
     results = []
 
     if not fundamentals or fundamentals.get("error"):
@@ -304,10 +308,15 @@ def _score_fundamental_factors(fundamentals):
     dcf = fundamentals.get("dcf") or {}
     ratios = fundamentals.get("ratios") or {}
 
+    # If we have no ratios AND no z_score, there's truly nothing to score
+    if not ratios and not z_score:
+        return _default_scores("fundamental")
+
     # FD1: Valuation — DCF upside + P/E relative
     val_score = 0.0
-    upside = dcf.get("upside")
-    pe = ratios.get("peRatio")
+    upside = dcf.get("upside") if dcf else None
+    pe = ratios.get("peRatio") or ratios.get("forwardPE")
+    val_explanation = "Valuation data unavailable"
     if upside is not None:
         if upside > 30:
             val_score = 2.0
@@ -321,13 +330,29 @@ def _score_fundamental_factors(fundamentals):
             val_score = -1.2
         else:
             val_score = -2.0
+        val_explanation = f"DCF upside {round(upside, 1)}%"
+    elif pe is not None:
+        # Fallback: score based on P/E ratio when DCF is unavailable
+        if pe < 0:
+            val_score = -1.5  # negative earnings
+        elif pe < 12:
+            val_score = 1.5   # deeply undervalued
+        elif pe < 18:
+            val_score = 0.8   # reasonably valued
+        elif pe < 25:
+            val_score = 0.0   # fair value
+        elif pe < 40:
+            val_score = -0.7  # richly valued
+        else:
+            val_score = -1.5  # very expensive
+        val_explanation = f"P/E={round(pe, 1)} ({'cheap' if val_score > 0 else 'expensive' if val_score < 0 else 'fair'})"
     val_score = _clamp(val_score)
     results.append({
         "factorId": "FD1", "rawValue": val_score,
         "normalizedScore": round(val_score, 2),
         "direction": "positive" if val_score > 0.3 else "negative" if val_score < -0.3 else "neutral",
-        "dataSource": "DCF Model + P/E",
-        "explanation": f"DCF upside {round(upside, 1)}%" if upside is not None else "Valuation data unavailable",
+        "dataSource": "DCF Model + P/E" if upside is not None else "Finnhub P/E",
+        "explanation": val_explanation,
     })
 
     # FD2: Profitability — ROE + Margins
@@ -386,9 +411,9 @@ def _score_fundamental_factors(fundamentals):
         "explanation": f"Z-Score={round(z_val, 2) if z_val else 'N/A'}, F-Score={f_val}/9" if f_val else "Health data unavailable",
     })
 
-    # FD4: Earnings Quality — M-Score
-    m_val = m_score.get("value")
-    m_interp = m_score.get("interpretation", "")
+    # FD4: Earnings Quality — M-Score (neutral when unavailable)
+    m_val = m_score.get("value") if m_score else None
+    m_interp = m_score.get("interpretation", "") if m_score else ""
     eq_score = 0.0
     if m_val is not None:
         if m_val < -3.0:
@@ -398,12 +423,13 @@ def _score_fundamental_factors(fundamentals):
         else:
             eq_score = -1.5  # manipulation flag
     eq_score = _clamp(eq_score)
+    eq_explanation = "M-Score data not available (Finnhub fallback)" if m_val is None else f"M-Score={round(m_val, 2)}, {'clean' if 'unlikely' in m_interp else 'red flag'}"
     results.append({
         "factorId": "FD4", "rawValue": eq_score,
         "normalizedScore": round(eq_score, 2),
         "direction": "positive" if eq_score > 0.3 else "negative" if eq_score < -0.3 else "neutral",
-        "dataSource": "Beneish M-Score",
-        "explanation": f"M-Score={round(m_val, 2) if m_val else 'N/A'}, {'clean' if 'unlikely' in m_interp else 'red flag'}",
+        "dataSource": "Beneish M-Score" if m_val is not None else "N/A",
+        "explanation": eq_explanation,
     })
 
     # FD5: Growth — Revenue trend

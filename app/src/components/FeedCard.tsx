@@ -122,12 +122,23 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     ]).then(([priceR, signalR, techR, fundR, factorR, insightR]) => {
       if (!mounted) return;
 
+      // Filter out error responses (HTTP 200 with {error: "..."}) — treat as null
+      const _ok = (r: PromiseSettledResult<any>) => {
+        if (r.status !== 'fulfilled') return null;
+        const v = r.value;
+        return (v && !v.error) ? v : null;
+      };
+      // Price endpoint never returns {error} — always trust it
       const priceData = priceR.status === 'fulfilled' ? priceR.value : null;
-      const sig = signalR.status === 'fulfilled' ? signalR.value : null;
-      const tech = techR.status === 'fulfilled' ? techR.value : null;
-      const fund = fundR.status === 'fulfilled' ? fundR.value : null;
-      const factors = factorR.status === 'fulfilled' ? factorR.value : null;
+      const sig = _ok(signalR);
+      const tech = _ok(techR);
+      const fund = _ok(fundR);
+      const factors = _ok(factorR);
       const insightData = insightR.status === 'fulfilled' ? insightR.value : null;
+
+      // Even when signal/fund have error, extract any partial data they contain
+      const sigRaw = signalR.status === 'fulfilled' ? signalR.value : null;
+      const fundRaw = fundR.status === 'fulfilled' ? fundR.value : null;
 
       // ── Price ──
       if (priceData) {
@@ -154,12 +165,13 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const trend = ta.signals?.trend ?? tech?.signals?.trend;
       if (trend) setTechTrend(trend);
 
-      // ── Health Grade: signal → fundamentals endpoint ──
-      const grade = sig?.fundamentalGrade ?? fund?.grade;
+      // ── Health Grade: signal → fundamentals endpoint (also check raw) ──
+      const grade = sig?.fundamentalGrade ?? fund?.grade ?? fundRaw?.grade;
       if (grade && grade !== 'N/A') setHealthGrade(grade);
 
-      // ── P/E Ratio: signal → fundamentals.ratios → price.trailingPE → price.forwardPE ──
-      const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio ?? priceData?.trailingPE ?? priceData?.forwardPE;
+      // ── P/E Ratio: signal → fundamentals.ratios → raw fundamentals → price endpoint ──
+      const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio
+        ?? fundRaw?.ratios?.peRatio ?? priceData?.trailingPE ?? priceData?.forwardPE;
       if (pe > 0) setPeRatio(safeNum(pe));
 
       // ── Fair Value Upside: signal → fundamentals.dcf.upside ──
@@ -174,13 +186,14 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const f = sig?.fScore ?? fund?.fScore?.value;
       if (f != null) setFScoreVal(safeNum(f));
 
-      // ── Dimension Scores: signal → factors endpoint ──
-      const dims = sig?.dimensionScores ?? factors?.dimensionScores;
-      if (dims && typeof dims === 'object') setDimensionScores(dims);
+      // ── Dimension Scores: signal → factors endpoint (also check raw for partial) ──
+      const factorsRaw = factorR.status === 'fulfilled' ? factorR.value : null;
+      const dims = sig?.dimensionScores ?? factors?.dimensionScores ?? factorsRaw?.dimensionScores;
+      if (dims && typeof dims === 'object' && Object.keys(dims).length > 0) setDimensionScores(dims);
 
       // ── Factor pills: signal → factors endpoint → feedItem.topFactors ──
-      const pos = sig?.topPositive ?? factors?.topPositive ?? [];
-      const neg = sig?.topNegative ?? factors?.topNegative ?? [];
+      const pos = sig?.topPositive ?? factors?.topPositive ?? factorsRaw?.topPositive ?? [];
+      const neg = sig?.topNegative ?? factors?.topNegative ?? factorsRaw?.topNegative ?? [];
       const allFactors = [
         ...pos.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
         ...neg.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
@@ -189,6 +202,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
       // ── Insight from signal ──
       if (sig?.insight) setEnrichedInsight(sig.insight);
+      else if (sigRaw?.insight) setEnrichedInsight(sigRaw.insight);
 
       // ── AI Agent Insight ──
       if (insightData) {

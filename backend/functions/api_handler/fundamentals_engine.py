@@ -830,19 +830,99 @@ def compute_health_grade(z_score, f_score, m_score, ratios):
 # ─── Main Entry Point ───
 
 
+def _build_fallback_from_finnhub(ticker, market_cap=None, beta=1.0, current_price=None):
+    """Build a partial fundamental analysis from Finnhub metrics when SEC EDGAR fails.
+
+    This ensures every ticker gets *some* fundamental data (P/E, margins, etc.)
+    even if SEC filings are unavailable or use non-standard XBRL concepts.
+    """
+    try:
+        import finnhub_client
+        financials = finnhub_client.get_basic_financials(ticker)
+        if not financials:
+            return None
+
+        ratios = {}
+        pe = financials.get("peRatio")
+        if pe is not None:
+            ratios["peRatio"] = round(float(pe), 2)
+        fwd_pe = financials.get("forwardPE")
+        if fwd_pe is not None:
+            ratios["forwardPE"] = round(float(fwd_pe), 2)
+        roe = financials.get("roeTTM")
+        if roe is not None:
+            ratios["roe"] = round(float(roe), 4)
+        de = financials.get("debtEquity")
+        if de is not None:
+            ratios["debtToEquity"] = round(float(de), 2)
+        margin = financials.get("profitMargin")
+        if margin is not None:
+            ratios["netProfitMargin"] = round(float(margin), 4)
+
+        if not ratios:
+            return None
+
+        # Derive a simple grade from available ratios
+        grade_score = 5  # Start neutral
+        if ratios.get("roe") is not None:
+            if ratios["roe"] > 0.15:
+                grade_score += 2
+            elif ratios["roe"] > 0.08:
+                grade_score += 1
+            elif ratios["roe"] < 0:
+                grade_score -= 2
+        if ratios.get("debtToEquity") is not None:
+            if ratios["debtToEquity"] < 0.5:
+                grade_score += 1
+            elif ratios["debtToEquity"] > 2.0:
+                grade_score -= 1
+        if ratios.get("netProfitMargin") is not None:
+            if ratios["netProfitMargin"] > 0.15:
+                grade_score += 1
+            elif ratios["netProfitMargin"] < 0:
+                grade_score -= 2
+        grade_score = max(0, min(10, grade_score))
+
+        grade_map = {10: "A", 9: "A", 8: "A", 7: "B", 6: "B", 5: "C", 4: "C", 3: "D", 2: "D", 1: "F", 0: "F"}
+        grade = grade_map.get(grade_score, "C")
+
+        return {
+            "ticker": ticker,
+            "grade": grade,
+            "gradeScore": grade_score,
+            "ratios": ratios,
+            "zScore": None,
+            "fScore": None,
+            "mScore": None,
+            "dcf": None,
+            "years": [],
+            "source": "finnhub_fallback",
+            "analyzedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.warning(f"[Fundamentals] Finnhub fallback failed for {ticker}: {e}")
+        return None
+
+
 def analyze(ticker, market_cap=None, beta=1.0, current_price=None, shares_outstanding=None):
     """Run full fundamental analysis for a ticker.
 
     Returns complete analysis package: grade, zScore, fScore, mScore, dcf, ratios.
+    Falls back to Finnhub basic financials when SEC EDGAR data is unavailable.
     """
     logger.info(f"[Fundamentals] Analyzing {ticker}")
 
     facts = _get_company_facts(ticker)
-    if not facts:
-        return {"ticker": ticker, "error": "Could not fetch SEC EDGAR data"}
+    financials = None
+    if facts:
+        financials = extract_financials(ticker, facts)
 
-    financials = extract_financials(ticker, facts)
+    # If SEC EDGAR data is missing, fall back to Finnhub-derived metrics
     if not financials:
+        logger.info(f"[Fundamentals] SEC EDGAR unavailable for {ticker}, trying Finnhub fallback")
+        fallback = _build_fallback_from_finnhub(ticker, market_cap, beta, current_price)
+        if fallback:
+            return fallback
         return {"ticker": ticker, "error": "Insufficient financial data"}
 
     z_score = compute_z_score(financials, market_cap)

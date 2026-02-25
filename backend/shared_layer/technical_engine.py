@@ -28,8 +28,10 @@ def compute_indicators(candles: list[dict]) -> dict:
 
     Returns:
         Dict with all indicator values and signal summaries.
+        Gracefully degrades when fewer candles are available — computes
+        whichever indicators the data supports instead of returning an error.
     """
-    if len(candles) < 50:
+    if not candles or len(candles) < 5:
         return {"error": "Insufficient data", "indicatorCount": 0}
 
     df = pd.DataFrame(candles)
@@ -41,57 +43,98 @@ def compute_indicators(candles: list[dict]) -> dict:
     low = df["low"].astype(float)
     volume = df["volume"].astype(float)
     open_price = df["open"].astype(float)
+    n = len(close)
 
     result = {}
+    indicator_count = 0
 
     # ─── Trend Indicators ───
 
-    result["sma20"] = _safe_last(_sma(close, 20))
-    result["sma50"] = _safe_last(_sma(close, 50))
-    result["sma200"] = _safe_last(_sma(close, 200))
-    result["ema12"] = _safe_last(_ema(close, 12))
-    result["ema26"] = _safe_last(_ema(close, 26))
+    if n >= 20:
+        result["sma20"] = _safe_last(_sma(close, 20))
+        indicator_count += 1
+    else:
+        result["sma20"] = None
 
-    macd_line, signal_line, histogram = _macd(close, 12, 26, 9)
-    result["macd"] = {
-        "value": _safe_last(macd_line),
-        "signal": _safe_last(signal_line),
-        "histogram": _safe_last(histogram),
-    }
+    if n >= 50:
+        result["sma50"] = _safe_last(_sma(close, 50))
+        indicator_count += 1
+    else:
+        result["sma50"] = None
 
-    result["adx"] = _safe_last(_adx(high, low, close, 14))
+    if n >= 200:
+        result["sma200"] = _safe_last(_sma(close, 200))
+        indicator_count += 1
+    else:
+        result["sma200"] = None
+
+    if n >= 26:
+        result["ema12"] = _safe_last(_ema(close, 12))
+        result["ema26"] = _safe_last(_ema(close, 26))
+        macd_line, signal_line, histogram = _macd(close, 12, 26, 9)
+        result["macd"] = {
+            "value": _safe_last(macd_line),
+            "signal": _safe_last(signal_line),
+            "histogram": _safe_last(histogram),
+        }
+        indicator_count += 3
+    else:
+        result["ema12"] = None
+        result["ema26"] = None
+        result["macd"] = {"value": None, "signal": None, "histogram": None}
+
+    if n >= 14:
+        result["adx"] = _safe_last(_adx(high, low, close, 14))
+        indicator_count += 1
+    else:
+        result["adx"] = None
 
     # ─── Momentum Indicators ───
 
-    result["rsi"] = _safe_last(_rsi(close, 14))
-
-    stoch_k, stoch_d = _stochastic(high, low, close, 14, 3, 3)
-    result["stochastic"] = {
-        "k": _safe_last(stoch_k),
-        "d": _safe_last(stoch_d),
-    }
-
-    result["williamsR"] = _safe_last(_williams_r(high, low, close, 14))
+    if n >= 14:
+        result["rsi"] = _safe_last(_rsi(close, 14))
+        stoch_k, stoch_d = _stochastic(high, low, close, 14, 3, 3)
+        result["stochastic"] = {
+            "k": _safe_last(stoch_k),
+            "d": _safe_last(stoch_d),
+        }
+        result["williamsR"] = _safe_last(_williams_r(high, low, close, 14))
+        indicator_count += 3
+    else:
+        result["rsi"] = None
+        result["stochastic"] = {"k": None, "d": None}
+        result["williamsR"] = None
 
     # ─── Volatility Indicators ───
 
-    bb_upper, bb_middle, bb_lower = _bollinger_bands(close, 20, 2)
-    result["bollingerBands"] = {
-        "upper": _safe_last(bb_upper),
-        "middle": _safe_last(bb_middle),
-        "lower": _safe_last(bb_lower),
-    }
+    if n >= 20:
+        bb_upper, bb_middle, bb_lower = _bollinger_bands(close, 20, 2)
+        result["bollingerBands"] = {
+            "upper": _safe_last(bb_upper),
+            "middle": _safe_last(bb_middle),
+            "lower": _safe_last(bb_lower),
+        }
+        indicator_count += 1
+    else:
+        result["bollingerBands"] = {"upper": None, "middle": None, "lower": None}
 
-    result["atr"] = _safe_last(_atr(high, low, close, 14))
+    if n >= 14:
+        result["atr"] = _safe_last(_atr(high, low, close, 14))
+        indicator_count += 1
+    else:
+        result["atr"] = None
 
     # ─── Volume Indicators ───
 
     result["obv"] = _safe_last(_obv(close, volume))
     result["vwap"] = _safe_last(_vwap(high, low, close, volume))
+    indicator_count += 2
 
     # ─── Pattern: Fibonacci Retracement ───
 
-    result["fibonacci"] = _fibonacci_levels(high, low, window=60)
+    window = min(60, n)
+    result["fibonacci"] = _fibonacci_levels(high, low, window=window)
+    indicator_count += 1
 
     # ─── Current price for context ───
     current_price = float(close.iloc[-1])
@@ -103,7 +146,7 @@ def compute_indicators(candles: list[dict]) -> dict:
     # ─── Technical Score (1-10) ───
     result["technicalScore"] = _compute_technical_score(result, current_price)
 
-    result["indicatorCount"] = 15
+    result["indicatorCount"] = indicator_count
 
     return result
 

@@ -1152,11 +1152,11 @@ def _handle_factors(method, ticker):
     except Exception:
         pass
 
-    if not technicals_data or not technicals_data.get("rsi"):
+    if not technicals_data or technicals_data.get("error"):
         # Fetch live candles and compute technical indicators
         try:
             candles = finnhub_client.get_candles(ticker, resolution="D")
-            if candles and len(candles) >= 50:
+            if candles and len(candles) >= 5:
                 technicals_data = technical_engine.compute_indicators(candles)
                 # Cache for next time
                 try:
@@ -1180,7 +1180,7 @@ def _handle_factors(method, ticker):
     except Exception:
         pass
 
-    if not fundamentals_data or not fundamentals_data.get("zScore"):
+    if not fundamentals_data or fundamentals_data.get("error"):
         # Fetch live fundamental analysis
         try:
             market_cap = None
