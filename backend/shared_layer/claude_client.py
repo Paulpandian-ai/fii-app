@@ -231,6 +231,120 @@ def generate_reasoning(
         return f"Analysis for {ticker} is currently being processed."
 
 
+# ─── News-Aware Reasoning Generation ───
+
+REASONING_WITH_NEWS_PROMPT = """Write an 80-120 word stock analysis for retail investors.
+
+Ticker: {ticker}
+Company: {company_name}
+FII Score: {score}/10
+Signal: {signal}
+Top positives: {positives}
+Top negatives: {negatives}
+{news_context}
+Be punchy and specific. Mention specific companies, data points, and numbers.
+Write in present tense. No disclaimers, no "this is not financial advice".
+Incorporate the recent news into your analysis where relevant.
+Start with the most important insight. End with a forward-looking statement."""
+
+
+def generate_reasoning_with_news(
+    ticker: str,
+    company_name: str,
+    score: float,
+    signal: str,
+    factor_details: dict,
+    recent_news: list[dict] | None = None,
+) -> str:
+    """Generate an 80-120 word analysis incorporating recent news.
+
+    Falls back to the standard reasoning prompt when no news is available.
+
+    Args:
+        ticker: Stock ticker symbol.
+        company_name: Full company name.
+        score: Composite score (1-10).
+        signal: BUY/HOLD/SELL.
+        factor_details: All 18 factor scores with reasons.
+        recent_news: List of dicts with headline, date, impact, direction, summary.
+
+    Returns:
+        Reasoning text (80-120 words).
+    """
+    if not recent_news:
+        return generate_reasoning(
+            ticker=ticker,
+            company_name=company_name,
+            score=score,
+            signal=signal,
+            factor_details=factor_details,
+        )
+
+    try:
+        client = _get_client()
+
+        # Extract top positives and negatives
+        sorted_factors = sorted(
+            factor_details.items(),
+            key=lambda x: x[1]["score"],
+            reverse=True,
+        )
+        positives = [
+            f"{fid}: {d['reason']} (score: {d['score']})"
+            for fid, d in sorted_factors[:3]
+            if d["score"] > 0
+        ]
+        negatives = [
+            f"{fid}: {d['reason']} (score: {d['score']})"
+            for fid, d in sorted_factors[-3:]
+            if d["score"] < 0
+        ]
+
+        # Build news context block
+        news_lines = []
+        for n in recent_news[:5]:
+            line = f"- {n.get('date', 'recent')}: {n.get('headline', '')}"
+            if n.get("summary"):
+                line += f" — {n['summary']}"
+            if n.get("impact"):
+                line += f" [{n['impact']} impact, {n.get('direction', 'neutral')}]"
+            news_lines.append(line)
+        news_context = (
+            "\nRecent news for " + ticker + ":\n" + "\n".join(news_lines) + "\n"
+            if news_lines
+            else ""
+        )
+
+        prompt = REASONING_WITH_NEWS_PROMPT.format(
+            ticker=ticker,
+            company_name=company_name,
+            score=score,
+            signal=signal,
+            positives="; ".join(positives) if positives else "None identified",
+            negatives="; ".join(negatives) if negatives else "None identified",
+            news_context=news_context,
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        return message.content[0].text.strip()
+
+    except Exception as e:
+        logger.error(f"[Claude] News-aware reasoning failed for {ticker}: {e}")
+        # Fall back to standard reasoning
+        return generate_reasoning(
+            ticker=ticker,
+            company_name=company_name,
+            score=score,
+            signal=signal,
+            factor_details=factor_details,
+        )
+
+
 # ─── Alternatives Generation ───
 
 ALTERNATIVES_PROMPT = """Given that {ticker} ({company_name}) has a {signal} signal with a score of {score}/10,

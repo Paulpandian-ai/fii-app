@@ -69,6 +69,7 @@ import patent_engine
 import contract_engine
 import fda_engine
 import stress_engine
+import claude_client
 
 
 def lambda_handler(event, context):
@@ -407,9 +408,16 @@ def _handle_market_movers(method):
 # ─── Signal Endpoints ───
 
 def _handle_signal(method, ticker, user_id):
-    """GET /signals/<ticker> — Return full signal from DynamoDB + S3."""
+    """GET /signals/<ticker> — Return full signal from DynamoDB + S3.
+
+    Includes 24-hour cache staleness check: if the cached analysis is older
+    than 24 hours *or* newer INSIGHT#/EVENT# records exist, regenerate the
+    reasoning with recent news context before returning.
+    """
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
+
+    from datetime import datetime, timezone, timedelta
 
     # Try DynamoDB first for summary
     summary = db.get_item(f"SIGNAL#{ticker}", "LATEST")
@@ -454,21 +462,152 @@ def _handle_signal(method, ticker, user_id):
         except (ValueError, TypeError):
             pass
 
-    # Add signal freshness indicator
-    from datetime import datetime, timezone
+    # ── Cache staleness check ──
+    now = datetime.now(timezone.utc)
     last_updated = result.get("lastUpdated") or result.get("analyzedAt") or ""
     freshness = "fresh"
     freshness_days = 0
+    analysis_ts = None  # parsed timestamp of the cached analysis
+
     if last_updated:
         try:
-            ts = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
-            freshness_days = (datetime.now(timezone.utc) - ts).days
+            analysis_ts = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+            freshness_days = (now - analysis_ts).days
             if freshness_days > 30:
                 freshness = "stale"
             elif freshness_days > 7:
                 freshness = "aging"
         except Exception:
             pass
+
+    # Determine if we should regenerate the reasoning:
+    # 1) Analysis older than 24 hours
+    # 2) Newer INSIGHT# or EVENT# records exist since last analysis
+    needs_refresh = False
+    recent_news_items = []
+
+    analysis_age_hours = (
+        (now - analysis_ts).total_seconds() / 3600
+        if analysis_ts
+        else float("inf")
+    )
+
+    if analysis_age_hours > 24:
+        needs_refresh = True
+
+    # Check for newer insights/events that post-date the cached analysis
+    cutoff_iso = (
+        analysis_ts.isoformat() if analysis_ts else (now - timedelta(days=7)).isoformat()
+    )
+    try:
+        recent_insights = db.query(
+            f"INSIGHT#{ticker}", limit=5, scan_forward=False,
+        )
+        for ins in recent_insights:
+            ins_ts_str = ins.get("SK", "")
+            if ins_ts_str > cutoff_iso:
+                needs_refresh = True
+                break
+    except Exception:
+        pass
+
+    try:
+        recent_events = db.query(
+            f"EVENT#{ticker}", limit=5, scan_forward=False,
+        )
+        for ev in recent_events:
+            ev_ts_str = ev.get("timestamp", "")
+            if ev_ts_str > cutoff_iso:
+                needs_refresh = True
+                # Collect news headlines for the Claude prompt
+                headline = ev.get("headline", "")
+                if headline:
+                    recent_news_items.append({
+                        "headline": headline,
+                        "date": ev.get("timestamp", "")[:10],
+                        "impact": ev.get("impact", ""),
+                        "direction": ev.get("direction", ""),
+                        "summary": ev.get("summary", ""),
+                    })
+    except Exception:
+        pass
+
+    # Also gather last-7-day events even if not triggering refresh
+    # (so that when we *do* refresh, we have the full context).
+    if needs_refresh and not recent_news_items:
+        try:
+            seven_days_ago = (now - timedelta(days=7)).isoformat()
+            all_events = db.query(
+                f"EVENT#{ticker}", limit=10, scan_forward=False,
+            )
+            for ev in all_events:
+                headline = ev.get("headline", "")
+                if headline and ev.get("timestamp", "") >= seven_days_ago:
+                    recent_news_items.append({
+                        "headline": headline,
+                        "date": ev.get("timestamp", "")[:10],
+                        "impact": ev.get("impact", ""),
+                        "direction": ev.get("direction", ""),
+                        "summary": ev.get("summary", ""),
+                    })
+        except Exception:
+            pass
+
+    # ── Regenerate reasoning with news context if stale ──
+    if needs_refresh:
+        try:
+            factor_details = {}
+            # Try to load factor details from SIGNAL#FACTORS or S3
+            factor_record = db.get_item(f"SIGNAL#{ticker}", "FACTORS")
+            if factor_record:
+                factor_details = json.loads(factor_record.get("factorDetails", "{}"))
+            elif result.get("factorDetails"):
+                factor_details = result["factorDetails"]
+
+            if factor_details:
+                company_name = result.get("companyName", ticker)
+                score = result.get("compositeScore", 5.0)
+                signal = result.get("signal", "HOLD")
+
+                reasoning = claude_client.generate_reasoning_with_news(
+                    ticker=ticker,
+                    company_name=company_name,
+                    score=score,
+                    signal=signal,
+                    factor_details=factor_details,
+                    recent_news=recent_news_items,
+                )
+
+                if reasoning and len(reasoning) > 20:
+                    result["reasoning"] = reasoning
+                    result["insight"] = reasoning[:200] if len(reasoning) > 200 else reasoning
+
+                    # Persist the refreshed analysis back to DynamoDB + S3
+                    refreshed_at = now.isoformat()
+                    result["lastUpdated"] = refreshed_at
+                    freshness = "fresh"
+                    freshness_days = 0
+
+                    db.update_item(
+                        f"SIGNAL#{ticker}", "LATEST",
+                        {
+                            "insight": result["insight"],
+                            "reasoning": reasoning,
+                            "lastUpdated": refreshed_at,
+                        },
+                    )
+
+                    # Update S3 full signal too
+                    try:
+                        s3.write_json(f"signals/{ticker}.json", result)
+                    except Exception:
+                        pass
+
+                    print(f"[SignalRefresh] Refreshed reasoning for {ticker} "
+                          f"(age={analysis_age_hours:.1f}h, news={len(recent_news_items)})")
+        except Exception as e:
+            print(f"[SignalRefresh] Failed to refresh {ticker}: {e}")
+
     result["freshness"] = freshness
     result["freshnessDays"] = freshness_days
     result["dataSources"] = ["SEC EDGAR", "Federal Reserve FRED", "Finnhub", "Claude AI"]
