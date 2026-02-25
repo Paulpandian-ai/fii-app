@@ -1,0 +1,1 @@
+{"httpMethod":"GET","path":"/screener","queryStringParameters":{"signal":"BUY,HOLD,SELL","limit":"50"}}
