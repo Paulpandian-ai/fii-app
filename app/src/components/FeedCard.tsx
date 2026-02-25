@@ -6,7 +6,7 @@ import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
-import { getPrice, getTechnicals, getFundamentals, getInsightsForTicker } from '../services/api';
+import { getPrice, getSignalDetail, getInsightsForTicker } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -46,8 +46,23 @@ const formatTimeAgo = (isoDate: string | undefined | null): string => {
   return `Updated ${days}d ago`;
 };
 
+const formatMarketCap = (cap: number): string => {
+  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(1)}T`;
+  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(1)}B`;
+  if (cap >= 1e6) return `$${(cap / 1e6).toFixed(0)}M`;
+  return '--';
+};
+
+// Dimension label & color map
+const DIMENSIONS: { key: string; label: string; icon: string; color: string }[] = [
+  { key: 'technical', label: 'Technical', icon: 'analytics', color: '#60A5FA' },
+  { key: 'fundamental', label: 'Fundamental', icon: 'document-text', color: '#34D399' },
+  { key: 'sentiment', label: 'Sentiment', icon: 'chatbubbles', color: '#FBBF24' },
+  { key: 'macroGeo', label: 'Macro/Geo', icon: 'globe', color: '#F97316' },
+  { key: 'supplyChain', label: 'Supply Chain', icon: 'git-network', color: '#A78BFA' },
+];
+
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
-  const topFactors = Array.isArray(item.topFactors) ? item.topFactors.slice(0, 3) : [];
   const score = safeNum(item.compositeScore);
 
   const ownedShares = usePortfolioStore((s) => s.getSharesForTicker)(item.ticker);
@@ -64,78 +79,148 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     }
   }, [isBookmarked, item.ticker, item.companyName, activeWatchlistId, addTicker, removeTicker]);
 
+  // ─── Price data ───
   const [price, setPrice] = useState<number | null>(null);
   const [changePercent, setChangePercent] = useState<number>(0);
   const [change, setChange] = useState<number>(0);
+  const [marketCap, setMarketCap] = useState<number>(0);
+  const [w52Low, setW52Low] = useState<number | null>(null);
+  const [w52High, setW52High] = useState<number | null>(null);
+  const [sector, setSector] = useState<string | null>(null);
+
+  // ─── Signal-enriched data (single call) ───
   const [techScore, setTechScore] = useState<number | null>(null);
   const [techTrend, setTechTrend] = useState<string | null>(null);
+  const [rsi, setRsi] = useState<number | null>(null);
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
   const [peRatio, setPeRatio] = useState<number | null>(null);
-  const [dataLoaded, setDataLoaded] = useState(false);
+  const [fairValueUpside, setFairValueUpside] = useState<number | null>(null);
+  const [zScore, setZScore] = useState<number | null>(null);
+  const [fScoreVal, setFScoreVal] = useState<number | null>(null);
+  const [dimensionScores, setDimensionScores] = useState<Record<string, number>>({});
+  const [enrichedFactors, setEnrichedFactors] = useState<{ name: string; score: number }[]>([]);
+  const [enrichedInsight, setEnrichedInsight] = useState<string | null>(null);
+
+  // ─── AI Agent insight ───
   const [aiHeadline, setAiHeadline] = useState<string | null>(null);
   const [aiAction, setAiAction] = useState<string | null>(null);
-  const [aiUrgency, setAiUrgency] = useState<number | null>(null);
+
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     Promise.allSettled([
       getPrice(item.ticker),
-      getTechnicals(item.ticker),
-      getFundamentals(item.ticker),
+      getSignalDetail(item.ticker),
       getInsightsForTicker(item.ticker, 1),
-    ]).then(([priceResult, techResult, healthResult, insightResult]) => {
+    ]).then(([priceResult, signalResult, insightResult]) => {
       if (!mounted) return;
-      // Price
+
+      // ── Price ──
       if (priceResult.status === 'fulfilled' && priceResult.value) {
         const d = priceResult.value;
         const p = typeof d.price === 'number' && Number.isFinite(d.price) ? d.price : null;
         setPrice(p);
         setChange(safeNum(d.change));
         setChangePercent(safeNum(d.changePercent || d.change_percent));
+        if (d.marketCap > 0) setMarketCap(d.marketCap);
+        if (d.fiftyTwoWeekLow > 0) setW52Low(d.fiftyTwoWeekLow);
+        if (d.fiftyTwoWeekHigh > 0) setW52High(d.fiftyTwoWeekHigh);
+        if (d.sector) setSector(d.sector);
       }
-      // Technicals
-      if (techResult.status === 'fulfilled' && techResult.value) {
-        const d = techResult.value;
-        if (d.indicatorCount > 0) {
-          setTechScore(safeNum(d.technicalScore));
-          setTechTrend(d.signals?.trend || null);
+
+      // ── Enriched signal (technicals + fundamentals + factors in one) ──
+      if (signalResult.status === 'fulfilled' && signalResult.value) {
+        const s = signalResult.value;
+
+        // Technicals
+        const ta = s.technicalAnalysis || {};
+        if (s.technicalScore != null) setTechScore(safeNum(s.technicalScore));
+        else if (ta.technicalScore != null) setTechScore(safeNum(ta.technicalScore));
+        if (ta.signals?.trend) setTechTrend(ta.signals.trend);
+        if (ta.rsi != null) setRsi(safeNum(ta.rsi));
+
+        // Fundamentals
+        if (s.fundamentalGrade && s.fundamentalGrade !== 'N/A') setHealthGrade(s.fundamentalGrade);
+        const pe = s.peRatio || s.ratios?.peRatio;
+        if (pe > 0) setPeRatio(safeNum(pe));
+        if (s.fairValueUpside != null) setFairValueUpside(safeNum(s.fairValueUpside));
+        if (s.zScore != null) setZScore(safeNum(s.zScore));
+        if (s.fScore != null) setFScoreVal(safeNum(s.fScore));
+
+        // Dimension scores
+        if (s.dimensionScores && typeof s.dimensionScores === 'object') {
+          setDimensionScores(s.dimensionScores);
         }
+
+        // Top factors (from enriched signal)
+        const pos = s.topPositive || [];
+        const neg = s.topNegative || [];
+        const allFactors = [
+          ...pos.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
+          ...neg.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
+        ].filter((f) => f.name).slice(0, 4);
+        if (allFactors.length > 0) setEnrichedFactors(allFactors);
+
+        // Insight from signal
+        if (s.insight) setEnrichedInsight(s.insight);
       }
-      // Fundamentals
-      if (healthResult.status === 'fulfilled' && healthResult.value) {
-        const d = healthResult.value;
-        if (d.grade && d.grade !== 'N/A') setHealthGrade(d.grade);
-        if (d.peRatio || d.analysis?.peRatio) setPeRatio(safeNum(d.peRatio || d.analysis?.peRatio));
-      }
-      // AI Agent Insight
+
+      // ── AI Agent Insight ──
       if (insightResult.status === 'fulfilled' && insightResult.value) {
         const insights = insightResult.value.insights || [];
         if (insights.length > 0) {
           const latest = insights[0];
           setAiHeadline(latest.headline || null);
           setAiAction(latest.action || null);
-          setAiUrgency(typeof latest.urgency === 'number' ? latest.urgency : null);
         }
       }
+
       setDataLoaded(true);
     });
     return () => { mounted = false; };
   }, [item.ticker]);
 
   const confidence = item.confidence;
-  const signalColor = SIGNAL_COLORS[item.signal] || '#F59E0B';
   const isPositive = change >= 0;
 
-  // Derive health grade color
+  // Derived colors
   const gradeColor = healthGrade
     ? (healthGrade.startsWith('A') || healthGrade.startsWith('B')
       ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444')
     : 'rgba(255,255,255,0.3)';
 
-  // Tech trend color
   const trendColor = techTrend
     ? (techTrend.includes('bullish') ? '#10B981' : techTrend.includes('bearish') ? '#EF4444' : '#94A3B8')
     : 'rgba(255,255,255,0.3)';
+
+  // 52-week range position (0-1)
+  const rangePosition = (price != null && w52Low != null && w52High != null && w52High > w52Low)
+    ? Math.max(0, Math.min(1, (price - w52Low) / (w52High - w52Low)))
+    : null;
+
+  // RSI color
+  const rsiColor = rsi != null
+    ? (rsi >= 70 ? '#EF4444' : rsi <= 30 ? '#10B981' : '#94A3B8')
+    : 'rgba(255,255,255,0.3)';
+
+  // Fair value color
+  const fvColor = fairValueUpside != null
+    ? (fairValueUpside > 10 ? '#10B981' : fairValueUpside < -10 ? '#EF4444' : '#F59E0B')
+    : 'rgba(255,255,255,0.3)';
+
+  // Z-Score color
+  const zColor = zScore != null
+    ? (zScore > 2.99 ? '#10B981' : zScore < 1.81 ? '#EF4444' : '#F59E0B')
+    : 'rgba(255,255,255,0.3)';
+
+  // Best factors to display
+  const displayFactors = enrichedFactors.length > 0
+    ? enrichedFactors
+    : (Array.isArray(item.topFactors) ? item.topFactors.slice(0, 4) : []);
+
+  // Best insight text
+  const insightText = aiHeadline || enrichedInsight || item.insight || '';
 
   return (
     <TouchableOpacity
@@ -143,7 +228,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       onPress={onPress}
       style={styles.cardWrapper}
       accessibilityRole="button"
-      accessibilityLabel={`View ${item.signal} signal details for ${item.ticker}, ${item.companyName}, score ${score.toFixed(1)}`}
+      accessibilityLabel={`View ${item.signal} signal for ${item.ticker}`}
     >
       <LinearGradient
         colors={['#0D1B3E', '#1F3864']}
@@ -151,7 +236,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
       >
-        {/* ── Top Row: bookmark + timestamp ── */}
+        {/* ── Top Row: bookmark + sector + timestamp ── */}
         <View style={styles.topRow}>
           <TouchableOpacity style={styles.bookmarkBtn} onPress={toggleBookmark} accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}>
             <Ionicons
@@ -160,19 +245,26 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
               color={isBookmarked ? '#60A5FA' : 'rgba(255,255,255,0.4)'}
             />
           </TouchableOpacity>
-          <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
+          <View style={styles.topRowRight}>
+            {sector && (
+              <View style={styles.sectorPill}>
+                <Text style={styles.sectorText} numberOfLines={1}>{sector}</Text>
+              </View>
+            )}
+            <Text style={styles.timestamp}>{formatTimeAgo(item.updatedAt)}</Text>
+          </View>
         </View>
 
         {/* ── Score Dial ── */}
         <View style={styles.scoreContainer}>
-          <ScoreRing score={score} size={120} />
+          <ScoreRing score={score} size={110} />
         </View>
 
         {/* ── Ticker & Company ── */}
         <Text style={styles.ticker}>{item.ticker}</Text>
         <Text style={styles.companyName} numberOfLines={1}>{item.companyName}</Text>
 
-        {/* ── Portfolio badge (conditional but doesn't affect layout) ── */}
+        {/* ── Portfolio badge ── */}
         {ownedShares > 0 && (
           <View style={styles.ownedBadge}>
             <Ionicons name="briefcase" size={11} color="#60A5FA" />
@@ -180,22 +272,34 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         )}
 
-        {/* ── Price Row (ALWAYS shown) ── */}
+        {/* ── Price Row + Market Cap ── */}
         <View style={styles.priceRow}>
           <Text style={styles.price}>
             {price != null ? `$${price.toFixed(2)}` : '--'}
           </Text>
           <View style={[styles.changePill, { backgroundColor: isPositive ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }]}>
-            <Ionicons
-              name={isPositive ? 'caret-up' : 'caret-down'}
-              size={12}
-              color={isPositive ? '#10B981' : '#EF4444'}
-            />
+            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={isPositive ? '#10B981' : '#EF4444'} />
             <Text style={[styles.changeText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
               {dataLoaded ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '--'}
             </Text>
           </View>
+          {marketCap > 0 && (
+            <Text style={styles.marketCapText}>{formatMarketCap(marketCap)}</Text>
+          )}
         </View>
+
+        {/* ── 52-Week Range Bar ── */}
+        {rangePosition != null && (
+          <View style={styles.rangeContainer}>
+            <Text style={styles.rangeLabel}>52W</Text>
+            <Text style={styles.rangeLow}>${w52Low!.toFixed(0)}</Text>
+            <View style={styles.rangeBarBg}>
+              <View style={[styles.rangeBarFill, { width: `${rangePosition * 100}%` }]} />
+              <View style={[styles.rangeMarker, { left: `${rangePosition * 100}%` }]} />
+            </View>
+            <Text style={styles.rangeHigh}>${w52High!.toFixed(0)}</Text>
+          </View>
+        )}
 
         {/* ── Signal Badge + Confidence ── */}
         <View style={styles.signalRow}>
@@ -209,87 +313,116 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           )}
         </View>
 
-        {/* ── Metrics Row (ALWAYS shown — 3 columns) ── */}
-        <View style={styles.metricsRow}>
-          <View style={styles.metricItem}>
-            <Ionicons name="analytics-outline" size={14} color="#60A5FA" />
-            <Text style={styles.metricValue}>
-              {techScore != null ? techScore.toFixed(1) : '--'}
-            </Text>
-            <Text style={styles.metricLabel}>Technical</Text>
-            {techTrend && (
-              <Text style={[styles.metricSub, { color: trendColor }]} numberOfLines={1}>
-                {techTrend}
+        {/* ── Metrics Grid (2 rows x 3 columns) ── */}
+        <View style={styles.metricsGrid}>
+          {/* Row 1 */}
+          <View style={styles.metricsRow}>
+            <View style={styles.metricItem}>
+              <Ionicons name="analytics-outline" size={13} color="#60A5FA" />
+              <Text style={styles.metricValue}>{techScore != null ? techScore.toFixed(1) : '--'}</Text>
+              <Text style={styles.metricLabel}>Technical</Text>
+              {techTrend && <Text style={[styles.metricSub, { color: trendColor }]} numberOfLines={1}>{techTrend}</Text>}
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <Ionicons name="shield-checkmark-outline" size={13} color={gradeColor} />
+              <Text style={[styles.metricValue, { color: gradeColor }]}>{healthGrade || '--'}</Text>
+              <Text style={styles.metricLabel}>Health</Text>
+              {fScoreVal != null && <Text style={styles.metricSub}>F-Score {fScoreVal}/9</Text>}
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <Ionicons name="bar-chart-outline" size={13} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.metricValue}>{peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}</Text>
+              <Text style={styles.metricLabel}>P/E</Text>
+            </View>
+          </View>
+          {/* Divider */}
+          <View style={styles.metricsRowDivider} />
+          {/* Row 2 */}
+          <View style={styles.metricsRow}>
+            <View style={styles.metricItem}>
+              <Ionicons name="speedometer-outline" size={13} color={rsiColor} />
+              <Text style={[styles.metricValue, { color: rsiColor }]}>{rsi != null ? rsi.toFixed(0) : '--'}</Text>
+              <Text style={styles.metricLabel}>RSI</Text>
+              {rsi != null && <Text style={[styles.metricSub, { color: rsiColor }]}>{rsi >= 70 ? 'overbought' : rsi <= 30 ? 'oversold' : 'neutral'}</Text>}
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <Ionicons name="trending-up-outline" size={13} color={fvColor} />
+              <Text style={[styles.metricValue, { color: fvColor }]}>
+                {fairValueUpside != null ? `${fairValueUpside > 0 ? '+' : ''}${fairValueUpside.toFixed(0)}%` : '--'}
               </Text>
-            )}
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            <Ionicons name="shield-checkmark-outline" size={14} color={gradeColor} />
-            <Text style={[styles.metricValue, { color: gradeColor }]}>
-              {healthGrade || '--'}
-            </Text>
-            <Text style={styles.metricLabel}>Health</Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            <Ionicons name="bar-chart-outline" size={14} color="rgba(255,255,255,0.5)" />
-            <Text style={styles.metricValue}>
-              {peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}
-            </Text>
-            <Text style={styles.metricLabel}>P/E</Text>
+              <Text style={styles.metricLabel}>Fair Value</Text>
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metricItem}>
+              <Ionicons name="pulse-outline" size={13} color={zColor} />
+              <Text style={[styles.metricValue, { color: zColor }]}>{zScore != null ? zScore.toFixed(1) : '--'}</Text>
+              <Text style={styles.metricLabel}>Z-Score</Text>
+              {zScore != null && <Text style={[styles.metricSub, { color: zColor }]}>{zScore > 2.99 ? 'safe' : zScore < 1.81 ? 'distress' : 'grey zone'}</Text>}
+            </View>
           </View>
         </View>
 
-        {/* ── AI Insight (ALWAYS shown — prefer live agent insight) ── */}
+        {/* ── Dimension Score Bars ── */}
+        {Object.keys(dimensionScores).length > 0 && (
+          <View style={styles.dimensionContainer}>
+            {DIMENSIONS.map((dim) => {
+              const val = dimensionScores[dim.key];
+              if (val == null) return null;
+              const pct = Math.max(0, Math.min(100, (val / 10) * 100));
+              return (
+                <View key={dim.key} style={styles.dimensionRow}>
+                  <Ionicons name={dim.icon as any} size={10} color={dim.color} />
+                  <Text style={styles.dimensionLabel}>{dim.label}</Text>
+                  <View style={styles.dimensionBarBg}>
+                    <View style={[styles.dimensionBarFill, { width: `${pct}%`, backgroundColor: dim.color }]} />
+                  </View>
+                  <Text style={[styles.dimensionValue, { color: dim.color }]}>{val.toFixed(1)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── AI Insight ── */}
         {aiHeadline ? (
           <View style={styles.aiInsightBox}>
             <View style={styles.aiInsightHeader}>
               <Ionicons name="sparkles" size={12} color="#A78BFA" />
               <Text style={styles.aiInsightLabel}>AI AGENT</Text>
               {aiAction && (
-                <View style={[styles.aiActionPill, {
-                  backgroundColor: (SIGNAL_COLORS[aiAction] || '#F59E0B') + '20',
-                }]}>
-                  <Text style={[styles.aiActionText, {
-                    color: SIGNAL_COLORS[aiAction] || '#F59E0B',
-                  }]}>{aiAction}</Text>
+                <View style={[styles.aiActionPill, { backgroundColor: (SIGNAL_COLORS[aiAction] || '#F59E0B') + '20' }]}>
+                  <Text style={[styles.aiActionText, { color: SIGNAL_COLORS[aiAction] || '#F59E0B' }]}>{aiAction}</Text>
                 </View>
               )}
             </View>
             <Text style={styles.aiInsightHeadline} numberOfLines={2}>{aiHeadline}</Text>
           </View>
-        ) : (
-          <Text style={styles.insight} numberOfLines={2}>
-            {item.insight || `AI analysis for ${item.ticker} — tap for full details.`}
-          </Text>
-        )}
+        ) : insightText ? (
+          <Text style={styles.insight} numberOfLines={2}>{insightText}</Text>
+        ) : null}
 
-        {/* ── Top Factor Pills (ALWAYS shown — use placeholders) ── */}
-        <View style={styles.factorsRow}>
-          {topFactors.length > 0 ? (
-            topFactors.map((f, i) => {
+        {/* ── Factor Pills ── */}
+        {displayFactors.length > 0 && (
+          <View style={styles.factorsRow}>
+            {displayFactors.map((f, i) => {
               const fScore = f.score ?? 0;
-              const fColor = fScore >= 1 ? '#10B981' : fScore <= -1 ? '#EF4444' : '#F59E0B';
+              const fColor = fScore >= 0.5 ? '#10B981' : fScore <= -0.5 ? '#EF4444' : '#F59E0B';
               return (
-                <View key={f.name || `f-${i}`} style={[styles.factorPill, { borderColor: fColor + '60' }]}>
+                <View key={f.name || `f-${i}`} style={[styles.factorPill, { borderColor: fColor + '50' }]}>
                   <Text style={[styles.factorName, { color: fColor }]}>{f.name}</Text>
                   <Text style={[styles.factorScore, { color: fColor }]}>
                     {fScore >= 0 ? '+' : ''}{fScore.toFixed(1)}
                   </Text>
                 </View>
               );
-            })
-          ) : (
-            <>
-              <View style={[styles.factorPill, { borderColor: 'rgba(255,255,255,0.15)' }]}>
-                <Text style={styles.factorPlaceholder}>Tap for factors</Text>
-              </View>
-            </>
-          )}
-        </View>
+            })}
+          </View>
+        )}
 
-        {/* ── Tap for full analysis CTA ── */}
+        {/* ── CTA ── */}
         <TouchableOpacity style={styles.ctaButton} onPress={onPress} activeOpacity={0.8}>
           <Ionicons name="arrow-forward-circle" size={18} color="#60A5FA" />
           <Text style={styles.ctaText}>Tap for full analysis</Text>
@@ -318,7 +451,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
   },
 
   // Top row
@@ -331,13 +464,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  bookmarkBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
+  topRowRight: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  bookmarkBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  sectorPill: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  sectorText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
+    maxWidth: 100,
   },
   timestamp: {
     color: 'rgba(255,255,255,0.35)',
@@ -346,20 +493,18 @@ const styles = StyleSheet.create({
   },
 
   // Score
-  scoreContainer: {
-    marginBottom: 16,
-  },
+  scoreContainer: { marginBottom: 10 },
 
   // Ticker
   ticker: {
     color: '#FFFFFF',
-    fontSize: 42,
+    fontSize: 38,
     fontWeight: '800',
     letterSpacing: 2,
   },
   companyName: {
     color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '400',
     marginTop: 2,
     maxWidth: 280,
@@ -368,222 +513,172 @@ const styles = StyleSheet.create({
 
   // Owned badge
   ownedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(96,165,250,0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginTop: 6,
-    gap: 4,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 10, marginTop: 4, gap: 4,
   },
-  ownedText: {
-    color: '#60A5FA',
-    fontSize: 11,
-    fontWeight: '600',
+  ownedText: { color: '#60A5FA', fontSize: 11, fontWeight: '600' },
+
+  // Price row
+  priceRow: {
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: 8, gap: 8,
+  },
+  price: { color: '#FFFFFF', fontSize: 22, fontWeight: '700' },
+  changePill: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, gap: 3,
+  },
+  changeText: { fontSize: 13, fontWeight: '700' },
+  marketCapText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12, fontWeight: '600',
+    marginLeft: 2,
   },
 
-  // Price
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    gap: 10,
+  // 52-week range
+  rangeContainer: {
+    flexDirection: 'row', alignItems: 'center',
+    width: '100%', maxWidth: 320,
+    marginTop: 6, gap: 5,
   },
-  price: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
+  rangeLabel: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 9, fontWeight: '700',
   },
-  changePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 3,
+  rangeLow: { color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: '600' },
+  rangeHigh: { color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: '600' },
+  rangeBarBg: {
+    flex: 1, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    position: 'relative',
   },
-  changeText: {
-    fontSize: 14,
-    fontWeight: '700',
+  rangeBarFill: {
+    height: '100%', borderRadius: 2,
+    backgroundColor: 'rgba(96,165,250,0.4)',
+  },
+  rangeMarker: {
+    position: 'absolute', top: -3, width: 10, height: 10,
+    borderRadius: 5, backgroundColor: '#60A5FA',
+    marginLeft: -5,
   },
 
   // Signal
   signalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 14,
-    gap: 8,
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: 8, marginBottom: 8, gap: 8,
   },
-  confidencePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  confidenceText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
+  confidencePill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
+  confidenceText: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
 
-  // Metrics row
-  metricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // Metrics grid (2 rows of 3)
+  metricsGrid: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 10,
-    paddingHorizontal: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
     width: '100%',
     maxWidth: 320,
-    marginBottom: 14,
+    marginBottom: 8,
   },
-  metricItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
+  metricsRow: {
+    flexDirection: 'row', alignItems: 'center',
   },
-  metricValue: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
+  metricsRowDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    marginVertical: 6,
+    marginHorizontal: 10,
   },
+  metricItem: { flex: 1, alignItems: 'center', gap: 1 },
+  metricValue: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
   metricLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 9, fontWeight: '600', letterSpacing: 0.5,
   },
   metricSub: {
-    fontSize: 9,
-    fontWeight: '600',
+    fontSize: 8, fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
     textTransform: 'capitalize',
   },
-  metricDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
+  metricDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.08)' },
 
-  // Insight
+  // Dimension bars
+  dimensionContainer: {
+    width: '100%', maxWidth: 320,
+    marginBottom: 8, gap: 3,
+  },
+  dimensionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+  },
+  dimensionLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 9, fontWeight: '600',
+    width: 68,
+  },
+  dimensionBarBg: {
+    flex: 1, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+  },
+  dimensionBarFill: { height: '100%', borderRadius: 2 },
+  dimensionValue: { fontSize: 9, fontWeight: '700', width: 22, textAlign: 'right' },
+
+  // AI Insight
   insight: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
-    fontWeight: '400',
-    textAlign: 'center',
-    lineHeight: 19,
-    paddingHorizontal: 12,
-    maxWidth: 320,
-    marginBottom: 12,
+    fontSize: 12, fontWeight: '400',
+    textAlign: 'center', lineHeight: 17,
+    paddingHorizontal: 12, maxWidth: 320, marginBottom: 8,
   },
   aiInsightBox: {
     backgroundColor: 'rgba(167,139,250,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(167,139,250,0.2)',
+    borderWidth: 1, borderColor: 'rgba(167,139,250,0.2)',
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    width: '100%',
-    maxWidth: 320,
-    marginBottom: 12,
+    paddingHorizontal: 12, paddingVertical: 8,
+    width: '100%', maxWidth: 320, marginBottom: 8,
   },
   aiInsightHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3,
   },
-  aiInsightLabel: {
-    color: '#A78BFA',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  aiActionPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 6,
-    marginLeft: 'auto',
-  },
-  aiActionText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  aiInsightHeadline: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 18,
-  },
+  aiInsightLabel: { color: '#A78BFA', fontSize: 9, fontWeight: '800', letterSpacing: 1.5 },
+  aiActionPill: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, marginLeft: 'auto' },
+  aiActionText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  aiInsightHeadline: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '500', lineHeight: 17 },
 
   // Factor pills
   factorsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    flexWrap: 'wrap', gap: 5, marginBottom: 10,
   },
   factorPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    gap: 5,
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 3, gap: 4,
   },
-  factorName: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  factorScore: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  factorPlaceholder: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 11,
-    fontWeight: '500',
-  },
+  factorName: { fontSize: 10, fontWeight: '600' },
+  factorScore: { fontSize: 10, fontWeight: '800' },
 
-  // CTA button
+  // CTA
   ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(96,165,250,0.12)',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.25)',
-    gap: 8,
-    marginBottom: 10,
+    paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: 24, borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.25)', gap: 8, marginBottom: 6,
   },
-  ctaText: {
-    color: '#60A5FA',
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  ctaText: { color: '#60A5FA', fontSize: 13, fontWeight: '700' },
 
   // Disclaimer
   disclaimer: {
     color: 'rgba(255,255,255,0.2)',
-    fontSize: 9,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-    lineHeight: 13,
+    fontSize: 9, textAlign: 'center',
+    paddingHorizontal: 32, lineHeight: 12,
   },
 
   // Swipe hint
-  hintContainer: {
-    position: 'absolute',
-    bottom: 36,
-    alignSelf: 'center',
-  },
+  hintContainer: { position: 'absolute', bottom: 30, alignSelf: 'center' },
 });
