@@ -418,52 +418,91 @@ def _handle_signal(method, ticker, user_id):
         return _response(405, {"error": "Method not allowed"})
 
     from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
 
     # Try DynamoDB first for summary
     summary = db.get_item(f"SIGNAL#{ticker}", "LATEST")
 
     if not summary:
-        return _response(404, {
-            "ticker": ticker,
-            "status": "not_found",
-            "message": f"No signal data available for {ticker}",
-        })
-
-    # Fetch full detail from S3
-    full_signal = s3.read_json(f"signals/{ticker}.json")
-
-    result = None
-    if full_signal:
-        result = full_signal
-    else:
-        # Fallback: return DynamoDB summary
-        top_factors = json.loads(summary.get("topFactors", "[]"))
-        result = {
-            "ticker": summary["ticker"],
-            "companyName": summary.get("companyName", ticker),
-            "compositeScore": float(summary.get("compositeScore", 5.0)),
-            "signal": summary.get("signal", "HOLD"),
-            "confidence": summary.get("confidence", "MEDIUM"),
-            "insight": summary.get("insight", ""),
-            "reasoning": summary.get("reasoning", ""),
-            "topFactors": top_factors,
-            "lastUpdated": summary.get("lastUpdated", ""),
-        }
-
-    # DynamoDB signal is the source of truth (updated by normalization),
-    # so always overlay it onto the S3 result to prevent stale mismatches.
-    db_signal = summary.get("signal")
-    if db_signal and result.get("signal") != db_signal:
-        result["signal"] = db_signal
-    db_score = summary.get("compositeScore")
-    if db_score:
+        # No pre-computed signal exists — build a basic one on-the-fly
+        # from live price + technicals + fundamentals so the frontend
+        # always gets a usable response.
+        company_name = ticker
         try:
-            result["compositeScore"] = float(db_score)
-        except (ValueError, TypeError):
+            profile = finnhub_client.get_company_profile(ticker)
+            company_name = profile.get("name", ticker) if profile else ticker
+        except Exception:
             pass
 
-    # ── Cache staleness check ──
-    now = datetime.now(timezone.utc)
+        # Compute technical score
+        tech_score = 5.0
+        try:
+            candles = finnhub_client.get_candles(ticker, resolution="D")
+            if candles and len(candles) >= 5:
+                tech_result = technical_engine.compute_indicators(candles)
+                tech_score = tech_result.get("technicalScore", 5.0) or 5.0
+        except Exception:
+            pass
+
+        # Derive composite from technical only (no Claude for on-the-fly)
+        composite = round(max(1, min(10, tech_score)), 1)
+        signal = "BUY" if composite >= 6.5 else "SELL" if composite <= 3.5 else "HOLD"
+
+        result = {
+            "ticker": ticker,
+            "companyName": company_name,
+            "compositeScore": composite,
+            "signal": signal,
+            "confidence": "LOW",
+            "insight": f"Live analysis for {ticker} — technical score {composite}/10.",
+            "reasoning": "",
+            "topFactors": [],
+            "lastUpdated": now.isoformat(),
+            "tier": "ON_DEMAND",
+            "freshness": "fresh",
+            "freshnessDays": 0,
+            "dataSources": ["Finnhub"],
+        }
+
+        # Skip S3/DynamoDB parsing — jump straight to enrichment
+        is_on_demand = True
+    else:
+        is_on_demand = False
+
+        # Fetch full detail from S3
+        full_signal = s3.read_json(f"signals/{ticker}.json")
+
+        result = None
+        if full_signal:
+            result = full_signal
+        else:
+            # Fallback: return DynamoDB summary
+            top_factors = json.loads(summary.get("topFactors", "[]"))
+            result = {
+                "ticker": summary["ticker"],
+                "companyName": summary.get("companyName", ticker),
+                "compositeScore": float(summary.get("compositeScore", 5.0)),
+                "signal": summary.get("signal", "HOLD"),
+                "confidence": summary.get("confidence", "MEDIUM"),
+                "insight": summary.get("insight", ""),
+                "reasoning": summary.get("reasoning", ""),
+                "topFactors": top_factors,
+                "lastUpdated": summary.get("lastUpdated", ""),
+            }
+
+        # DynamoDB signal is the source of truth (updated by normalization),
+        # so always overlay it onto the S3 result to prevent stale mismatches.
+        db_signal = summary.get("signal")
+        if db_signal and result.get("signal") != db_signal:
+            result["signal"] = db_signal
+        db_score = summary.get("compositeScore")
+        if db_score:
+            try:
+                result["compositeScore"] = float(db_score)
+            except (ValueError, TypeError):
+                pass
+
+    # ── Cache staleness check (skip for on-demand signals) ──
     last_updated = result.get("lastUpdated") or result.get("analyzedAt") or ""
     freshness = "fresh"
     freshness_days = 0
@@ -483,6 +522,7 @@ def _handle_signal(method, ticker, user_id):
     # Determine if we should regenerate the reasoning:
     # 1) Analysis older than 24 hours
     # 2) Newer INSIGHT# or EVENT# records exist since last analysis
+    # On-demand signals are fresh by definition — skip refresh logic.
     needs_refresh = False
     recent_news_items = []
 
@@ -492,7 +532,7 @@ def _handle_signal(method, ticker, user_id):
         else float("inf")
     )
 
-    if analysis_age_hours > 24:
+    if analysis_age_hours > 24 and not is_on_demand:
         needs_refresh = True
 
     # Check for newer insights/events that post-date the cached analysis
@@ -612,72 +652,180 @@ def _handle_signal(method, ticker, user_id):
     result["freshnessDays"] = freshness_days
     result["dataSources"] = ["SEC EDGAR", "Federal Reserve FRED", "Finnhub", "Claude AI"]
 
-    # Enrich with technicalScore from DynamoDB if not already present
+    # ── Enrich with technicals (cache → live compute) ──
     if "technicalAnalysis" not in result or not result.get("technicalAnalysis"):
-        tech_score_str = summary.get("technicalScore", "")
+        tech_score_str = summary.get("technicalScore", "") if isinstance(summary, dict) else ""
         if tech_score_str:
             try:
                 result["technicalScore"] = float(tech_score_str)
             except (ValueError, TypeError):
                 pass
 
-        # Try to fetch live technicals from cache
+        indicators = None
+
+        # Try DynamoDB cache first
         try:
             tech_cached = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
             if tech_cached:
                 indicators = tech_cached.get("indicators", {})
-                result["technicalAnalysis"] = {
-                    "technicalScore": indicators.get("technicalScore", 0),
-                    "rsi": indicators.get("rsi"),
-                    "macd": indicators.get("macd", {}),
-                    "sma20": indicators.get("sma20"),
-                    "sma50": indicators.get("sma50"),
-                    "sma200": indicators.get("sma200"),
-                    "bollingerBands": indicators.get("bollingerBands", {}),
-                    "atr": indicators.get("atr"),
-                    "signals": indicators.get("signals", {}),
-                    "indicatorCount": indicators.get("indicatorCount", 0),
-                }
         except Exception:
             pass
 
-    # Enrich with fundamental health grade from cache
+        # If cache is empty, compute live from Finnhub candles
+        if not indicators or not indicators.get("indicatorCount"):
+            try:
+                candles = finnhub_client.get_candles(ticker, resolution="D")
+                if candles and len(candles) >= 5:
+                    indicators = technical_engine.compute_indicators(candles)
+                    # Cache for next time
+                    try:
+                        db.put_item({
+                            "PK": f"TECHNICALS#{ticker}",
+                            "SK": "LATEST",
+                            "indicators": indicators,
+                            "cachedAt": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Signal] Live technicals failed for {ticker}: {e}")
+
+        if indicators and indicators.get("indicatorCount", 0) > 0:
+            result["technicalAnalysis"] = {
+                "technicalScore": indicators.get("technicalScore", 0),
+                "rsi": indicators.get("rsi"),
+                "macd": indicators.get("macd", {}),
+                "sma20": indicators.get("sma20"),
+                "sma50": indicators.get("sma50"),
+                "sma200": indicators.get("sma200"),
+                "bollingerBands": indicators.get("bollingerBands", {}),
+                "atr": indicators.get("atr"),
+                "signals": indicators.get("signals", {}),
+                "indicatorCount": indicators.get("indicatorCount", 0),
+            }
+
+    # ── Enrich with fundamentals (cache → live compute) ──
     if "fundamentalGrade" not in result:
+        fund_analysis = None
+
+        # Try DynamoDB cache first
         try:
             health_cached = db.get_item(f"HEALTH#{ticker}", "LATEST")
             if health_cached:
-                analysis = health_cached.get("analysis", {})
-                result["fundamentalGrade"] = analysis.get("grade", "N/A")
-                result["fundamentalScore"] = analysis.get("gradeScore", 0)
-                dcf = analysis.get("dcf")
-                if dcf:
-                    result["fairValue"] = dcf.get("fairValue")
-                    result["fairValueUpside"] = dcf.get("upside")
-                z = analysis.get("zScore")
-                if z:
-                    result["zScore"] = z.get("value")
-                f = analysis.get("fScore")
-                if f:
-                    result["fScore"] = f.get("value")
-                m = analysis.get("mScore")
-                if m:
-                    result["mScore"] = m.get("value")
+                fund_analysis = health_cached.get("analysis", {})
         except Exception:
             pass
 
-    # Enrich with enhanced factor dimensions from cache
+        # If cache is empty, compute live
+        if not fund_analysis or fund_analysis.get("error"):
+            try:
+                market_cap = None
+                beta = 1.0
+                current_price = None
+                shares_outstanding = None
+                try:
+                    quote = finnhub_client.get_quote(ticker)
+                    current_price = quote.get("price")
+                    profile = finnhub_client.get_company_profile(ticker)
+                    market_cap = profile.get("marketCap")
+                    fin = finnhub_client.get_basic_financials(ticker)
+                    beta = fin.get("beta") or 1.0
+                    if market_cap and current_price and current_price > 0:
+                        shares_outstanding = market_cap / current_price
+                except Exception:
+                    pass
+                fund_analysis = fundamentals_engine.analyze(
+                    ticker,
+                    market_cap=market_cap,
+                    beta=beta,
+                    current_price=current_price,
+                    shares_outstanding=shares_outstanding,
+                )
+                # Cache for next time
+                if fund_analysis and fund_analysis.get("grade"):
+                    try:
+                        db.put_item({
+                            "PK": f"HEALTH#{ticker}",
+                            "SK": "LATEST",
+                            "analysis": fund_analysis,
+                            "cachedAt": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Signal] Live fundamentals failed for {ticker}: {e}")
+
+        if fund_analysis and not fund_analysis.get("error"):
+            result["fundamentalGrade"] = fund_analysis.get("grade", "N/A")
+            result["fundamentalScore"] = fund_analysis.get("gradeScore", 0)
+            ratios = fund_analysis.get("ratios", {})
+            if ratios:
+                result["peRatio"] = ratios.get("peRatio") or ratios.get("forwardPE")
+                result["ratios"] = ratios
+            dcf = fund_analysis.get("dcf")
+            if dcf:
+                result["fairValue"] = dcf.get("fairValue")
+                result["fairValueUpside"] = dcf.get("upside")
+            z = fund_analysis.get("zScore")
+            if z and isinstance(z, dict):
+                result["zScore"] = z.get("value")
+            f = fund_analysis.get("fScore")
+            if f and isinstance(f, dict):
+                result["fScore"] = f.get("value")
+            m = fund_analysis.get("mScore")
+            if m and isinstance(m, dict):
+                result["mScore"] = m.get("value")
+
+    # ── Enrich with factor dimensions (cache → live compute) ──
     if "dimensionScores" not in result:
+        factor_data = None
+
+        # Try DynamoDB cache first
         try:
             factor_cached = db.get_item(f"FACTORS#{ticker}", "LATEST")
             if factor_cached:
-                factors = factor_cached.get("factors", {})
-                result["dimensionScores"] = factors.get("dimensionScores", {})
-                result["topPositive"] = factors.get("topPositive", [])
-                result["topNegative"] = factors.get("topNegative", [])
-                result["factorCount"] = factors.get("factorCount", 0)
-                result["scoringMethodology"] = factors.get("scoringMethodology", {})
+                factor_data = factor_cached.get("factors", {})
         except Exception:
             pass
+
+        # If cache is empty, compute live from available technicals + fundamentals
+        if not factor_data or not factor_data.get("dimensionScores"):
+            try:
+                tech_input = result.get("technicalAnalysis")
+                fund_input = None
+                # Try to get fund_analysis from what we already computed above
+                try:
+                    h = db.get_item(f"HEALTH#{ticker}", "LATEST")
+                    if h:
+                        fund_input = h.get("analysis")
+                except Exception:
+                    pass
+                factor_data = factor_engine.compute_factors(
+                    ticker,
+                    signal_data=result,
+                    technicals=tech_input,
+                    fundamentals=fund_input,
+                )
+                # Cache for next time
+                if factor_data and factor_data.get("dimensionScores"):
+                    try:
+                        db.put_item({
+                            "PK": f"FACTORS#{ticker}",
+                            "SK": "LATEST",
+                            "factors": factor_data,
+                            "cachedAt": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Signal] Live factors failed for {ticker}: {e}")
+
+        if factor_data and factor_data.get("dimensionScores"):
+            result["dimensionScores"] = factor_data.get("dimensionScores", {})
+            result["topPositive"] = factor_data.get("topPositive", [])
+            result["topNegative"] = factor_data.get("topNegative", [])
+            result["factorCount"] = factor_data.get("factorCount", 0)
+            result["scoringMethodology"] = factor_data.get("scoringMethodology", {})
 
     return _response(200, result)
 
