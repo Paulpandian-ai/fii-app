@@ -6,7 +6,7 @@ import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
-import { getPrice, getTechnicals, getFundamentals } from '../services/api';
+import { getPrice, getTechnicals, getFundamentals, getInsightsForTicker } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -72,6 +72,9 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [healthGrade, setHealthGrade] = useState<string | null>(null);
   const [peRatio, setPeRatio] = useState<number | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [aiHeadline, setAiHeadline] = useState<string | null>(null);
+  const [aiAction, setAiAction] = useState<string | null>(null);
+  const [aiUrgency, setAiUrgency] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -79,7 +82,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       getPrice(item.ticker),
       getTechnicals(item.ticker),
       getFundamentals(item.ticker),
-    ]).then(([priceResult, techResult, healthResult]) => {
+      getInsightsForTicker(item.ticker, 1),
+    ]).then(([priceResult, techResult, healthResult, insightResult]) => {
       if (!mounted) return;
       // Price
       if (priceResult.status === 'fulfilled' && priceResult.value) {
@@ -102,6 +106,16 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         const d = healthResult.value;
         if (d.grade && d.grade !== 'N/A') setHealthGrade(d.grade);
         if (d.peRatio || d.analysis?.peRatio) setPeRatio(safeNum(d.peRatio || d.analysis?.peRatio));
+      }
+      // AI Agent Insight
+      if (insightResult.status === 'fulfilled' && insightResult.value) {
+        const insights = insightResult.value.insights || [];
+        if (insights.length > 0) {
+          const latest = insights[0];
+          setAiHeadline(latest.headline || null);
+          setAiAction(latest.action || null);
+          setAiUrgency(typeof latest.urgency === 'number' ? latest.urgency : null);
+        }
       }
       setDataLoaded(true);
     });
@@ -227,10 +241,29 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         </View>
 
-        {/* ── AI Insight (ALWAYS shown) ── */}
-        <Text style={styles.insight} numberOfLines={2}>
-          {item.insight || `AI analysis for ${item.ticker} — tap for full details.`}
-        </Text>
+        {/* ── AI Insight (ALWAYS shown — prefer live agent insight) ── */}
+        {aiHeadline ? (
+          <View style={styles.aiInsightBox}>
+            <View style={styles.aiInsightHeader}>
+              <Ionicons name="sparkles" size={12} color="#A78BFA" />
+              <Text style={styles.aiInsightLabel}>AI AGENT</Text>
+              {aiAction && (
+                <View style={[styles.aiActionPill, {
+                  backgroundColor: (SIGNAL_COLORS[aiAction] || '#F59E0B') + '20',
+                }]}>
+                  <Text style={[styles.aiActionText, {
+                    color: SIGNAL_COLORS[aiAction] || '#F59E0B',
+                  }]}>{aiAction}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.aiInsightHeadline} numberOfLines={2}>{aiHeadline}</Text>
+          </View>
+        ) : (
+          <Text style={styles.insight} numberOfLines={2}>
+            {item.insight || `AI analysis for ${item.ticker} — tap for full details.`}
+          </Text>
+        )}
 
         {/* ── Top Factor Pills (ALWAYS shown — use placeholders) ── */}
         <View style={styles.factorsRow}>
@@ -445,6 +478,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     maxWidth: 320,
     marginBottom: 12,
+  },
+  aiInsightBox: {
+    backgroundColor: 'rgba(167,139,250,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,139,250,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    width: '100%',
+    maxWidth: 320,
+    marginBottom: 12,
+  },
+  aiInsightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  aiInsightLabel: {
+    color: '#A78BFA',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+  },
+  aiActionPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    marginLeft: 'auto',
+  },
+  aiActionText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  aiInsightHeadline: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
   },
 
   // Factor pills

@@ -36,6 +36,9 @@ Routes:
   GET  /strategy/achievements        — User achievement badges
   GET  /stock/<ticker>/stress-test   — Macro stress-test (single scenario)
   GET  /stock/<ticker>/stress-test/all — Macro stress-test (all scenarios)
+  GET  /insights/feed                — AI-generated insight feed
+  GET  /insights/alerts              — High-urgency AI alerts
+  GET  /insights/<ticker>            — Insights for a specific stock
   GET  /admin/agents                 — List agents with schedules & last run
   POST /admin/agents/<id>/run        — Manually trigger an agent
   GET  /admin/agents/<id>/history    — View agent run history
@@ -159,6 +162,8 @@ def lambda_handler(event, context):
             return _handle_coach(http_method, path, body, user_id)
         elif path.startswith("/stock/") and "/stress-test" in path:
             return _handle_stress_test(http_method, path, query_params)
+        elif path.startswith("/insights"):
+            return _handle_insights(http_method, path, query_params)
         elif path.startswith("/admin/"):
             return _handle_admin(http_method, path, body, query_params)
         else:
@@ -4541,6 +4546,74 @@ def _handle_stress_test(method, path, query_params):
     if "error" in result:
         return _response(400, result)
     return _response(200, result)
+
+
+# ─── Insights (AI Agent) ───
+
+
+def _handle_insights(method, path, query_params):
+    """GET /insights/feed, /insights/alerts, /insights/{ticker}."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    parts = path.strip("/").split("/")
+
+    # GET /insights/feed — global insight feed
+    if len(parts) >= 2 and parts[1] == "feed":
+        limit = int(query_params.get("limit", "20"))
+        items = db.query("INSIGHT_FEED", limit=min(limit, 50), scan_forward=False)
+        feed = []
+        for item in items:
+            sk = item.get("SK", "")
+            feed.append({
+                "ticker": item.get("ticker", ""),
+                "headline": item.get("headline", ""),
+                "action": item.get("action", "WATCH"),
+                "urgency": int(item.get("urgency", 5)),
+                "confidence": item.get("confidence", "MEDIUM"),
+                "changeType": item.get("changeType", ""),
+                "timestamp": sk.split("#")[0] if "#" in sk else sk,
+            })
+        return _response(200, {"insights": feed})
+
+    # GET /insights/alerts — high-urgency only
+    if len(parts) >= 2 and parts[1] == "alerts":
+        limit = int(query_params.get("limit", "10"))
+        items = db.query("ALERTS", limit=min(limit, 50), scan_forward=False)
+        alerts = []
+        for item in items:
+            sk = item.get("SK", "")
+            alerts.append({
+                "ticker": item.get("ticker", ""),
+                "headline": item.get("headline", ""),
+                "explanation": item.get("explanation", ""),
+                "action": item.get("action", "WATCH"),
+                "urgency": int(item.get("urgency", 8)),
+                "changeType": item.get("changeType", ""),
+                "timestamp": sk.split("#")[0] if "#" in sk else sk,
+            })
+        return _response(200, {"alerts": alerts})
+
+    # GET /insights/{ticker} — insights for a specific stock
+    if len(parts) >= 2:
+        ticker = parts[1].upper()
+        limit = int(query_params.get("limit", "10"))
+        items = db.query(f"INSIGHT#{ticker}", limit=min(limit, 50), scan_forward=False)
+        insights = []
+        for item in items:
+            insights.append({
+                "ticker": ticker,
+                "headline": item.get("headline", ""),
+                "explanation": item.get("explanation", ""),
+                "action": item.get("action", "WATCH"),
+                "urgency": int(item.get("urgency", 5)),
+                "confidence": item.get("confidence", "MEDIUM"),
+                "changeType": item.get("changeType", ""),
+                "timestamp": item.get("SK", ""),
+            })
+        return _response(200, {"ticker": ticker, "insights": insights})
+
+    return _response(400, {"error": "Invalid insights path"})
 
 
 # ─── Admin: Agent Scheduling ───

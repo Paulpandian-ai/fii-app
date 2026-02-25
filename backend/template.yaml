@@ -1179,6 +1179,38 @@ Resources:
               Action: lambda:InvokeFunction
               Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:fii-*-${Stage}
 
+  # ─── AI Agent Function (observe/reason/act loop with Claude) ───
+
+  AIAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub fii-ai-agent-${Stage}
+      Handler: handler.lambda_handler
+      CodeUri: functions/ai_agent/
+      Description: Agentic AI monitor — detects changes, analyzes with Claude, stores insights & alerts
+      Timeout: 300
+      MemorySize: 512
+      Events:
+        HourlyRun:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Description: Hourly AI agent scan for significant market changes
+            Enabled: true
+            Input: '{"trigger": "hourly"}'
+        MarketCloseAnalysis:
+          Type: Schedule
+          Properties:
+            Schedule: cron(15 21 ? * MON-FRI *)
+            Description: Post-market-close AI analysis (4:15 PM ET)
+            Enabled: true
+            Input: '{"trigger": "market_close"}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref ClaudeApiKeyArn
+
 Conditions:
   HasAppleConfig: !Not [!Equals [!Ref AppleTeamId, '']]
   CreateTable: !Equals [!Ref ExistingTableName, '']

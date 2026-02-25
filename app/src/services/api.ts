@@ -305,6 +305,23 @@ export const getStressTestAll = async (ticker: string) => {
   return data;
 };
 
+// ─── AI Insights ───
+
+export const getInsightsFeed = async (limit: number = 20) => {
+  const { data } = await api.get('/insights/feed', { params: { limit: String(limit) } });
+  return data;
+};
+
+export const getInsightsAlerts = async (limit: number = 10) => {
+  const { data } = await api.get('/insights/alerts', { params: { limit: String(limit) } });
+  return data;
+};
+
+export const getInsightsForTicker = async (ticker: string, limit: number = 5) => {
+  const { data } = await api.get(`/insights/${ticker}`, { params: { limit: String(limit) } });
+  return data;
+};
+
 // ─── Coach ───
 
 export const getCoachDaily = async () => {

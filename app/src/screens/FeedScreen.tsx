@@ -22,7 +22,7 @@ import { Skeleton } from '../components/Skeleton';
 import { useFeedStore } from '../store/feedStore';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useEventStore } from '../store/eventStore';
-import { getFeed, getScreener } from '../services/api';
+import { getFeed, getScreener, getInsightsAlerts } from '../services/api';
 import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -158,6 +158,28 @@ export const FeedScreen: React.FC = () => {
   useEffect(() => {
     loadFeed();
     loadEventsFeed();
+    // Fetch AI agent alerts for the live banner
+    getInsightsAlerts(1).then((data) => {
+      const alerts = data?.alerts || [];
+      if (alerts.length > 0 && alerts[0].headline && alerts[0].ticker) {
+        useEventStore.getState().setLiveBannerEvent({
+          ticker: alerts[0].ticker,
+          summary: alerts[0].headline,
+          headline: alerts[0].headline,
+          type: 'news',
+          impact: 'high',
+          direction: 'neutral',
+          category: 'ai_agent',
+          sourceUrl: '',
+          formType: '',
+          indicator: '',
+          surpriseScore: null,
+          sectorImpacts: {},
+          factorsAffected: [],
+          timestamp: new Date().toISOString(),
+        } as any);
+      }
+    }).catch(() => {});
   }, []);
 
   // Animate live event banner
