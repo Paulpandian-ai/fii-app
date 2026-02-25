@@ -6,7 +6,7 @@ import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
-import { getPrice, getSignalDetail, getInsightsForTicker } from '../services/api';
+import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getInsightsForTicker } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 
@@ -109,66 +109,90 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
   useEffect(() => {
     let mounted = true;
+
+    // Call ALL endpoints in parallel — use enriched signal as primary,
+    // dedicated endpoints as fallbacks for any missing data.
     Promise.allSettled([
-      getPrice(item.ticker),
-      getSignalDetail(item.ticker),
-      getInsightsForTicker(item.ticker, 1),
-    ]).then(([priceResult, signalResult, insightResult]) => {
+      getPrice(item.ticker),                    // [0]
+      getSignalDetail(item.ticker),             // [1]
+      getTechnicals(item.ticker),               // [2] fallback for technicals
+      getFundamentals(item.ticker),             // [3] fallback for fundamentals
+      getFactors(item.ticker),                  // [4] fallback for factors/dimensions
+      getInsightsForTicker(item.ticker, 1),     // [5]
+    ]).then(([priceR, signalR, techR, fundR, factorR, insightR]) => {
       if (!mounted) return;
 
+      const priceData = priceR.status === 'fulfilled' ? priceR.value : null;
+      const sig = signalR.status === 'fulfilled' ? signalR.value : null;
+      const tech = techR.status === 'fulfilled' ? techR.value : null;
+      const fund = fundR.status === 'fulfilled' ? fundR.value : null;
+      const factors = factorR.status === 'fulfilled' ? factorR.value : null;
+      const insightData = insightR.status === 'fulfilled' ? insightR.value : null;
+
       // ── Price ──
-      if (priceResult.status === 'fulfilled' && priceResult.value) {
-        const d = priceResult.value;
-        const p = typeof d.price === 'number' && Number.isFinite(d.price) ? d.price : null;
+      if (priceData) {
+        const p = typeof priceData.price === 'number' && Number.isFinite(priceData.price) ? priceData.price : null;
         setPrice(p);
-        setChange(safeNum(d.change));
-        setChangePercent(safeNum(d.changePercent || d.change_percent));
-        if (d.marketCap > 0) setMarketCap(d.marketCap);
-        if (d.fiftyTwoWeekLow > 0) setW52Low(d.fiftyTwoWeekLow);
-        if (d.fiftyTwoWeekHigh > 0) setW52High(d.fiftyTwoWeekHigh);
-        if (d.sector) setSector(d.sector);
+        setChange(safeNum(priceData.change));
+        setChangePercent(safeNum(priceData.changePercent || priceData.change_percent));
+        if (priceData.marketCap > 0) setMarketCap(priceData.marketCap);
+        if (priceData.fiftyTwoWeekLow > 0) setW52Low(priceData.fiftyTwoWeekLow);
+        if (priceData.fiftyTwoWeekHigh > 0) setW52High(priceData.fiftyTwoWeekHigh);
+        if (priceData.sector) setSector(priceData.sector);
       }
 
-      // ── Enriched signal (technicals + fundamentals + factors in one) ──
-      if (signalResult.status === 'fulfilled' && signalResult.value) {
-        const s = signalResult.value;
+      // ── Technical Score: signal → technicals endpoint ──
+      const ta = sig?.technicalAnalysis || {};
+      const ts = sig?.technicalScore ?? ta.technicalScore ?? tech?.technicalScore;
+      if (ts != null) setTechScore(safeNum(ts));
 
-        // Technicals
-        const ta = s.technicalAnalysis || {};
-        if (s.technicalScore != null) setTechScore(safeNum(s.technicalScore));
-        else if (ta.technicalScore != null) setTechScore(safeNum(ta.technicalScore));
-        if (ta.signals?.trend) setTechTrend(ta.signals.trend);
-        if (ta.rsi != null) setRsi(safeNum(ta.rsi));
+      // ── RSI: signal.technicalAnalysis → technicals endpoint ──
+      const rsiVal = ta.rsi ?? tech?.rsi;
+      if (rsiVal != null) setRsi(safeNum(rsiVal));
 
-        // Fundamentals
-        if (s.fundamentalGrade && s.fundamentalGrade !== 'N/A') setHealthGrade(s.fundamentalGrade);
-        const pe = s.peRatio || s.ratios?.peRatio;
-        if (pe > 0) setPeRatio(safeNum(pe));
-        if (s.fairValueUpside != null) setFairValueUpside(safeNum(s.fairValueUpside));
-        if (s.zScore != null) setZScore(safeNum(s.zScore));
-        if (s.fScore != null) setFScoreVal(safeNum(s.fScore));
+      // ── Trend: signal → technicals endpoint ──
+      const trend = ta.signals?.trend ?? tech?.signals?.trend;
+      if (trend) setTechTrend(trend);
 
-        // Dimension scores
-        if (s.dimensionScores && typeof s.dimensionScores === 'object') {
-          setDimensionScores(s.dimensionScores);
-        }
+      // ── Health Grade: signal → fundamentals endpoint ──
+      const grade = sig?.fundamentalGrade ?? fund?.grade;
+      if (grade && grade !== 'N/A') setHealthGrade(grade);
 
-        // Top factors (from enriched signal)
-        const pos = s.topPositive || [];
-        const neg = s.topNegative || [];
-        const allFactors = [
-          ...pos.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
-          ...neg.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
-        ].filter((f) => f.name).slice(0, 4);
-        if (allFactors.length > 0) setEnrichedFactors(allFactors);
+      // ── P/E Ratio: signal → fundamentals.ratios → price.trailingPE → price.forwardPE ──
+      const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio ?? priceData?.trailingPE ?? priceData?.forwardPE;
+      if (pe > 0) setPeRatio(safeNum(pe));
 
-        // Insight from signal
-        if (s.insight) setEnrichedInsight(s.insight);
-      }
+      // ── Fair Value Upside: signal → fundamentals.dcf.upside ──
+      const fvu = sig?.fairValueUpside ?? fund?.dcf?.upside;
+      if (fvu != null) setFairValueUpside(safeNum(fvu));
+
+      // ── Z-Score: signal → fundamentals.zScore.value ──
+      const z = sig?.zScore ?? fund?.zScore?.value;
+      if (z != null) setZScore(safeNum(z));
+
+      // ── F-Score: signal → fundamentals.fScore.value ──
+      const f = sig?.fScore ?? fund?.fScore?.value;
+      if (f != null) setFScoreVal(safeNum(f));
+
+      // ── Dimension Scores: signal → factors endpoint ──
+      const dims = sig?.dimensionScores ?? factors?.dimensionScores;
+      if (dims && typeof dims === 'object') setDimensionScores(dims);
+
+      // ── Factor pills: signal → factors endpoint → feedItem.topFactors ──
+      const pos = sig?.topPositive ?? factors?.topPositive ?? [];
+      const neg = sig?.topNegative ?? factors?.topNegative ?? [];
+      const allFactors = [
+        ...pos.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
+        ...neg.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
+      ].filter((f: any) => f.name).slice(0, 4);
+      if (allFactors.length > 0) setEnrichedFactors(allFactors);
+
+      // ── Insight from signal ──
+      if (sig?.insight) setEnrichedInsight(sig.insight);
 
       // ── AI Agent Insight ──
-      if (insightResult.status === 'fulfilled' && insightResult.value) {
-        const insights = insightResult.value.insights || [];
+      if (insightData) {
+        const insights = insightData.insights || [];
         if (insights.length > 0) {
           const latest = insights[0];
           setAiHeadline(latest.headline || null);
