@@ -44,6 +44,25 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Retry interceptor: automatic retry with exponential backoff for 503 responses
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    if (!config || config._retryCount >= 3) {
+      return Promise.reject(error);
+    }
+    const status = error.response?.status;
+    if (status === 503 || status === 429) {
+      config._retryCount = (config._retryCount || 0) + 1;
+      const delay = config._retryCount * 2000; // 2s, 4s, 6s
+      await new Promise((r) => setTimeout(r, delay));
+      return api.request(config);
+    }
+    return Promise.reject(error);
+  },
+);
+
 // ─── Feed ───
 
 export const getFeed = async (cursor?: string) => {

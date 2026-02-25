@@ -137,6 +137,7 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        lazy: true, // Don't mount off-screen tabs until user navigates to them
         tabBarIcon: ({ focused, color, size }) => {
           const icons = TAB_ICONS[route.name];
           const iconName = focused ? icons.focused : icons.unfocused;
@@ -214,9 +215,16 @@ export default function App() {
       setShowOnboarding(val !== 'true');
     });
 
-    // Setup push notifications & load events
-    setupPushNotifications();
-    loadEventsFeed();
+    // Stagger startup loads: let Feed screen data load first (immediate),
+    // then load events + push notifications after a short delay to avoid
+    // overwhelming Finnhub-backed endpoints with concurrent requests.
+    const eventsTimer = setTimeout(() => loadEventsFeed(), 3000);
+    const pushTimer = setTimeout(() => setupPushNotifications(), 5000);
+
+    return () => {
+      clearTimeout(eventsTimer);
+      clearTimeout(pushTimer);
+    };
   }, [loadEventsFeed]);
 
   // Wait for onboarding check

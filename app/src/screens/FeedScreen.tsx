@@ -156,30 +156,39 @@ export const FeedScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   useEffect(() => {
+    // Load feed immediately (visible on screen)
     loadFeed();
-    loadEventsFeed();
-    // Fetch AI agent alerts for the live banner
-    getInsightsAlerts(1).then((data) => {
-      const alerts = data?.alerts || [];
-      if (alerts.length > 0 && alerts[0].headline && alerts[0].ticker) {
-        useEventStore.getState().setLiveBannerEvent({
-          ticker: alerts[0].ticker,
-          summary: alerts[0].headline,
-          headline: alerts[0].headline,
-          type: 'news',
-          impact: 'high',
-          direction: 'neutral',
-          category: 'ai_agent',
-          sourceUrl: '',
-          formType: '',
-          indicator: '',
-          surpriseScore: null,
-          sectorImpacts: {},
-          factorsAffected: [],
-          timestamp: new Date().toISOString(),
-        } as any);
-      }
-    }).catch(() => {});
+
+    // Stagger secondary loads to avoid 503 from concurrent Finnhub requests
+    const eventsTimer = setTimeout(() => loadEventsFeed(), 2000);
+    const alertsTimer = setTimeout(() => {
+      getInsightsAlerts(1).then((data) => {
+        const alerts = data?.alerts || [];
+        if (alerts.length > 0 && alerts[0].headline && alerts[0].ticker) {
+          useEventStore.getState().setLiveBannerEvent({
+            ticker: alerts[0].ticker,
+            summary: alerts[0].headline,
+            headline: alerts[0].headline,
+            type: 'news',
+            impact: 'high',
+            direction: 'neutral',
+            category: 'ai_agent',
+            sourceUrl: '',
+            formType: '',
+            indicator: '',
+            surpriseScore: null,
+            sectorImpacts: {},
+            factorsAffected: [],
+            timestamp: new Date().toISOString(),
+          } as any);
+        }
+      }).catch(() => {});
+    }, 4000);
+
+    return () => {
+      clearTimeout(eventsTimer);
+      clearTimeout(alertsTimer);
+    };
   }, []);
 
   // Animate live event banner
