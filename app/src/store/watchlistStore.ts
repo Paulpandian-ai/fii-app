@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Watchlist, WatchlistItem } from '../types';
 import {
   getWatchlists,
@@ -7,6 +8,13 @@ import {
   removeFromWatchlist,
   deleteWatchlist,
 } from '../services/api';
+
+const STORAGE_KEY = 'fii_watchlists';
+
+/** Persist watchlist state to AsyncStorage for offline access. */
+const _persist = (watchlists: Watchlist[]) => {
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(watchlists)).catch(() => {});
+};
 
 interface WatchlistStore {
   watchlists: Watchlist[];
@@ -34,6 +42,19 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
 
   loadWatchlists: async () => {
     set({ isLoading: true, error: null });
+
+    // Load from AsyncStorage first for instant display
+    try {
+      const cached = await AsyncStorage.getItem(STORAGE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          set({ watchlists: parsed });
+        }
+      }
+    } catch {}
+
+    // Then sync from API
     try {
       const data = await getWatchlists();
       const wls = data.watchlists || [];
@@ -41,6 +62,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
         wls.push({ id: 'default', name: 'Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, isLoading: false });
+      _persist(wls);
     } catch {
       set({ isLoading: false, error: 'Failed to load watchlists' });
     }
@@ -53,7 +75,9 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
     const id = (name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     try {
       const data = await saveWatchlist({ id, name, items: [] });
-      set({ watchlists: data.watchlists || get().watchlists });
+      const wls = data.watchlists || get().watchlists;
+      set({ watchlists: wls });
+      _persist(wls);
     } catch {
       set({ error: 'Failed to create watchlist' });
     }
@@ -67,6 +91,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
         wls.push({ id: 'default', name: 'Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, activeWatchlistId: wls[0].id });
+      _persist(wls);
     } catch {
       set({ error: 'Failed to delete watchlist' });
     }
@@ -85,12 +110,16 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       return wl;
     });
     set({ watchlists: updated });
+    _persist(updated);
 
     try {
       const data = await addToWatchlist(watchlistId, ticker, companyName);
-      set({ watchlists: data.watchlists || updated });
+      const wls = data.watchlists || updated;
+      set({ watchlists: wls });
+      _persist(wls);
     } catch {
       set({ watchlists, error: 'Failed to add to watchlist' });
+      _persist(watchlists);
     }
   },
 
@@ -103,12 +132,16 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       return wl;
     });
     set({ watchlists: updated });
+    _persist(updated);
 
     try {
       const data = await removeFromWatchlist(watchlistId, ticker);
-      set({ watchlists: data.watchlists || updated });
+      const wls = data.watchlists || updated;
+      set({ watchlists: wls });
+      _persist(wls);
     } catch {
       set({ watchlists, error: 'Failed to remove from watchlist' });
+      _persist(watchlists);
     }
   },
 

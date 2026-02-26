@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Dimensions,
   Platform,
+  Vibration,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,6 +22,7 @@ import { Skeleton } from '../components/Skeleton';
 import { SectorHeatmap } from '../components/SectorHeatmap';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getScreener, getScreenerTemplates } from '../services/api';
+import { useWatchlistStore } from '../store/watchlistStore';
 import type { Signal, RootStackParamList } from '../types';
 
 // ─── Constants ───
@@ -51,7 +53,7 @@ type Grade = (typeof GRADES)[number];
 const MARKET_CAPS = ['Small', 'Mid', 'Large', 'Mega'] as const;
 type MarketCap = (typeof MARKET_CAPS)[number];
 
-const SORT_OPTIONS = ['Price Change', 'Ticker', 'AI Score', 'Tech Score', 'Market Cap'] as const;
+const SORT_OPTIONS = ['FII Score', 'Price', 'Price Change', 'Market Cap', 'P/E', 'Ticker', 'Tech Score'] as const;
 type SortOption = (typeof SORT_OPTIONS)[number];
 
 const SIGNAL_COLORS: Record<Signal, string> = {
@@ -82,13 +84,13 @@ const TEMPLATES: Template[] = [
     id: 'ai-top-picks',
     label: 'AI Top Picks',
     icon: 'sparkles',
-    filters: { aiScoreMin: 6, aiScoreMax: 10, signals: ['BUY'], sortBy: 'AI Score' },
+    filters: { aiScoreMin: 6, aiScoreMax: 10, signals: ['BUY'], sortBy: 'FII Score' },
   },
   {
     id: 'value-plays',
     label: 'Value Plays',
     icon: 'diamond-outline',
-    filters: { signals: ['BUY'], marketCaps: ['Large', 'Mega'], sortBy: 'AI Score' },
+    filters: { signals: ['BUY'], marketCaps: ['Large', 'Mega'], sortBy: 'FII Score' },
   },
   {
     id: 'momentum-leaders',
@@ -100,19 +102,19 @@ const TEMPLATES: Template[] = [
     id: 'dividend-stars',
     label: 'Dividend Stars',
     icon: 'cash-outline',
-    filters: { marketCaps: ['Large', 'Mega'], sortBy: 'AI Score' },
+    filters: { marketCaps: ['Large', 'Mega'], sortBy: 'FII Score' },
   },
   {
     id: 'undervalued-ai',
     label: 'Undervalued by AI',
     icon: 'trending-up-outline',
-    filters: { aiScoreMin: 6, aiScoreMax: 10, sortBy: 'AI Score' },
+    filters: { aiScoreMin: 6, aiScoreMax: 10, sortBy: 'FII Score' },
   },
   {
     id: 'risk-alerts',
     label: 'Risk Alerts',
     icon: 'warning-outline',
-    filters: { aiScoreMin: 1, aiScoreMax: 5, signals: ['SELL'], sortBy: 'AI Score' },
+    filters: { aiScoreMin: 1, aiScoreMax: 5, signals: ['SELL'], sortBy: 'FII Score' },
   },
 ];
 
@@ -157,7 +159,7 @@ const DEFAULT_FILTERS: ScreenerFilters = {
   sectors: [],
   grades: [],
   marketCaps: [],
-  sortBy: 'Price Change',
+  sortBy: 'FII Score',
 };
 
 // ─── Helpers ───
@@ -175,6 +177,13 @@ const getAiScoreColor = (score: number): string => {
 export const ScreenerScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
+  // Watchlist integration
+  const watchlistTickers = useWatchlistStore((s) => s.getAllWatchlistTickers());
+  const isInAnyWatchlist = useWatchlistStore((s) => s.isInAnyWatchlist);
+  const addTicker = useWatchlistStore((s) => s.addTicker);
+  const removeTicker = useWatchlistStore((s) => s.removeTicker);
+  const activeWatchlistId = useWatchlistStore((s) => s.activeWatchlistId);
+
   // State
   const [filters, setFilters] = useState<ScreenerFilters>({ ...DEFAULT_FILTERS });
   const [pendingFilters, setPendingFilters] = useState<ScreenerFilters>({ ...DEFAULT_FILTERS });
@@ -189,6 +198,7 @@ export const ScreenerScreen: React.FC = () => {
   const [hasMore, setHasMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
   const PAGE_SIZE = 50;
 
   // ─── Data Fetching ───
@@ -206,9 +216,9 @@ export const ScreenerScreen: React.FC = () => {
     if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
     if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
     const sortMap: Record<string, string> = {
-      'Price Change': 'changePercent', 'Ticker': 'ticker',
-      'AI Score': 'aiScore', 'Tech Score': 'technicalScore',
-      'Market Cap': 'marketCap',
+      'FII Score': 'aiScore', 'Price': 'price', 'Price Change': 'changePercent',
+      'Market Cap': 'marketCap', 'P/E': 'peRatio', 'Ticker': 'ticker',
+      'Tech Score': 'technicalScore',
     };
     if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'changePercent';
     if (appliedFilters.sortBy === 'Ticker') params.sortDir = 'asc';
@@ -395,6 +405,20 @@ export const ScreenerScreen: React.FC = () => {
     [navigation],
   );
 
+  // ─── Watchlist Toggle ───
+
+  const toggleWatchlistItem = useCallback(
+    (ticker: string, companyName: string) => {
+      Vibration.vibrate(10);
+      if (isInAnyWatchlist(ticker)) {
+        removeTicker(activeWatchlistId, ticker);
+      } else {
+        addTicker(activeWatchlistId, ticker, companyName);
+      }
+    },
+    [isInAnyWatchlist, addTicker, removeTicker, activeWatchlistId],
+  );
+
   // ─── Active Filter Count ───
 
   const activeFilterCount = (() => {
@@ -405,20 +429,30 @@ export const ScreenerScreen: React.FC = () => {
     if (filters.sectors.length > 0) count++;
     if (filters.grades.length > 0) count++;
     if (filters.marketCaps.length > 0) count++;
+    if (watchlistOnly) count++;
     return count;
   })();
 
   // ─── Client-side search filter ───
 
   const filteredResults = useMemo(() => {
-    if (!searchQuery.trim()) return results;
-    const q = searchQuery.trim().toLowerCase();
-    return results.filter(
-      (r) =>
-        r.ticker.toLowerCase().includes(q) ||
-        r.companyName.toLowerCase().includes(q),
-    );
-  }, [results, searchQuery]);
+    let data = results;
+    // Watchlist filter
+    if (watchlistOnly) {
+      const wlSet = new Set(watchlistTickers);
+      data = data.filter((r) => wlSet.has(r.ticker));
+    }
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      data = data.filter(
+        (r) =>
+          r.ticker.toLowerCase().includes(q) ||
+          r.companyName.toLowerCase().includes(q),
+      );
+    }
+    return data;
+  }, [results, searchQuery, watchlistOnly, watchlistTickers]);
 
   // ─── Render: Template Chip ───
 
@@ -460,6 +494,7 @@ export const ScreenerScreen: React.FC = () => {
       const aiColor = hasAiScore ? getAiScoreColor(item.aiScore!) : '#8b949e';
       const gradeColor =
         item.fundamentalGrade ? (GRADE_COLORS[item.fundamentalGrade as Grade] || '#8b949e') : '#8b949e';
+      const starred = isInAnyWatchlist(item.ticker);
 
       return (
         <TouchableOpacity
@@ -469,6 +504,20 @@ export const ScreenerScreen: React.FC = () => {
           accessibilityRole="button"
           accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasSignal ? item.signal + ' signal' : 'no signal'}`}
         >
+          {/* Star / Watchlist toggle */}
+          <TouchableOpacity
+            style={styles.starBtn}
+            onPress={() => toggleWatchlistItem(item.ticker, item.companyName)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={starred ? 'Remove from watchlist' : 'Add to watchlist'}
+          >
+            <Ionicons
+              name={starred ? 'star' : 'star-outline'}
+              size={18}
+              color={starred ? '#ffa726' : '#8b949e'}
+            />
+          </TouchableOpacity>
+
           <View style={styles.resultLeft}>
             <View style={styles.resultTickerRow}>
               <Text style={styles.resultTicker}>{item.ticker}</Text>
@@ -519,7 +568,7 @@ export const ScreenerScreen: React.FC = () => {
         </TouchableOpacity>
       );
     },
-    [handleResultPress],
+    [handleResultPress, isInAnyWatchlist, toggleWatchlistItem],
   );
 
   // ─── Render: Loading Skeleton ───
@@ -657,6 +706,28 @@ export const ScreenerScreen: React.FC = () => {
             <Ionicons name="close-circle" size={18} color="#8b949e" />
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* Watchlist Toggle */}
+      <View style={styles.toggleContainer}>
+        <TouchableOpacity
+          style={[styles.toggleBtn, !watchlistOnly && styles.toggleBtnActive]}
+          onPress={() => setWatchlistOnly(false)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="globe-outline" size={14} color={!watchlistOnly ? '#fff' : '#8b949e'} />
+          <Text style={[styles.toggleBtnText, !watchlistOnly && styles.toggleBtnTextActive]}>All Stocks</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleBtn, watchlistOnly && styles.toggleBtnActive]}
+          onPress={() => setWatchlistOnly(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="star" size={14} color={watchlistOnly ? '#ffa726' : '#8b949e'} />
+          <Text style={[styles.toggleBtnText, watchlistOnly && styles.toggleBtnTextActive]}>
+            My Watchlist{watchlistTickers.length > 0 ? ` (${watchlistTickers.length})` : ''}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Template Chips */}
@@ -1036,6 +1107,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '800',
+  },
+
+  // Watchlist Toggle
+  toggleContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: '#161b22',
+    borderWidth: 1,
+    borderColor: '#30363d',
+    overflow: 'hidden',
+  },
+  toggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    gap: 6,
+  },
+  toggleBtnActive: {
+    backgroundColor: '#21262d',
+  },
+  toggleBtnText: {
+    color: '#8b949e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  toggleBtnTextActive: {
+    color: '#fff',
+  },
+
+  // Star button on result row
+  starBtn: {
+    paddingRight: 10,
+    paddingVertical: 4,
   },
 
   // Template Chips

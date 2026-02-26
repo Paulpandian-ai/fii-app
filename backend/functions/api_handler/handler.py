@@ -2194,6 +2194,7 @@ def _handle_screener(method, query_params):
         "price": lambda x: x.get("price") or 0,
         "changePercent": lambda x: x.get("changePercent") or 0,
         "marketCap": lambda x: x.get("marketCap") or 0,
+        "peRatio": lambda x: x.get("peRatio") if x.get("peRatio") is not None and x.get("peRatio") > 0 else 9999,
         "ticker": lambda x: x.get("ticker", ""),
         "signal": lambda x: {"BUY": 3, "HOLD": 2, "SELL": 1}.get(x.get("signal") or "", 0),
     }
