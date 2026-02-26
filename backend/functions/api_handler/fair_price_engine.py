@@ -52,6 +52,16 @@ def _get_sector_pe(sector: str) -> float:
     return DEFAULT_PE
 
 
+def _to_float(v):
+    """Safely convert any numeric type (including Decimal) to float."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def compute_fair_price(
     ticker: str,
     current_price: float | None = None,
@@ -77,6 +87,14 @@ def compute_fair_price(
     Returns:
         Dict with fairPrice, valuation label, components, or None if no data.
     """
+    # Convert all numeric inputs to float to avoid Decimal arithmetic errors
+    current_price = _to_float(current_price)
+    eps_ttm = _to_float(eps_ttm)
+    dcf_fair_value = _to_float(dcf_fair_value)
+    dcf_growth_rate = _to_float(dcf_growth_rate)
+    dcf_discount_rate = _to_float(dcf_discount_rate)
+    dcf_terminal_growth = _to_float(dcf_terminal_growth)
+
     dcf_value = None
     relative_value = None
     methods_used = []

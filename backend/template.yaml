@@ -335,6 +335,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetFairPrice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /fair-price/{ticker}
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetAltData:
           Type: HttpApi
           Properties:

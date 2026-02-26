@@ -284,4 +284,10 @@ def get_basic_financials(ticker):
         "roeTTM": m.get("roeTTM"),
         "debtEquity": m.get("totalDebt/totalEquityQuarterly"),
         "profitMargin": m.get("netProfitMarginTTM"),
+        "dividendYield": m.get("dividendYieldIndicatedAnnual"),
+        "epsTTM": m.get("epsBasicExclExtraItemsTTM"),
+        "epsInclExtra": m.get("epsInclExtraItemsTTM"),
+        "revenuePerShareTTM": m.get("revenuePerShareTTM"),
+        "bookValuePerShare": m.get("bookValuePerShareQuarterly"),
+        "marketCapitalization": m.get("marketCapitalization"),
     }

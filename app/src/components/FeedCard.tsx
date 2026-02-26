@@ -145,13 +145,15 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
       // ── Price ──
       if (priceData) {
-        const p = typeof priceData.price === 'number' && Number.isFinite(priceData.price) ? priceData.price : null;
-        setPrice(p);
+        const rawPrice = priceData.price;
+        // Accept both number and string (DynamoDB Decimal → string via default=str)
+        const p = rawPrice != null ? safeNum(rawPrice) : 0;
+        setPrice(p > 0 ? p : null);
         setChange(safeNum(priceData.change));
         setChangePercent(safeNum(priceData.changePercent || priceData.change_percent));
-        if (priceData.marketCap > 0) setMarketCap(priceData.marketCap);
-        if (priceData.fiftyTwoWeekLow > 0) setW52Low(priceData.fiftyTwoWeekLow);
-        if (priceData.fiftyTwoWeekHigh > 0) setW52High(priceData.fiftyTwoWeekHigh);
+        if (safeNum(priceData.marketCap) > 0) setMarketCap(safeNum(priceData.marketCap));
+        if (safeNum(priceData.fiftyTwoWeekLow) > 0) setW52Low(safeNum(priceData.fiftyTwoWeekLow));
+        if (safeNum(priceData.fiftyTwoWeekHigh) > 0) setW52High(safeNum(priceData.fiftyTwoWeekHigh));
         if (priceData.sector) setSector(priceData.sector);
       }
 
