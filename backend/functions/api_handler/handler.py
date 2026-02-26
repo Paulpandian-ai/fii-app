@@ -673,7 +673,15 @@ def _handle_signal(method, ticker, user_id):
                 result["fundamentalScore"] = fund_analysis.get("gradeScore", 0)
                 ratios = fund_analysis.get("ratios", {})
                 if ratios:
-                    result["peRatio"] = ratios.get("peRatio") or ratios.get("forwardPE")
+                    # Prefer trailing P/E; keep negative values for "N/A (Loss)" display
+                    pe_val = ratios.get("peRatio")
+                    if pe_val is None:
+                        pe_val = ratios.get("forwardPE")
+                    result["peRatio"] = pe_val
+                    if ratios.get("forwardPE") is not None:
+                        result["forwardPE"] = ratios.get("forwardPE")
+                    if ratios.get("negativeEarnings"):
+                        result["negativeEarnings"] = True
                     result["ratios"] = ratios
                 dcf = fund_analysis.get("dcf")
                 if dcf:
@@ -1024,8 +1032,9 @@ def _handle_price(method, ticker):
                 "fiftyTwoWeekLow": round(financials.get("fiftyTwoWeekLow", 0) or 0, 2),
                 "fiftyTwoWeekHigh": round(financials.get("fiftyTwoWeekHigh", 0) or 0, 2),
                 "beta": round(financials.get("beta", 1.0) or 1.0, 2),
-                "forwardPE": round(financials.get("forwardPE", 0) or 0, 2),
-                "trailingPE": round(financials.get("peRatio", 0) or 0, 2),
+                "forwardPE": round(float(financials.get("forwardPE") or 0), 2) if financials.get("forwardPE") is not None else None,
+                "trailingPE": round(float(financials.get("peRatio") or 0), 2) if financials.get("peRatio") is not None else None,
+                "epsTTM": financials.get("epsTTM"),
                 "sector": profile.get("sector", ""),
                 "companyName": profile.get("name", ticker),
                 "source": "live",
@@ -1063,8 +1072,9 @@ def _handle_price(method, ticker):
             "fiftyTwoWeekLow": 0,
             "fiftyTwoWeekHigh": 0,
             "beta": 0,
-            "forwardPE": 0,
-            "trailingPE": 0,
+            "forwardPE": None,
+            "trailingPE": None,
+            "epsTTM": None,
             "sector": "",
             "companyName": signal.get("companyName", ticker),
             "note": "Live price unavailable — showing signal data only",
@@ -1089,8 +1099,9 @@ def _format_price_response(ticker, data, source, note=None):
         "fiftyTwoWeekLow": float(data.get("fiftyTwoWeekLow", 0) or 0),
         "fiftyTwoWeekHigh": float(data.get("fiftyTwoWeekHigh", 0) or 0),
         "beta": float(data.get("beta", 1.0) or 1.0),
-        "forwardPE": float(data.get("forwardPE", 0) or 0),
-        "trailingPE": float(data.get("trailingPE", 0) or 0),
+        "forwardPE": float(data["forwardPE"]) if data.get("forwardPE") is not None else None,
+        "trailingPE": float(data["trailingPE"]) if data.get("trailingPE") is not None else None,
+        "epsTTM": float(data["epsTTM"]) if data.get("epsTTM") is not None else None,
         "sector": data.get("sector", ""),
         "companyName": data.get("companyName", ticker),
         "source": source,

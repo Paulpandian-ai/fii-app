@@ -22,6 +22,8 @@ export interface EnrichmentData {
   rsi: number | null;
   healthGrade: string | null;
   peRatio: number | null;
+  forwardPE: number | null;
+  negativeEarnings: boolean;
   fairValueUpside: number | null;
   fairPriceDollars: number | null;
   fairPriceLabel: string | null;

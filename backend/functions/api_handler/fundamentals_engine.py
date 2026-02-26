@@ -288,7 +288,7 @@ def compute_z_score(financials, market_cap=None):
 
     if z > 2.99:
         zone = "safe"
-    elif z > 1.81:
+    elif z >= 1.81:
         zone = "gray"
     else:
         zone = "distress"
@@ -697,8 +697,11 @@ def compute_ratios(financials, market_cap=None, current_price=None):
     # Valuation ratios (need market cap)
     if market_cap:
         pe = _safe_div(market_cap, ni)
-        if pe is not None and pe > 0:
+        if pe is not None:
+            # Store P/E even for negative earnings (frontend handles display)
             ratios["peRatio"] = round(pe, 1)
+            if ni is not None and ni < 0:
+                ratios["negativeEarnings"] = True
         pb = _safe_div(market_cap, te)
         if pb is not None:
             ratios["priceToBook"] = round(pb, 2)
@@ -845,7 +848,10 @@ def _build_fallback_from_finnhub(ticker, market_cap=None, beta=1.0, current_pric
         ratios = {}
         pe = financials.get("peRatio")
         if pe is not None:
-            ratios["peRatio"] = round(float(pe), 2)
+            pe_val = round(float(pe), 2)
+            ratios["peRatio"] = pe_val
+            if pe_val < 0:
+                ratios["negativeEarnings"] = True
         fwd_pe = financials.get("forwardPE")
         if fwd_pe is not None:
             ratios["forwardPE"] = round(float(fwd_pe), 2)

@@ -107,6 +107,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [rsi, setRsi] = useState<number | null>(cached?.rsi ?? null);
   const [healthGrade, setHealthGrade] = useState<string | null>(cached?.healthGrade ?? null);
   const [peRatio, setPeRatio] = useState<number | null>(cached?.peRatio ?? null);
+  const [forwardPE, setForwardPE] = useState<number | null>(cached?.forwardPE ?? null);
+  const [negativeEarnings, setNegativeEarnings] = useState<boolean>(cached?.negativeEarnings ?? false);
   const [fairValueUpside, setFairValueUpside] = useState<number | null>(cached?.fairValueUpside ?? null);
   const [fairPriceDollars, setFairPriceDollars] = useState<number | null>(cached?.fairPriceDollars ?? null);
   const [fairPriceLabel, setFairPriceLabel] = useState<string | null>(cached?.fairPriceLabel ?? null);
@@ -200,10 +202,22 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const grade = sig?.fundamentalGrade ?? fund?.grade ?? fundRaw?.grade;
       if (grade && grade !== 'N/A') { setHealthGrade(grade); ed.healthGrade = grade; }
 
-      // ── P/E Ratio: signal → fundamentals.ratios → raw fundamentals → price endpoint ──
+      // ── P/E Ratio (trailing TTM): signal → fundamentals.ratios → price endpoint ──
       const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio
-        ?? fundRaw?.ratios?.peRatio ?? priceData?.trailingPE ?? priceData?.forwardPE;
-      if (pe > 0) { const v = safeNum(pe); setPeRatio(v); ed.peRatio = v; }
+        ?? fundRaw?.ratios?.peRatio ?? priceData?.trailingPE;
+      if (pe != null && pe !== 0) {
+        const v = safeNum(pe);
+        setPeRatio(v);
+        ed.peRatio = v;
+        // Flag negative earnings (P/E < 0 means company is losing money)
+        const isNegEarnings = v < 0 || sig?.negativeEarnings || sig?.ratios?.negativeEarnings
+          || fund?.ratios?.negativeEarnings || fundRaw?.ratios?.negativeEarnings;
+        if (isNegEarnings) { setNegativeEarnings(true); ed.negativeEarnings = true; }
+      }
+      // ── Forward P/E (NTM) as secondary metric ──
+      const fpe = sig?.forwardPE ?? sig?.ratios?.forwardPE ?? fund?.ratios?.forwardPE
+        ?? fundRaw?.ratios?.forwardPE ?? priceData?.forwardPE;
+      if (fpe != null && fpe > 0) { const v = safeNum(fpe); setForwardPE(v); ed.forwardPE = v; }
 
       // ── Fair Value Upside: signal → fundamentals.dcf.upside ──
       const fvu = sig?.fairValueUpside ?? sig?.fairPriceUpside ?? fund?.dcf?.upside;
@@ -273,6 +287,8 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         rsi: ed.rsi ?? null,
         healthGrade: ed.healthGrade ?? null,
         peRatio: ed.peRatio ?? null,
+        forwardPE: ed.forwardPE ?? null,
+        negativeEarnings: ed.negativeEarnings ?? false,
         fairValueUpside: ed.fairValueUpside ?? null,
         fairPriceDollars: ed.fairPriceDollars ?? null,
         fairPriceLabel: ed.fairPriceLabel ?? null,
@@ -457,11 +473,18 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
-              <Ionicons name="bar-chart-outline" size={13} color="rgba(255,255,255,0.5)" />
+              <Ionicons name="bar-chart-outline" size={13} color={negativeEarnings ? '#EF4444' : peRatio != null && peRatio > 100 ? '#F59E0B' : 'rgba(255,255,255,0.5)'} />
               {showSkeleton && peRatio == null ? <MetricSkeleton /> : (
-                <Text style={styles.metricValue}>{peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}</Text>
+                <Text style={[styles.metricValue, negativeEarnings ? { color: '#EF4444' } : peRatio != null && peRatio > 100 ? { color: '#F59E0B' } : {}]}>
+                  {negativeEarnings ? 'N/A' : peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}
+                </Text>
               )}
               <Text style={styles.metricLabel}>P/E</Text>
+              {negativeEarnings ? (
+                <Text style={[styles.metricSub, { color: '#EF4444' }]}>Loss</Text>
+              ) : forwardPE != null && forwardPE > 0 ? (
+                <Text style={styles.metricSub}>Fwd {forwardPE.toFixed(1)}</Text>
+              ) : null}
             </View>
           </View>
           {/* Divider */}

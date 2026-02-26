@@ -263,7 +263,7 @@ def get_basic_financials(ticker: str) -> dict:
     return {
         "ticker": ticker,
         "peRatio": m.get("peBasicExclExtraTTM"),
-        "forwardPE": m.get("peTTM"),
+        "forwardPE": m.get("peNTM"),
         "beta": m.get("beta"),
         "fiftyTwoWeekHigh": m.get("52WeekHigh"),
         "fiftyTwoWeekLow": m.get("52WeekLow"),
