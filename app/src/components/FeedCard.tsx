@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,9 +6,12 @@ import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
+import { Skeleton } from './Skeleton';
 import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
+import { useSignalStore } from '../store/signalStore';
+import type { EnrichmentData } from '../store/signalStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -62,6 +65,11 @@ const DIMENSIONS: { key: string; label: string; icon: string; color: string }[] 
   { key: 'supplyChain', label: 'Supply Chain', icon: 'git-network', color: '#A78BFA' },
 ];
 
+/** Inline skeleton for metric values while loading */
+const MetricSkeleton: React.FC = () => (
+  <Skeleton width={36} height={16} borderRadius={4} />
+);
+
 export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const score = safeNum(item.compositeScore);
 
@@ -71,6 +79,11 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const removeTicker = useWatchlistStore((s) => s.removeTicker);
   const activeWatchlistId = useWatchlistStore((s) => s.activeWatchlistId);
 
+  // ─── Read enrichment cache from Zustand (persists across unmounts) ───
+  const cached = useSignalStore((s) => s.enrichmentCache[item.ticker]);
+  const setEnrichment = useSignalStore((s) => s.setEnrichment);
+  const hasCache = cached != null;
+
   const toggleBookmark = useCallback(() => {
     if (isBookmarked) {
       removeTicker(activeWatchlistId, item.ticker);
@@ -79,35 +92,39 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     }
   }, [isBookmarked, item.ticker, item.companyName, activeWatchlistId, addTicker, removeTicker]);
 
-  // ─── Price data ───
-  const [price, setPrice] = useState<number | null>(null);
-  const [changePercent, setChangePercent] = useState<number>(0);
-  const [change, setChange] = useState<number>(0);
-  const [marketCap, setMarketCap] = useState<number>(0);
-  const [w52Low, setW52Low] = useState<number | null>(null);
-  const [w52High, setW52High] = useState<number | null>(null);
-  const [sector, setSector] = useState<string | null>(null);
+  // ─── Price data (initialized from cache if available) ───
+  const [price, setPrice] = useState<number | null>(cached?.price ?? null);
+  const [changePercent, setChangePercent] = useState<number>(cached?.changePercent ?? 0);
+  const [change, setChange] = useState<number>(cached?.change ?? 0);
+  const [marketCap, setMarketCap] = useState<number>(cached?.marketCap ?? 0);
+  const [w52Low, setW52Low] = useState<number | null>(cached?.w52Low ?? null);
+  const [w52High, setW52High] = useState<number | null>(cached?.w52High ?? null);
+  const [sector, setSector] = useState<string | null>(cached?.sector ?? null);
 
-  // ─── Signal-enriched data (single call) ───
-  const [techScore, setTechScore] = useState<number | null>(null);
-  const [techTrend, setTechTrend] = useState<string | null>(null);
-  const [rsi, setRsi] = useState<number | null>(null);
-  const [healthGrade, setHealthGrade] = useState<string | null>(null);
-  const [peRatio, setPeRatio] = useState<number | null>(null);
-  const [fairValueUpside, setFairValueUpside] = useState<number | null>(null);
-  const [fairPriceDollars, setFairPriceDollars] = useState<number | null>(null);
-  const [fairPriceLabel, setFairPriceLabel] = useState<string | null>(null);
-  const [zScore, setZScore] = useState<number | null>(null);
-  const [fScoreVal, setFScoreVal] = useState<number | null>(null);
-  const [dimensionScores, setDimensionScores] = useState<Record<string, number>>({});
-  const [enrichedFactors, setEnrichedFactors] = useState<{ name: string; score: number }[]>([]);
-  const [enrichedInsight, setEnrichedInsight] = useState<string | null>(null);
+  // ─── Signal-enriched data (initialized from cache) ───
+  const [techScore, setTechScore] = useState<number | null>(cached?.techScore ?? null);
+  const [techTrend, setTechTrend] = useState<string | null>(cached?.techTrend ?? null);
+  const [rsi, setRsi] = useState<number | null>(cached?.rsi ?? null);
+  const [healthGrade, setHealthGrade] = useState<string | null>(cached?.healthGrade ?? null);
+  const [peRatio, setPeRatio] = useState<number | null>(cached?.peRatio ?? null);
+  const [fairValueUpside, setFairValueUpside] = useState<number | null>(cached?.fairValueUpside ?? null);
+  const [fairPriceDollars, setFairPriceDollars] = useState<number | null>(cached?.fairPriceDollars ?? null);
+  const [fairPriceLabel, setFairPriceLabel] = useState<string | null>(cached?.fairPriceLabel ?? null);
+  const [zScore, setZScore] = useState<number | null>(cached?.zScore ?? null);
+  const [fScoreVal, setFScoreVal] = useState<number | null>(cached?.fScoreVal ?? null);
+  const [dimensionScores, setDimensionScores] = useState<Record<string, number>>(cached?.dimensionScores ?? {});
+  const [enrichedFactors, setEnrichedFactors] = useState<{ name: string; score: number }[]>(cached?.enrichedFactors ?? []);
+  const [enrichedInsight, setEnrichedInsight] = useState<string | null>(cached?.enrichedInsight ?? null);
 
   // ─── AI Agent insight ───
-  const [aiHeadline, setAiHeadline] = useState<string | null>(null);
-  const [aiAction, setAiAction] = useState<string | null>(null);
+  const [aiHeadline, setAiHeadline] = useState<string | null>(cached?.aiHeadline ?? null);
+  const [aiAction, setAiAction] = useState<string | null>(cached?.aiAction ?? null);
 
-  const [dataLoaded, setDataLoaded] = useState(false);
+  // dataLoaded = true if we have cache OR fresh API data has arrived
+  const [dataLoaded, setDataLoaded] = useState(hasCache);
+
+  // Track collected data for cache write
+  const enrichmentRef = useRef<Partial<EnrichmentData>>({});
 
   useEffect(() => {
     let mounted = true;
@@ -143,70 +160,79 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const sigRaw = signalR.status === 'fulfilled' ? signalR.value : null;
       const fundRaw = fundR.status === 'fulfilled' ? fundR.value : null;
 
+      // Collect enrichment data for cache
+      const ed: Partial<EnrichmentData> = {};
+
       // ── Price ──
       if (priceData) {
         const rawPrice = priceData.price;
         // Accept both number and string (DynamoDB Decimal → string via default=str)
         const p = rawPrice != null ? safeNum(rawPrice) : 0;
-        setPrice(p > 0 ? p : null);
-        setChange(safeNum(priceData.change));
-        setChangePercent(safeNum(priceData.changePercent || priceData.change_percent));
-        if (safeNum(priceData.marketCap) > 0) setMarketCap(safeNum(priceData.marketCap));
-        if (safeNum(priceData.fiftyTwoWeekLow) > 0) setW52Low(safeNum(priceData.fiftyTwoWeekLow));
-        if (safeNum(priceData.fiftyTwoWeekHigh) > 0) setW52High(safeNum(priceData.fiftyTwoWeekHigh));
-        if (priceData.sector) setSector(priceData.sector);
+        const priceVal = p > 0 ? p : null;
+        setPrice(priceVal);
+        ed.price = priceVal;
+        const ch = safeNum(priceData.change);
+        setChange(ch);
+        ed.change = ch;
+        const cp = safeNum(priceData.changePercent || priceData.change_percent);
+        setChangePercent(cp);
+        ed.changePercent = cp;
+        if (safeNum(priceData.marketCap) > 0) { const mc = safeNum(priceData.marketCap); setMarketCap(mc); ed.marketCap = mc; }
+        if (safeNum(priceData.fiftyTwoWeekLow) > 0) { const lo = safeNum(priceData.fiftyTwoWeekLow); setW52Low(lo); ed.w52Low = lo; }
+        if (safeNum(priceData.fiftyTwoWeekHigh) > 0) { const hi = safeNum(priceData.fiftyTwoWeekHigh); setW52High(hi); ed.w52High = hi; }
+        if (priceData.sector) { setSector(priceData.sector); ed.sector = priceData.sector; }
       }
 
       // ── Technical Score: signal → technicals endpoint ──
       const ta = sig?.technicalAnalysis || {};
       const ts = sig?.technicalScore ?? ta.technicalScore ?? tech?.technicalScore;
-      if (ts != null) setTechScore(safeNum(ts));
+      if (ts != null) { const v = safeNum(ts); setTechScore(v); ed.techScore = v; }
 
       // ── RSI: signal.technicalAnalysis → technicals endpoint ──
       const rsiVal = ta.rsi ?? tech?.rsi;
-      if (rsiVal != null) setRsi(safeNum(rsiVal));
+      if (rsiVal != null) { const v = safeNum(rsiVal); setRsi(v); ed.rsi = v; }
 
       // ── Trend: signal → technicals endpoint ──
       const trend = ta.signals?.trend ?? tech?.signals?.trend;
-      if (trend) setTechTrend(trend);
+      if (trend) { setTechTrend(trend); ed.techTrend = trend; }
 
       // ── Health Grade: signal → fundamentals endpoint (also check raw) ──
       const grade = sig?.fundamentalGrade ?? fund?.grade ?? fundRaw?.grade;
-      if (grade && grade !== 'N/A') setHealthGrade(grade);
+      if (grade && grade !== 'N/A') { setHealthGrade(grade); ed.healthGrade = grade; }
 
       // ── P/E Ratio: signal → fundamentals.ratios → raw fundamentals → price endpoint ──
       const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio
         ?? fundRaw?.ratios?.peRatio ?? priceData?.trailingPE ?? priceData?.forwardPE;
-      if (pe > 0) setPeRatio(safeNum(pe));
+      if (pe > 0) { const v = safeNum(pe); setPeRatio(v); ed.peRatio = v; }
 
       // ── Fair Value Upside: signal → fundamentals.dcf.upside ──
       const fvu = sig?.fairValueUpside ?? sig?.fairPriceUpside ?? fund?.dcf?.upside;
-      if (fvu != null) setFairValueUpside(safeNum(fvu));
+      if (fvu != null) { const v = safeNum(fvu); setFairValueUpside(v); ed.fairValueUpside = v; }
 
       // ── Fair Price (dollar amount): signal → fair-price endpoint ──
       const fpData = fairPriceR?.status === 'fulfilled' ? fairPriceR.value : null;
       const fp = sig?.fairPrice ?? fpData?.fairPrice;
-      if (fp != null && fp > 0) setFairPriceDollars(safeNum(fp));
+      if (fp != null && fp > 0) { const v = safeNum(fp); setFairPriceDollars(v); ed.fairPriceDollars = v; }
       const fpLabel = sig?.fairPriceLabel ?? fpData?.label;
-      if (fpLabel) setFairPriceLabel(fpLabel);
+      if (fpLabel) { setFairPriceLabel(fpLabel); ed.fairPriceLabel = fpLabel; }
       // If we got fair price upside from this endpoint but not from fundamentals
       if (fvu == null) {
         const fpUpside = sig?.fairPriceUpside ?? fpData?.upside;
-        if (fpUpside != null) setFairValueUpside(safeNum(fpUpside));
+        if (fpUpside != null) { const v = safeNum(fpUpside); setFairValueUpside(v); ed.fairValueUpside = v; }
       }
 
       // ── Z-Score: signal → fundamentals.zScore.value ──
       const z = sig?.zScore ?? fund?.zScore?.value;
-      if (z != null) setZScore(safeNum(z));
+      if (z != null) { const v = safeNum(z); setZScore(v); ed.zScore = v; }
 
       // ── F-Score: signal → fundamentals.fScore.value ──
       const f = sig?.fScore ?? fund?.fScore?.value;
-      if (f != null) setFScoreVal(safeNum(f));
+      if (f != null) { const v = safeNum(f); setFScoreVal(v); ed.fScoreVal = v; }
 
       // ── Dimension Scores: signal → factors endpoint (also check raw for partial) ──
       const factorsRaw = factorR.status === 'fulfilled' ? factorR.value : null;
       const dims = sig?.dimensionScores ?? factors?.dimensionScores ?? factorsRaw?.dimensionScores;
-      if (dims && typeof dims === 'object' && Object.keys(dims).length > 0) setDimensionScores(dims);
+      if (dims && typeof dims === 'object' && Object.keys(dims).length > 0) { setDimensionScores(dims); ed.dimensionScores = dims; }
 
       // ── Factor pills: signal → factors endpoint → feedItem.topFactors ──
       const pos = sig?.topPositive ?? factors?.topPositive ?? factorsRaw?.topPositive ?? [];
@@ -215,29 +241,59 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
         ...pos.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
         ...neg.map((f: any) => ({ name: f.factorName || f.name, score: safeNum(f.normalizedScore ?? f.score) })),
       ].filter((f: any) => f.name).slice(0, 4);
-      if (allFactors.length > 0) setEnrichedFactors(allFactors);
+      if (allFactors.length > 0) { setEnrichedFactors(allFactors); ed.enrichedFactors = allFactors; }
 
       // ── Insight from signal ──
-      if (sig?.insight) setEnrichedInsight(sig.insight);
-      else if (sigRaw?.insight) setEnrichedInsight(sigRaw.insight);
+      if (sig?.insight) { setEnrichedInsight(sig.insight); ed.enrichedInsight = sig.insight; }
+      else if (sigRaw?.insight) { setEnrichedInsight(sigRaw.insight); ed.enrichedInsight = sigRaw.insight; }
 
       // ── AI Agent Insight ──
       if (insightData) {
         const insights = insightData.insights || [];
         if (insights.length > 0) {
           const latest = insights[0];
-          setAiHeadline(latest.headline || null);
-          setAiAction(latest.action || null);
+          if (latest.headline) { setAiHeadline(latest.headline); ed.aiHeadline = latest.headline; }
+          if (latest.action) { setAiAction(latest.action); ed.aiAction = latest.action; }
         }
       }
 
       setDataLoaded(true);
+
+      // ── Save enrichment data to Zustand cache ──
+      setEnrichment(item.ticker, {
+        price: ed.price ?? null,
+        change: ed.change ?? 0,
+        changePercent: ed.changePercent ?? 0,
+        marketCap: ed.marketCap ?? 0,
+        w52Low: ed.w52Low ?? null,
+        w52High: ed.w52High ?? null,
+        sector: ed.sector ?? null,
+        techScore: ed.techScore ?? null,
+        techTrend: ed.techTrend ?? null,
+        rsi: ed.rsi ?? null,
+        healthGrade: ed.healthGrade ?? null,
+        peRatio: ed.peRatio ?? null,
+        fairValueUpside: ed.fairValueUpside ?? null,
+        fairPriceDollars: ed.fairPriceDollars ?? null,
+        fairPriceLabel: ed.fairPriceLabel ?? null,
+        zScore: ed.zScore ?? null,
+        fScoreVal: ed.fScoreVal ?? null,
+        dimensionScores: ed.dimensionScores ?? {},
+        enrichedFactors: ed.enrichedFactors ?? [],
+        enrichedInsight: ed.enrichedInsight ?? null,
+        aiHeadline: ed.aiHeadline ?? null,
+        aiAction: ed.aiAction ?? null,
+        cachedAt: Date.now(),
+      });
     });
     return () => { mounted = false; };
   }, [item.ticker]);
 
   const confidence = item.confidence;
   const isPositive = change >= 0;
+
+  // Whether to show skeleton (first load, no cache)
+  const showSkeleton = !dataLoaded && !hasCache;
 
   // Derived colors
   const gradeColor = healthGrade
@@ -331,14 +387,22 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
 
         {/* ── Price Row + Market Cap ── */}
         <View style={styles.priceRow}>
-          <Text style={styles.price}>
-            {price != null ? `$${price.toFixed(2)}` : '--'}
-          </Text>
+          {showSkeleton && price == null ? (
+            <Skeleton width={90} height={24} borderRadius={6} />
+          ) : (
+            <Text style={styles.price}>
+              {price != null ? `$${price.toFixed(2)}` : '--'}
+            </Text>
+          )}
           <View style={[styles.changePill, { backgroundColor: isPositive ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }]}>
             <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={isPositive ? '#10B981' : '#EF4444'} />
-            <Text style={[styles.changeText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
-              {dataLoaded ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '--'}
-            </Text>
+            {showSkeleton ? (
+              <Skeleton width={50} height={14} borderRadius={4} />
+            ) : (
+              <Text style={[styles.changeText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+                {dataLoaded ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '--'}
+              </Text>
+            )}
           </View>
           {marketCap > 0 && (
             <Text style={styles.marketCapText}>{formatMarketCap(marketCap)}</Text>
@@ -376,21 +440,27 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           <View style={styles.metricsRow}>
             <View style={styles.metricItem}>
               <Ionicons name="analytics-outline" size={13} color="#60A5FA" />
-              <Text style={styles.metricValue}>{techScore != null ? techScore.toFixed(1) : '--'}</Text>
+              {showSkeleton && techScore == null ? <MetricSkeleton /> : (
+                <Text style={styles.metricValue}>{techScore != null ? techScore.toFixed(1) : '--'}</Text>
+              )}
               <Text style={styles.metricLabel}>Technical</Text>
               {techTrend && <Text style={[styles.metricSub, { color: trendColor }]} numberOfLines={1}>{techTrend}</Text>}
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
               <Ionicons name="shield-checkmark-outline" size={13} color={gradeColor} />
-              <Text style={[styles.metricValue, { color: gradeColor }]}>{healthGrade || '--'}</Text>
+              {showSkeleton && !healthGrade ? <MetricSkeleton /> : (
+                <Text style={[styles.metricValue, { color: gradeColor }]}>{healthGrade || '--'}</Text>
+              )}
               <Text style={styles.metricLabel}>Health</Text>
               {fScoreVal != null && <Text style={styles.metricSub}>F-Score {fScoreVal}/9</Text>}
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
               <Ionicons name="bar-chart-outline" size={13} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.metricValue}>{peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}</Text>
+              {showSkeleton && peRatio == null ? <MetricSkeleton /> : (
+                <Text style={styles.metricValue}>{peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}</Text>
+              )}
               <Text style={styles.metricLabel}>P/E</Text>
             </View>
           </View>
@@ -400,31 +470,48 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
           <View style={styles.metricsRow}>
             <View style={styles.metricItem}>
               <Ionicons name="speedometer-outline" size={13} color={rsiColor} />
-              <Text style={[styles.metricValue, { color: rsiColor }]}>{rsi != null ? rsi.toFixed(0) : '--'}</Text>
+              {showSkeleton && rsi == null ? <MetricSkeleton /> : (
+                <Text style={[styles.metricValue, { color: rsiColor }]}>{rsi != null ? rsi.toFixed(0) : '--'}</Text>
+              )}
               <Text style={styles.metricLabel}>RSI</Text>
               {rsi != null && <Text style={[styles.metricSub, { color: rsiColor }]}>{rsi >= 70 ? 'overbought' : rsi <= 30 ? 'oversold' : 'neutral'}</Text>}
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
               <Ionicons name="trending-up-outline" size={13} color={fvColor} />
-              <Text style={[styles.metricValue, { color: fvColor }]}>
-                {fairPriceDollars != null ? `$${fairPriceDollars >= 1000 ? `${(fairPriceDollars / 1000).toFixed(1)}K` : fairPriceDollars.toFixed(0)}` : fairValueUpside != null ? `${fairValueUpside > 0 ? '+' : ''}${fairValueUpside.toFixed(0)}%` : '--'}
-              </Text>
+              {showSkeleton && fairPriceDollars == null && fairValueUpside == null ? <MetricSkeleton /> : (
+                <Text style={[styles.metricValue, { color: fvColor }]}>
+                  {fairPriceDollars != null ? `$${fairPriceDollars >= 1000 ? `${(fairPriceDollars / 1000).toFixed(1)}K` : fairPriceDollars.toFixed(0)}` : fairValueUpside != null ? `${fairValueUpside > 0 ? '+' : ''}${fairValueUpside.toFixed(0)}%` : '--'}
+                </Text>
+              )}
               <Text style={styles.metricLabel}>Fair Price</Text>
               {fairPriceLabel && <Text style={[styles.metricSub, { color: fvColor }]}>{fairPriceLabel}</Text>}
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
               <Ionicons name="pulse-outline" size={13} color={zColor} />
-              <Text style={[styles.metricValue, { color: zColor }]}>{zScore != null ? zScore.toFixed(1) : '--'}</Text>
+              {showSkeleton && zScore == null ? <MetricSkeleton /> : (
+                <Text style={[styles.metricValue, { color: zColor }]}>{zScore != null ? zScore.toFixed(1) : '--'}</Text>
+              )}
               <Text style={styles.metricLabel}>Z-Score</Text>
               {zScore != null && <Text style={[styles.metricSub, { color: zColor }]}>{zScore > 2.99 ? 'safe' : zScore < 1.81 ? 'distress' : 'grey zone'}</Text>}
             </View>
           </View>
         </View>
 
-        {/* ── Dimension Score Bars ── */}
-        {Object.keys(dimensionScores).length > 0 && (
+        {/* ── Dimension Score Bars (skeleton while loading) ── */}
+        {showSkeleton && Object.keys(dimensionScores).length === 0 ? (
+          <View style={styles.dimensionContainer}>
+            {DIMENSIONS.map((dim) => (
+              <View key={dim.key} style={styles.dimensionRow}>
+                <Ionicons name={dim.icon as any} size={10} color={dim.color} />
+                <Text style={styles.dimensionLabel}>{dim.label}</Text>
+                <Skeleton width={'100%' as any} height={4} borderRadius={2} />
+                <Skeleton width={22} height={10} borderRadius={2} />
+              </View>
+            ))}
+          </View>
+        ) : Object.keys(dimensionScores).length > 0 ? (
           <View style={styles.dimensionContainer}>
             {DIMENSIONS.map((dim) => {
               const val = dimensionScores[dim.key];
@@ -442,10 +529,16 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
               );
             })}
           </View>
-        )}
+        ) : null}
 
         {/* ── AI Insight ── */}
-        {aiHeadline ? (
+        {showSkeleton && !insightText ? (
+          <View style={{ marginBottom: 8, alignItems: 'center' }}>
+            <Skeleton width={280} height={14} borderRadius={4} />
+            <View style={{ height: 4 }} />
+            <Skeleton width={220} height={14} borderRadius={4} />
+          </View>
+        ) : aiHeadline ? (
           <View style={styles.aiInsightBox}>
             <View style={styles.aiInsightHeader}>
               <Ionicons name="sparkles" size={12} color="#A78BFA" />

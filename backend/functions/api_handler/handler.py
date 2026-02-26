@@ -2457,6 +2457,19 @@ def _handle_get_portfolio(user_id):
 
     holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
 
+    # Fetch all prices in parallel to avoid sequential Finnhub calls
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    tickers = [h["ticker"] for h in holdings_raw]
+    price_map = {}
+    with ThreadPoolExecutor(max_workers=min(10, len(tickers))) as executor:
+        futures = {executor.submit(_fetch_price_quiet, t): t for t in tickers}
+        for future in as_completed(futures):
+            t = futures[future]
+            try:
+                price_map[t] = future.result()
+            except Exception:
+                price_map[t] = None
+
     # Enrich with prices
     enriched = []
     total_value = 0.0
@@ -2469,7 +2482,7 @@ def _handle_get_portfolio(user_id):
         cost_basis = shares * avg_cost
         total_cost += cost_basis
 
-        price_data = _fetch_price_quiet(h["ticker"])
+        price_data = price_map.get(h["ticker"])
         current_price = price_data.get("price", avg_cost) if price_data else avg_cost
         change = price_data.get("change", 0) if price_data else 0
         change_pct = price_data.get("changePercent", 0) if price_data else 0
@@ -2698,12 +2711,24 @@ def _handle_portfolio_summary(user_id):
     holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
     tickers = [h["ticker"] for h in holdings_raw]
 
-    # Fetch signals for portfolio tickers
+    # Fetch signals and prices in parallel
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     signal_keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in tickers]
     signal_items = db.batch_get(signal_keys) if signal_keys else []
     signals_by_ticker = {}
     for s in signal_items:
         signals_by_ticker[s.get("ticker", "")] = s
+
+    # Parallel price fetch
+    price_map = {}
+    with ThreadPoolExecutor(max_workers=min(10, len(tickers))) as executor:
+        futures = {executor.submit(_fetch_price_quiet, t): t for t in tickers}
+        for future in as_completed(futures):
+            t = futures[future]
+            try:
+                price_map[t] = future.result()
+            except Exception:
+                price_map[t] = None
 
     biggest_winner = None
     biggest_risk = None
@@ -2714,7 +2739,7 @@ def _handle_portfolio_summary(user_id):
         shares = float(h.get("shares", 0))
         avg_cost = float(h.get("avgCost", 0))
 
-        price_data = _fetch_price_quiet(ticker)
+        price_data = price_map.get(ticker)
         current_price = price_data.get("price", avg_cost) if price_data else avg_cost
         cost_basis = shares * avg_cost
         gain_loss_pct = ((current_price - avg_cost) / avg_cost * 100) if avg_cost else 0
@@ -2742,6 +2767,8 @@ def _handle_portfolio_summary(user_id):
 
 def _fetch_price_quiet(ticker):
     """Fetch price for a ticker, return None on failure. Falls back to DynamoDB."""
+    from datetime import datetime, timezone
+
     # Try DynamoDB price cache first (fastest)
     try:
         cached = db.get_item(f"PRICE#{ticker}", "LATEST")
@@ -2760,12 +2787,26 @@ def _fetch_price_quiet(ticker):
         quote = finnhub_client.get_quote(ticker)
         if quote and quote.get("price"):
             profile = finnhub_client.get_company_profile(ticker)
-            return {
+            result = {
                 "price": round(quote.get("price", 0), 2),
                 "change": round(quote.get("change", 0), 2),
                 "changePercent": round(quote.get("changePercent", 0), 2),
                 "companyName": profile.get("name", ticker),
             }
+            # Cache to DynamoDB for faster subsequent calls
+            try:
+                db.put_item({
+                    "PK": f"PRICE#{ticker}",
+                    "SK": "LATEST",
+                    "price": result["price"],
+                    "change": result["change"],
+                    "changePercent": result["changePercent"],
+                    "companyName": result["companyName"],
+                    "cachedAt": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+            return result
     except Exception:
         pass
 
