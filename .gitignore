@@ -34,3 +34,9 @@ samconfig.toml
 # Logs
 *.log
 npm-debug.log*
+
+backend/*.json
+!backend/package.json
+!backend/template.yaml
+models.py
+FII_Architecture_Diagram.html
