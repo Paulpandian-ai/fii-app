@@ -128,7 +128,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
       <TouchableOpacity
         style={styles.resultRow}
         onPress={() => handleSelect(item)}
-        disabled={generating !== null}
+        disabled={generating !== null ? true : false}
       >
         <View style={styles.resultLeft}>
           <View style={styles.tickerRow}>
@@ -165,7 +165,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={true}>
+    <Modal visible={Boolean(visible)} animationType="slide" transparent={true}>
       <View style={styles.overlay}>
         <View style={styles.container}>
           {/* Header */}

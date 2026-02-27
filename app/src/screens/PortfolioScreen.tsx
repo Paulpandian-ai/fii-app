@@ -338,12 +338,20 @@ export const PortfolioScreen: React.FC = () => {
 
   // ── Section Collapse ──
   const toggleSection = useCallback((section: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch {
+      // LayoutAnimation can throw on Android in certain RN versions
+    }
     setCollapsed((prev) => ({ ...prev, [section]: !prev[section] }));
   }, []);
 
   const toggleWlCollapse = useCallback((wlId: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch {
+      // LayoutAnimation can throw on Android in certain RN versions
+    }
     setWlCollapsed((prev) => ({ ...prev, [wlId]: !prev[wlId] }));
   }, []);
 
@@ -611,6 +619,20 @@ export const PortfolioScreen: React.FC = () => {
   }
 
   // ═══════ MAIN RENDER ═══════
+  if (__DEV__) {
+    console.log('[PortfolioScreen] render start', {
+      hasHoldings,
+      holdingsCount: holdings.length,
+      healthLoading,
+      healthError,
+      sectorDataLen: sectorData.length,
+      watchlistsLen: watchlists.length,
+      collapsedHealth: collapsed.health,
+      collapsedHoldings: collapsed.holdings,
+      collapsedWatchlist: collapsed.watchlist,
+    });
+  }
+
   return (
     <LinearGradient colors={[COLORS.bg, COLORS.bgEnd]} style={styles.container}>
       {/* Top bar */}
@@ -632,10 +654,11 @@ export const PortfolioScreen: React.FC = () => {
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
+          <RefreshControl refreshing={Boolean(refreshing)} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
       >
         {/* ═══════ 1. PORTFOLIO SUMMARY ═══════ */}
+
         <View style={styles.section}>
           <View style={styles.staticHeader}>
             <Text style={styles.sectionTitle}>Portfolio Summary</Text>
@@ -702,6 +725,7 @@ export const PortfolioScreen: React.FC = () => {
         </View>
 
         {/* ═══════ 2. PORTFOLIO HEALTH (collapsible) ═══════ */}
+
         <View style={styles.section}>
           <SectionHeader
             title="Portfolio Health"
@@ -785,6 +809,7 @@ export const PortfolioScreen: React.FC = () => {
         </View>
 
         {/* ═══════ 3. HOLDINGS (collapsible) ═══════ */}
+
         <View style={styles.section}>
           <SectionHeader
             title={`Holdings${hasHoldings ? ` (${holdings.length})` : ''}`}
@@ -941,10 +966,12 @@ export const PortfolioScreen: React.FC = () => {
           )}
         </View>
 
-        {/* ═══════ 4. TRENDING NOW 🔥 ═══════ */}
+        {/* ═══════ 4. TRENDING NOW ═══════ */}
+
         <TrendingSection />
 
         {/* ═══════ 5. WATCHLISTS (collapsible) ═══════ */}
+
         <View style={styles.section}>
           <SectionHeader
             title="Watchlists"
@@ -1083,8 +1110,8 @@ export const PortfolioScreen: React.FC = () => {
 
       {/* Create Watchlist Modal */}
       <Modal
-        visible={createWlVisible}
-        transparent
+        visible={Boolean(createWlVisible)}
+        transparent={true}
         animationType="fade"
         onRequestClose={() => setCreateWlVisible(false)}
       >
@@ -1104,7 +1131,7 @@ export const PortfolioScreen: React.FC = () => {
               onChangeText={setNewWlName}
               placeholder="e.g. Tech Picks, Dividend Stocks..."
               placeholderTextColor={COLORS.textHint}
-              autoFocus
+              autoFocus={true}
               maxLength={30}
               onSubmitEditing={handleCreateWatchlist}
               returnKeyType="done"
@@ -1125,7 +1152,7 @@ export const PortfolioScreen: React.FC = () => {
                   !newWlName.trim() && { opacity: 0.4 },
                 ]}
                 onPress={handleCreateWatchlist}
-                disabled={!newWlName.trim()}
+                disabled={newWlName.trim().length === 0}
               >
                 <Text style={styles.modalCreateText}>Create</Text>
               </TouchableOpacity>

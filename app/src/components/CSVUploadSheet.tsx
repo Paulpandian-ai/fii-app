@@ -81,7 +81,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={Boolean(visible)} animationType="slide" transparent={true}>
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -108,7 +108,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
                 placeholderTextColor="rgba(255,255,255,0.2)"
                 value={csvText}
                 onChangeText={setCsvText}
-                multiline
+                multiline={true}
                 numberOfLines={8}
                 textAlignVertical="top"
                 autoCapitalize="none"
@@ -117,7 +117,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
               <TouchableOpacity
                 style={[styles.parseBtn, !csvText.trim() && styles.parseBtnDisabled]}
                 onPress={handleParse}
-                disabled={!csvText.trim() || parsing}
+                disabled={csvText.trim().length === 0 || Boolean(parsing)}
               >
                 {parsing ? (
                   <ActivityIndicator color="#FFF" />
@@ -160,7 +160,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
                 <TouchableOpacity
                   style={styles.importBtn}
                   onPress={handleImport}
-                  disabled={importing}
+                  disabled={Boolean(importing)}
                 >
                   {importing ? (
                     <ActivityIndicator color="#FFF" />

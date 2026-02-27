@@ -111,10 +111,10 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
     onClose();
   };
 
-  const isValid = selectedTicker && parseFloat(shares) > 0;
+  const isValid = selectedTicker.length > 0 && parseFloat(shares) > 0;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={Boolean(visible)} animationType="slide" transparent={true}>
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -140,7 +140,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
                   placeholderTextColor="rgba(255,255,255,0.3)"
                   value={query}
                   onChangeText={handleSearch}
-                  autoFocus
+                  autoFocus={true}
                   autoCapitalize="characters"
                 />
               </View>
@@ -212,7 +212,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
               <TouchableOpacity
                 style={[styles.addBtn, !isValid && styles.addBtnDisabled]}
                 onPress={handleAdd}
-                disabled={!isValid || saving}
+                disabled={!isValid || Boolean(saving)}
               >
                 {saving ? (
                   <ActivityIndicator color="#FFF" />
