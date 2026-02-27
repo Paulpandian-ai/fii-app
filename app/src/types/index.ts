@@ -232,6 +232,14 @@ export interface TrendingItem {
   changePercent: number;
   volume: string;         // e.g. "12.3M"
   rank: number;
+  price: number;
+  sector: string;
+  insight: string;
+  topFactors: FactorScore[];
+  marketCap: string;      // e.g. "3.3T"
+  peRatio: number;
+  weekHigh52: number;
+  weekLow52: number;
 }
 
 // ─── Discovery Types ───

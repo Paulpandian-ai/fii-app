@@ -3196,26 +3196,58 @@ def _handle_baskets(method, path):
 # ─── Trending Endpoint ───
 
 DEFAULT_TRENDING = [
-    {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "reason": "AI chip demand surge after earnings beat", "changePercent": 4.2, "volume": "52.3M", "rank": 1},
-    {"ticker": "TSLA", "companyName": "Tesla, Inc.", "reason": "Robotaxi unveil drives speculation", "changePercent": -2.1, "volume": "38.7M", "rank": 2},
-    {"ticker": "AAPL", "companyName": "Apple Inc.", "reason": "iPhone 17 pre-orders exceed expectations", "changePercent": 1.8, "volume": "28.1M", "rank": 3},
-    {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "reason": "AWS growth accelerates to 19% YoY", "changePercent": 3.1, "volume": "22.5M", "rank": 4},
-    {"ticker": "META", "companyName": "Meta Platforms, Inc.", "reason": "Threads user growth hits 200M DAUs", "changePercent": 0.9, "volume": "18.9M", "rank": 5},
+    {"ticker": "NVDA", "companyName": "NVIDIA Corporation", "reason": "AI chip demand surge after earnings beat", "changePercent": 4.2, "volume": "52.3M", "rank": 1, "sector": "Technology", "price": 135.50, "insight": "Blackwell GPU ramp exceeds expectations; data center revenue up 154% YoY with hyperscaler demand showing no signs of slowing", "topFactors": [{"name": "Supply Chain", "score": 1.8}, {"name": "Performance", "score": 1.5}, {"name": "Customers", "score": 1.2}], "marketCap": "3.3T", "peRatio": 65.2, "weekHigh52": 153.13, "weekLow52": 47.32},
+    {"ticker": "TSLA", "companyName": "Tesla, Inc.", "reason": "Robotaxi unveil drives speculation", "changePercent": -2.1, "volume": "38.7M", "rank": 2, "sector": "Consumer Cyclical", "price": 248.20, "insight": "Robotaxi launch timeline accelerated; energy storage deployments doubled while auto margins face near-term pressure from price cuts", "topFactors": [{"name": "Customers", "score": 0.5}, {"name": "Supply Chain", "score": -0.8}, {"name": "Macro", "score": -0.3}], "marketCap": "792B", "peRatio": 98.4, "weekHigh52": 488.54, "weekLow52": 138.80},
+    {"ticker": "AAPL", "companyName": "Apple Inc.", "reason": "iPhone 17 pre-orders exceed expectations", "changePercent": 1.8, "volume": "28.1M", "rank": 3, "sector": "Technology", "price": 232.80, "insight": "Apple Intelligence driving upgrade supercycle; Services revenue hits record $26B quarterly with 1.1B paid subscribers", "topFactors": [{"name": "Customers", "score": 1.4}, {"name": "Performance", "score": 1.1}, {"name": "Supply Chain", "score": 0.6}], "marketCap": "3.6T", "peRatio": 38.1, "weekHigh52": 260.10, "weekLow52": 164.08},
+    {"ticker": "AMZN", "companyName": "Amazon.com, Inc.", "reason": "AWS growth accelerates to 19% YoY", "changePercent": 3.1, "volume": "22.5M", "rank": 4, "sector": "Technology", "price": 214.70, "insight": "AWS reaccelerating on AI workloads; advertising segment now $14B/quarter with Prime Video ads gaining traction", "topFactors": [{"name": "Performance", "score": 1.3}, {"name": "Customers", "score": 1.0}, {"name": "Macro", "score": 0.4}], "marketCap": "2.2T", "peRatio": 42.6, "weekHigh52": 242.52, "weekLow52": 151.61},
+    {"ticker": "META", "companyName": "Meta Platforms, Inc.", "reason": "Threads user growth hits 200M DAUs", "changePercent": 0.9, "volume": "18.9M", "rank": 5, "sector": "Communication", "price": 595.40, "insight": "Reels monetization closing the gap with Stories; AI-driven content recommendations boosting engagement 8% across family of apps", "topFactors": [{"name": "Customers", "score": 1.6}, {"name": "Performance", "score": 1.3}, {"name": "Supply Chain", "score": 0.2}], "marketCap": "1.5T", "peRatio": 27.8, "weekHigh52": 638.40, "weekLow52": 414.50},
 ]
 
 
 def _enrich_trending_with_signals(items):
-    """Enrich trending items with live DynamoDB signal data."""
+    """Enrich trending items with live DynamoDB signal data and full record details."""
     tickers = [item["ticker"] for item in items]
     signals_map = _get_signal_data_for_tickers(tickers)
 
+    # Batch fetch full signal records to get insights, topFactors, sector from DynamoDB
+    full_records = {}
+    keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in tickers]
+    if keys:
+        db_items = db.batch_get(keys)
+        for db_item in db_items:
+            full_records[db_item.get("ticker", "")] = db_item
+
     enriched = []
     for item in items:
-        sig = signals_map.get(item["ticker"], {})
+        t = item["ticker"]
+        sig = signals_map.get(t, {})
+        full = full_records.get(t, {})
+
+        # Use DynamoDB insight/topFactors if available, else keep defaults
+        insight = full.get("insight") or item.get("insight", "")
+        top_factors = item.get("topFactors", [])
+        if full.get("topFactors"):
+            try:
+                db_factors = full["topFactors"]
+                if isinstance(db_factors, str):
+                    db_factors = json.loads(db_factors)
+                if isinstance(db_factors, list) and len(db_factors) > 0:
+                    top_factors = db_factors[:3]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         enriched.append({
             **item,
             "score": round(sig.get("compositeScore", 5.0), 1),
             "signal": sig.get("signal", "HOLD"),
+            "insight": insight,
+            "topFactors": top_factors,
+            "price": float(full.get("price", item.get("price", 0))),
+            "sector": full.get("sector") or item.get("sector", ""),
+            "marketCap": item.get("marketCap", ""),
+            "peRatio": float(item.get("peRatio", 0)),
+            "weekHigh52": float(item.get("weekHigh52", 0)),
+            "weekLow52": float(item.get("weekLow52", 0)),
         })
     return enriched
 
