@@ -233,7 +233,7 @@ const swipeStyles = StyleSheet.create({
   deleteBtn: {
     backgroundColor: COLORS.red,
     width: 80,
-    height: '100%',
+    alignSelf: 'stretch',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -262,14 +262,14 @@ const HoldingSwipeRow: React.FC<{
     <View style={swipeStyles.container}>
       <View style={swipeStyles.actions}>
         <TouchableOpacity
-          style={{ backgroundColor: COLORS.amber, width: 70, height: '100%', justifyContent: 'center', alignItems: 'center' }}
+          style={{ backgroundColor: COLORS.amber, width: 70, alignSelf: 'stretch', justifyContent: 'center', alignItems: 'center' }}
           onPress={onEdit}
         >
           <Ionicons name="pencil" size={18} color="#FFF" />
           <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '600', marginTop: 2 }}>Edit</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={{ backgroundColor: COLORS.red, width: 70, height: '100%', justifyContent: 'center', alignItems: 'center' }}
+          style={{ backgroundColor: COLORS.red, width: 70, alignSelf: 'stretch', justifyContent: 'center', alignItems: 'center' }}
           onPress={onDelete}
         >
           <Ionicons name="trash" size={18} color="#FFF" />

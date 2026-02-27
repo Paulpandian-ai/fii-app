@@ -61,7 +61,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
     Animated.timing(pan, {
       toValue: { x: toValue, y: 0 },
       duration: 300,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start(() => {
       if (direction === 'right' && card) {
         addTicker(activeWatchlistId, card.ticker, card.companyName);
@@ -88,7 +88,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
         } else {
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
-            useNativeDriver: true,
+            useNativeDriver: false,
           }).start();
         }
       },

@@ -175,6 +175,7 @@ export const TrendingSection: React.FC = () => {
   const inWatchlist = isInAnyWatchlist(item.ticker);
   const signalColor = SIGNAL_COLORS[item.signal];
   const rangePercent = format52WRange(item.weekLow52, item.weekHigh52, item.price);
+  const rangeFraction = rangePercent / 100;
 
   const rotate = pan.x.interpolate({
     inputRange: [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
@@ -334,8 +335,9 @@ export const TrendingSection: React.FC = () => {
                   <View style={styles.rangeBarWrap}>
                     <Text style={styles.rangeLow}>${item.weekLow52.toFixed(0)}</Text>
                     <View style={styles.rangeBar}>
-                      <View style={[styles.rangeFill, { width: `${rangePercent}%` }]} />
-                      <View style={[styles.rangeMarker, { left: `${rangePercent}%` }]} />
+                      <View style={[styles.rangeFill, { flex: rangeFraction }]} />
+                      <View style={styles.rangeMarker} />
+                      <View style={{ flex: 1 - rangeFraction }} />
                     </View>
                     <Text style={styles.rangeHigh}>${item.weekHigh52.toFixed(0)}</Text>
                   </View>
@@ -576,24 +578,22 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 2,
-    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'visible',
   },
   rangeFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
     height: 4,
     backgroundColor: 'rgba(96,165,250,0.4)',
     borderRadius: 2,
   },
   rangeMarker: {
-    position: 'absolute',
-    top: -3,
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: '#60A5FA',
     marginLeft: -5,
+    marginRight: -5,
   },
   factors: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   factorPill: {
