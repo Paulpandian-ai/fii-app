@@ -72,7 +72,7 @@ export const TrendingSection: React.FC = () => {
       Animated.timing(pan, {
         toValue: { x: 0, y: -600 },
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start(() => {
         pan.setValue({ x: 0, y: 0 });
         if (card) {
@@ -87,7 +87,7 @@ export const TrendingSection: React.FC = () => {
     Animated.timing(pan, {
       toValue: { x: toValue, y: 0 },
       duration: 300,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start(() => {
       if (direction === 'right' && card) {
         addTicker(activeWatchlistId, card.ticker, card.companyName);
@@ -115,7 +115,7 @@ export const TrendingSection: React.FC = () => {
         } else {
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
-            useNativeDriver: true,
+            useNativeDriver: false,
           }).start();
         }
       },
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
   swipeRight: { right: 16, borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)' },
   swipeLeft: { left: 16, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)' },
   swipeUp: {
-    top: 'auto' as any,
+    top: undefined,
     bottom: 16,
     left: 16,
     right: 16,
