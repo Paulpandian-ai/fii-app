@@ -11,6 +11,8 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,14 +21,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
-import { getPortfolioHealth, getTrending } from '../services/api';
+import { getPortfolioHealth } from '../services/api';
 import { AddHoldingSheet } from '../components/AddHoldingSheet';
 import { CSVUploadSheet } from '../components/CSVUploadSheet';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SectorPieChart } from '../components/SectorPieChart';
+import { TrendingSection } from '../components/TrendingSection';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
-import type { Holding, PortfolioHealth, TrendingItem, RootStackParamList, WatchlistItem } from '../types';
+import type { Holding, PortfolioHealth, RootStackParamList, Watchlist, WatchlistItem } from '../types';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -293,6 +296,7 @@ export const PortfolioScreen: React.FC = () => {
   const {
     holdings,
     totalValue,
+    totalCost,
     totalGainLoss,
     totalGainLossPercent,
     dailyChange,
@@ -306,9 +310,10 @@ export const PortfolioScreen: React.FC = () => {
 
   const {
     watchlists,
-    activeWatchlistId,
     loadWatchlists,
+    createWatchlist,
     removeTicker: removeWatchlistTicker,
+    addTicker: addWatchlistTicker,
   } = useWatchlistStore();
 
   const { signals, enrichmentCache } = useSignalStore();
@@ -319,14 +324,14 @@ export const PortfolioScreen: React.FC = () => {
   const [healthData, setHealthData] = useState<PortfolioHealth | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
   const [healthError, setHealthError] = useState(false);
-  const [trendingItems, setTrendingItems] = useState<TrendingItem[]>([]);
-  const [trendingLoading, setTrendingLoading] = useState(true);
-  const [trendingError, setTrendingError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [addVisible, setAddVisible] = useState(false);
   const [csvVisible, setCsvVisible] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
   const [editHolding, setEditHolding] = useState<Holding | null>(null);
+  const [createWlVisible, setCreateWlVisible] = useState(false);
+  const [newWlName, setNewWlName] = useState('');
+  const [wlCollapsed, setWlCollapsed] = useState<Record<string, boolean>>({});
 
   const hasHoldings = holdings.length > 0;
   const isPositiveDaily = dailyChange >= 0;
@@ -335,6 +340,11 @@ export const PortfolioScreen: React.FC = () => {
   const toggleSection = useCallback((section: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCollapsed((prev) => ({ ...prev, [section]: !prev[section] }));
+  }, []);
+
+  const toggleWlCollapse = useCallback((wlId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setWlCollapsed((prev) => ({ ...prev, [wlId]: !prev[wlId] }));
   }, []);
 
   // ── Data Fetching ──
@@ -351,24 +361,10 @@ export const PortfolioScreen: React.FC = () => {
     }
   }, []);
 
-  const loadTrendingData = useCallback(async () => {
-    setTrendingLoading(true);
-    setTrendingError(false);
-    try {
-      const data = await getTrending();
-      setTrendingItems((data.items || []).slice(0, 5));
-    } catch {
-      setTrendingError(true);
-    } finally {
-      setTrendingLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadPortfolio();
     loadSummary();
     loadHealthData();
-    loadTrendingData();
     loadWatchlists();
   }, []);
 
@@ -378,11 +374,10 @@ export const PortfolioScreen: React.FC = () => {
       loadPortfolio(),
       loadSummary(),
       loadHealthData(),
-      loadTrendingData(),
       loadWatchlists(),
     ]);
     setRefreshing(false);
-  }, [loadPortfolio, loadSummary, loadHealthData, loadTrendingData, loadWatchlists]);
+  }, [loadPortfolio, loadSummary, loadHealthData, loadWatchlists]);
 
   const handleAddClose = useCallback(() => {
     setAddVisible(false);
@@ -405,6 +400,74 @@ export const PortfolioScreen: React.FC = () => {
       navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
     },
     [navigation],
+  );
+
+  // ── Watchlist Helpers ──
+  const handleCreateWatchlist = useCallback(() => {
+    const name = newWlName.trim();
+    if (!name) return;
+    createWatchlist(name);
+    setNewWlName('');
+    setCreateWlVisible(false);
+  }, [newWlName, createWatchlist]);
+
+  const showWlItemOptions = useCallback(
+    (watchlistId: string, item: WatchlistItem) => {
+      const otherWatchlists = watchlists.filter((w) => w.id !== watchlistId);
+
+      const buttons: any[] = [
+        { text: 'Cancel', style: 'cancel' },
+      ];
+
+      if (otherWatchlists.length > 0) {
+        buttons.push({
+          text: 'Move to...',
+          onPress: () => {
+            Alert.alert(
+              `Move ${item.ticker} to...`,
+              'Select a watchlist',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                ...otherWatchlists.map((wl) => ({
+                  text: wl.name,
+                  onPress: () => {
+                    addWatchlistTicker(wl.id, item.ticker, item.companyName);
+                    removeWatchlistTicker(watchlistId, item.ticker);
+                  },
+                })),
+              ],
+            );
+          },
+        });
+      }
+
+      buttons.push({
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => removeWatchlistTicker(watchlistId, item.ticker),
+      });
+
+      Alert.alert(item.ticker, 'What would you like to do?', buttons);
+    },
+    [watchlists, addWatchlistTicker, removeWatchlistTicker],
+  );
+
+  const getWlAvgScore = useCallback(
+    (wl: Watchlist): number => {
+      if (wl.items.length === 0) return 0;
+      let sum = 0;
+      let count = 0;
+      for (const item of wl.items) {
+        const signal = signals[item.ticker];
+        const score = signal?.score ?? item.score;
+        if (score != null && score > 0) {
+          sum += score;
+          count += 1;
+        }
+      }
+      return count > 0 ? sum / count : 0;
+    },
+    [signals],
   );
 
   // ── Computed: Sector Allocation ──
@@ -507,10 +570,6 @@ export const PortfolioScreen: React.FC = () => {
     return sorted;
   }, [holdings, sortMode, signals]);
 
-  // ── Computed: Active Watchlist ──
-  const activeWatchlist = watchlists.find((w) => w.id === activeWatchlistId) || watchlists[0];
-  const watchlistItems = activeWatchlist?.items || [];
-
   // ═══════ LOADING STATE ═══════
   if (isLoading && holdings.length === 0) {
     return (
@@ -576,7 +635,7 @@ export const PortfolioScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
       >
-        {/* ═══════ 1. PORTFOLIO SUMMARY (always visible, never collapsible) ═══════ */}
+        {/* ═══════ 1. PORTFOLIO SUMMARY ═══════ */}
         <View style={styles.section}>
           <View style={styles.staticHeader}>
             <Text style={styles.sectionTitle}>Portfolio Summary</Text>
@@ -586,6 +645,7 @@ export const PortfolioScreen: React.FC = () => {
             <View style={styles.card}>
               <Text style={styles.totalValue}>{formatMoney(totalValue)}</Text>
 
+              {/* Daily Change — single clear number */}
               <View style={styles.changeRow}>
                 <Ionicons
                   name={isPositiveDaily ? 'trending-up' : 'trending-down'}
@@ -600,20 +660,23 @@ export const PortfolioScreen: React.FC = () => {
                 </Text>
               </View>
 
+              {/* Total Gain/Loss */}
               {totalGainLoss !== 0 && (
                 <Text
                   style={[
-                    styles.totalGainLoss,
+                    styles.totalGainLossText,
                     { color: totalGainLoss >= 0 ? COLORS.green : COLORS.red },
                   ]}
                 >
-                  Total: {totalGainLoss >= 0 ? '+' : ''}
+                  Total gain/loss: {totalGainLoss >= 0 ? '+' : ''}
                   {formatMoney(totalGainLoss)} ({formatPct(totalGainLossPercent)})
                 </Text>
               )}
 
+              {/* Sector Allocation Donut Chart */}
               {sectorData.length > 0 && (
                 <View style={styles.pieContainer}>
+                  <Text style={styles.pieLabel}>Sector Allocation</Text>
                   <SectorPieChart sectors={sectorData} size={100} />
                 </View>
               )}
@@ -767,11 +830,13 @@ export const PortfolioScreen: React.FC = () => {
                     ))}
                   </View>
 
-                  {/* Holdings list */}
+                  {/* Holdings list — new 3-row layout */}
                   {sortedHoldings.map((item) => {
                     const signal = signals[item.ticker];
                     const isPositive = (item.gainLoss || 0) >= 0;
-                    const isDailyPositive = (item.changePercent || 0) >= 0;
+                    const positionValue = (item.currentPrice ?? 0) * item.shares;
+                    const gainLoss = item.gainLoss || 0;
+                    const gainLossPct = item.gainLossPercent || 0;
 
                     return (
                       <HoldingSwipeRow
@@ -792,39 +857,34 @@ export const PortfolioScreen: React.FC = () => {
                             })
                           }
                         >
-                          {/* Left: Ticker + Company Name */}
+                          {/* Left: Ticker + Company */}
                           <View style={styles.holdingLeft}>
-                            <Text style={styles.holdingTicker} numberOfLines={1}>
-                              {item.ticker}
-                            </Text>
+                            <View style={styles.holdingTickerRow}>
+                              <Text style={styles.holdingTicker} numberOfLines={1}>
+                                {item.ticker}
+                              </Text>
+                              {signal && <FIIBadge score={signal.score} size={22} />}
+                            </View>
                             <Text style={styles.holdingCompany} numberOfLines={1}>
                               {item.companyName}
                             </Text>
                           </View>
 
-                          {/* Center: Price + Daily Change */}
-                          <View style={styles.holdingCenter}>
+                          {/* Middle: Price + Shares */}
+                          <View style={styles.holdingMiddle}>
                             <Text style={styles.holdingPrice} numberOfLines={1}>
                               ${(item.currentPrice ?? 0).toFixed(2)}
                             </Text>
-                            <Text
-                              style={[
-                                styles.holdingDailyChange,
-                                { color: isDailyPositive ? COLORS.green : COLORS.red },
-                              ]}
-                            >
-                              {isDailyPositive ? '+' : ''}
-                              {(item.changePercent ?? 0).toFixed(2)}%
+                            <Text style={styles.holdingShares}>
+                              {item.shares} shares
                             </Text>
                           </View>
 
-                          {/* Right: FII Score Badge + Gain/Loss */}
+                          {/* Right: Total Value + Gain/Loss */}
                           <View style={styles.holdingRight}>
-                            {signal ? (
-                              <FIIBadge score={signal.score} size={28} />
-                            ) : (
-                              <View style={{ width: 28 }} />
-                            )}
+                            <Text style={styles.holdingTotalValue} numberOfLines={1}>
+                              {formatMoney(positionValue)}
+                            </Text>
                             <Text
                               style={[
                                 styles.holdingGainLoss,
@@ -833,7 +893,7 @@ export const PortfolioScreen: React.FC = () => {
                               numberOfLines={1}
                             >
                               {isPositive ? '+' : ''}
-                              {formatMoney(item.gainLoss || 0)}
+                              {formatMoney(gainLoss)} ({formatPct(gainLossPct)})
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -881,153 +941,129 @@ export const PortfolioScreen: React.FC = () => {
           )}
         </View>
 
-        {/* ═══════ 4. TRENDING NOW (collapsible) ═══════ */}
+        {/* ═══════ 4. TRENDING NOW 🔥 ═══════ */}
+        <TrendingSection />
+
+        {/* ═══════ 5. WATCHLISTS (collapsible) ═══════ */}
         <View style={styles.section}>
           <SectionHeader
-            title="Trending Now \uD83D\uDD25"
-            collapsed={!!collapsed.trending}
-            onToggle={() => toggleSection('trending')}
-          />
-
-          {!collapsed.trending && (
-            <>
-              {trendingLoading ? (
-                <View style={styles.sectionBody}>
-                  {[1, 2, 3].map((i) => (
-                    <React.Fragment key={i}>
-                      <Skeleton width={'100%'} height={48} borderRadius={8} />
-                      {i < 3 && <View style={{ height: 8 }} />}
-                    </React.Fragment>
-                  ))}
-                </View>
-              ) : trendingError ? (
-                <View style={styles.errorBody}>
-                  <Text style={styles.errorText}>Unable to load</Text>
-                  <TouchableOpacity style={styles.retryBtn} onPress={loadTrendingData}>
-                    <Ionicons name="refresh" size={14} color={COLORS.primary} />
-                    <Text style={styles.retryText}>Retry</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : trendingItems.length === 0 ? (
-                <View style={styles.emptyBody}>
-                  <Text style={styles.emptyText}>No trending stocks right now</Text>
-                </View>
-              ) : (
-                <View>
-                  {trendingItems.map((item) => {
-                    const isUp = (item.changePercent ?? 0) >= 0;
-                    return (
-                      <TouchableOpacity
-                        key={item.ticker}
-                        style={styles.trendingRow}
-                        activeOpacity={0.8}
-                        onPress={() =>
-                          navigation.navigate('SignalDetail', {
-                            ticker: item.ticker,
-                            feedItemId: item.ticker,
-                          })
-                        }
-                      >
-                        <View style={styles.trendingLeft}>
-                          <Text style={styles.trendingTicker} numberOfLines={1}>
-                            {item.ticker}
-                          </Text>
-                          <Text style={styles.trendingName} numberOfLines={1}>
-                            {item.companyName}
-                          </Text>
-                        </View>
-                        <View style={styles.trendingRight}>
-                          <Text
-                            style={[
-                              styles.trendingChange,
-                              { color: isUp ? COLORS.green : COLORS.red },
-                            ]}
-                          >
-                            {isUp ? '+' : ''}
-                            {(item.changePercent ?? 0).toFixed(2)}%
-                          </Text>
-                          <Ionicons
-                            name={isUp ? 'arrow-up' : 'arrow-down'}
-                            size={16}
-                            color={isUp ? COLORS.green : COLORS.red}
-                          />
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-            </>
-          )}
-        </View>
-
-        {/* ═══════ 5. WATCHLIST (collapsible) ═══════ */}
-        <View style={styles.section}>
-          <SectionHeader
-            title="Watchlist"
+            title="Watchlists"
             collapsed={!!collapsed.watchlist}
             onToggle={() => toggleSection('watchlist')}
+            rightElement={
+              <TouchableOpacity
+                onPress={() => setCreateWlVisible(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="add-circle" size={20} color={COLORS.primary} />
+              </TouchableOpacity>
+            }
           />
 
           {!collapsed.watchlist && (
-            <>
-              {watchlistItems.length === 0 ? (
-                <View style={styles.emptyBody}>
-                  <Text style={styles.emptyText}>
-                    {'Star stocks in the Screener to track them here \u2B50'}
-                  </Text>
-                </View>
-              ) : (
-                <View>
-                  {watchlistItems.map((item: WatchlistItem) => {
-                    const signal = signals[item.ticker];
-                    const isUp = (item.changePercent ?? 0) >= 0;
-                    return (
-                      <SwipeableWatchlistRow
-                        key={item.ticker}
-                        onRemove={() => {
-                          if (activeWatchlist) {
-                            removeWatchlistTicker(activeWatchlist.id, item.ticker);
-                          }
-                        }}
-                      >
-                        <TouchableOpacity
-                          style={styles.watchlistRow}
-                          activeOpacity={0.8}
-                          onPress={() =>
-                            navigation.navigate('SignalDetail', {
-                              ticker: item.ticker,
-                              feedItemId: item.ticker,
-                            })
-                          }
-                        >
-                          <View style={styles.watchlistLeft}>
-                            <Text style={styles.watchlistTicker} numberOfLines={1}>
-                              {item.ticker}
-                            </Text>
-                          </View>
-                          <Text style={styles.watchlistPrice} numberOfLines={1}>
-                            {item.price ? `$${item.price.toFixed(2)}` : '—'}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.watchlistChange,
-                              { color: isUp ? COLORS.green : COLORS.red },
-                            ]}
+            <View>
+              {watchlists.map((wl) => {
+                const isExpanded = !wlCollapsed[wl.id];
+                const avgScore = getWlAvgScore(wl);
+
+                return (
+                  <View key={wl.id}>
+                    {/* Watchlist header */}
+                    <TouchableOpacity
+                      style={styles.wlHeader}
+                      activeOpacity={0.7}
+                      onPress={() => toggleWlCollapse(wl.id)}
+                    >
+                      <Ionicons
+                        name={isExpanded ? 'chevron-down' : 'chevron-forward'}
+                        size={16}
+                        color={COLORS.textTertiary}
+                      />
+                      <Text style={styles.wlName} numberOfLines={1}>
+                        {wl.name}
+                      </Text>
+                      <View style={styles.wlCountBadge}>
+                        <Text style={styles.wlCountText}>{wl.items.length}</Text>
+                      </View>
+                      {avgScore > 0 && <FIIBadge score={avgScore} size={22} />}
+                    </TouchableOpacity>
+
+                    {/* Watchlist items */}
+                    {isExpanded && wl.items.length > 0 &&
+                      wl.items.map((item) => {
+                        const itemSignal = signals[item.ticker];
+                        const isUp = (item.changePercent ?? 0) >= 0;
+                        return (
+                          <SwipeableWatchlistRow
+                            key={item.ticker}
+                            onRemove={() => removeWatchlistTicker(wl.id, item.ticker)}
                           >
-                            {isUp ? '+' : ''}
-                            {(item.changePercent ?? 0).toFixed(1)}%
-                          </Text>
-                          {(signal || item.score) && (
-                            <FIIBadge score={signal?.score ?? item.score ?? 0} size={28} />
-                          )}
+                            <TouchableOpacity
+                              style={styles.wlItemRow}
+                              activeOpacity={0.8}
+                              onPress={() =>
+                                navigation.navigate('SignalDetail', {
+                                  ticker: item.ticker,
+                                  feedItemId: item.ticker,
+                                })
+                              }
+                              onLongPress={() => showWlItemOptions(wl.id, item)}
+                            >
+                              <View style={styles.wlItemLeft}>
+                                <Text style={styles.wlItemTicker}>{item.ticker}</Text>
+                                <Text style={styles.wlItemName} numberOfLines={1}>
+                                  {item.companyName}
+                                </Text>
+                              </View>
+                              <Text style={styles.wlItemPrice}>
+                                {item.price ? `$${item.price.toFixed(2)}` : '\u2014'}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.wlItemChange,
+                                  { color: isUp ? COLORS.green : COLORS.red },
+                                ]}
+                              >
+                                {isUp ? '+' : ''}
+                                {(item.changePercent ?? 0).toFixed(1)}%
+                              </Text>
+                              {(itemSignal || item.score) ? (
+                                <FIIBadge
+                                  score={itemSignal?.score ?? item.score ?? 0}
+                                  size={24}
+                                />
+                              ) : null}
+                            </TouchableOpacity>
+                          </SwipeableWatchlistRow>
+                        );
+                      })}
+
+                    {/* Empty watchlist state */}
+                    {isExpanded && wl.items.length === 0 && (
+                      <View style={styles.wlEmpty}>
+                        <Text style={styles.emptyText}>No stocks in this watchlist</Text>
+                        <TouchableOpacity
+                          style={styles.wlAddStockBtn}
+                          onPress={() => setSearchVisible(true)}
+                        >
+                          <Ionicons name="add" size={14} color={COLORS.primary} />
+                          <Text style={styles.wlAddStockText}>Add Stock</Text>
                         </TouchableOpacity>
-                      </SwipeableWatchlistRow>
-                    );
-                  })}
-                </View>
-              )}
-            </>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+
+              {/* Create New Watchlist button */}
+              <TouchableOpacity
+                style={styles.createWlBtn}
+                onPress={() => setCreateWlVisible(true)}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.createWlText}>Create New Watchlist</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -1044,6 +1080,59 @@ export const PortfolioScreen: React.FC = () => {
         onSelectTicker={handleSearchSelect}
         mode="navigate"
       />
+
+      {/* Create Watchlist Modal */}
+      <Modal
+        visible={createWlVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreateWlVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setCreateWlVisible(false)}
+        >
+          <View
+            style={styles.modalContent}
+            onStartShouldSetResponder={() => true}
+          >
+            <Text style={styles.modalTitle}>Create New Watchlist</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={newWlName}
+              onChangeText={setNewWlName}
+              placeholder="e.g. Tech Picks, Dividend Stocks..."
+              placeholderTextColor={COLORS.textHint}
+              autoFocus
+              maxLength={30}
+              onSubmitEditing={handleCreateWatchlist}
+              returnKeyType="done"
+            />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setNewWlName('');
+                  setCreateWlVisible(false);
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalCreateBtn,
+                  !newWlName.trim() && { opacity: 0.4 },
+                ]}
+                onPress={handleCreateWatchlist}
+                disabled={!newWlName.trim()}
+              >
+                <Text style={styles.modalCreateText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </LinearGradient>
   );
 };
@@ -1123,7 +1212,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  totalGainLoss: {
+  totalGainLossText: {
     fontSize: 13,
     fontWeight: '600',
     marginTop: 4,
@@ -1134,6 +1223,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
     width: '100%',
+  },
+  pieLabel: {
+    color: COLORS.textTertiary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 
   // Empty states
@@ -1302,6 +1399,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  holdingTickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   holdingTicker: {
     color: '#FFF',
     fontSize: 16,
@@ -1313,30 +1415,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  holdingCenter: {
-    width: 80,
+  holdingMiddle: {
     alignItems: 'flex-end',
+    minWidth: 70,
   },
   holdingPrice: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
   },
-  holdingDailyChange: {
-    fontSize: 13,
-    fontWeight: '600',
+  holdingShares: {
+    color: COLORS.textTertiary,
+    fontSize: 12,
     marginTop: 2,
   },
   holdingRight: {
-    width: 90,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 6,
+    alignItems: 'flex-end',
+    minWidth: 90,
+  },
+  holdingTotalValue: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   holdingGainLoss: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   manageRow: {
     flexDirection: 'row',
@@ -1367,71 +1472,157 @@ const styles = StyleSheet.create({
   },
   manageBtnOutlineText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
 
-  // ─── Trending Section ───
-  trendingRow: {
+  // ─── Watchlist Section ───
+  wlHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
+    gap: 8,
   },
-  trendingLeft: {
+  wlName: {
+    color: COLORS.textPrimary,
+    fontSize: 15,
+    fontWeight: '700',
     flex: 1,
-    minWidth: 0,
   },
-  trendingTicker: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '700',
+  wlCountBadge: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
-  trendingName: {
+  wlCountText: {
     color: COLORS.textTertiary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  trendingRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  trendingChange: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: '700',
-    minWidth: 60,
-    textAlign: 'right',
   },
-
-  // ─── Watchlist Section ───
-  watchlistRow: {
+  wlItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingLeft: 36,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
     backgroundColor: COLORS.bg,
-    gap: 12,
+    gap: 10,
   },
-  watchlistLeft: {
+  wlItemLeft: {
     flex: 1,
     minWidth: 0,
   },
-  watchlistTicker: {
+  wlItemTicker: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
-  watchlistPrice: {
+  wlItemName: {
+    color: COLORS.textTertiary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  wlItemPrice: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
-  watchlistChange: {
+  wlItemChange: {
     fontSize: 13,
     fontWeight: '600',
     minWidth: 50,
     textAlign: 'right',
+  },
+  wlEmpty: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 6,
+  },
+  wlAddStockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  wlAddStockText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  createWlBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+  },
+  createWlText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // ─── Create Watchlist Modal ───
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#FFF',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 16,
+  },
+  modalBtns: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  modalCancelText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalCreateBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+  },
+  modalCreateText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

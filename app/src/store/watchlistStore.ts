@@ -35,7 +35,7 @@ interface WatchlistStore {
 }
 
 export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
-  watchlists: [{ id: 'default', name: 'Watchlist', items: [], createdAt: '', updatedAt: '' }],
+  watchlists: [{ id: 'default', name: 'My Watchlist', items: [], createdAt: '', updatedAt: '' }],
   activeWatchlistId: 'default',
   isLoading: false,
   error: null,
@@ -59,7 +59,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       const data = await getWatchlists();
       const wls = data.watchlists || [];
       if (wls.length === 0) {
-        wls.push({ id: 'default', name: 'Watchlist', items: [], createdAt: '', updatedAt: '' });
+        wls.push({ id: 'default', name: 'My Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, isLoading: false });
       _persist(wls);
@@ -88,7 +88,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       const data = await deleteWatchlist(id);
       const wls = data.watchlists || get().watchlists.filter((w) => w.id !== id);
       if (wls.length === 0) {
-        wls.push({ id: 'default', name: 'Watchlist', items: [], createdAt: '', updatedAt: '' });
+        wls.push({ id: 'default', name: 'My Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, activeWatchlistId: wls[0].id });
       _persist(wls);

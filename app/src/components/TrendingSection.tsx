@@ -65,9 +65,24 @@ export const TrendingSection: React.FC = () => {
     }
   };
 
-  const swipeCard = useCallback((direction: 'left' | 'right') => {
-    const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
+  const swipeCard = useCallback((direction: 'left' | 'right' | 'up') => {
     const card = items[currentIndex];
+
+    if (direction === 'up') {
+      Animated.timing(pan, {
+        toValue: { x: 0, y: -600 },
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        pan.setValue({ x: 0, y: 0 });
+        if (card) {
+          navigation.navigate('SignalDetail', { ticker: card.ticker, feedItemId: card.ticker });
+        }
+      });
+      return;
+    }
+
+    const toValue = direction === 'right' ? SCREEN_WIDTH + 100 : -SCREEN_WIDTH - 100;
 
     Animated.timing(pan, {
       toValue: { x: toValue, y: 0 },
@@ -80,18 +95,20 @@ export const TrendingSection: React.FC = () => {
       pan.setValue({ x: 0, y: 0 });
       setCurrentIndex((prev) => prev + 1);
     });
-  }, [items, currentIndex, pan, addTicker, activeWatchlistId]);
+  }, [items, currentIndex, pan, addTicker, activeWatchlistId, navigation]);
 
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
-        Math.abs(gesture.dx) > 10,
+        Math.abs(gesture.dx) > 10 || Math.abs(gesture.dy) > 10,
       onPanResponderMove: Animated.event(
-        [null, { dx: pan.x }],
+        [null, { dx: pan.x, dy: pan.y }],
         { useNativeDriver: false }
       ),
       onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx > SWIPE_THRESHOLD) {
+        if (gesture.dy < -SWIPE_THRESHOLD && Math.abs(gesture.dy) > Math.abs(gesture.dx)) {
+          swipeCard('up');
+        } else if (gesture.dx > SWIPE_THRESHOLD) {
           swipeCard('right');
         } else if (gesture.dx < -SWIPE_THRESHOLD) {
           swipeCard('left');
@@ -137,12 +154,16 @@ export const TrendingSection: React.FC = () => {
         </View>
         <View style={styles.emptyState}>
           <Ionicons name="checkmark-circle-outline" size={40} color="rgba(245,158,11,0.4)" />
-          <Text style={styles.emptyText}>You've seen all trending stocks!</Text>
+          <Text style={styles.emptyText}>You're all caught up!</Text>
           <TouchableOpacity
             style={styles.resetBtn}
-            onPress={() => setCurrentIndex(0)}
+            onPress={() => {
+              setCurrentIndex(0);
+              loadTrending();
+            }}
           >
-            <Text style={styles.resetText}>Start Over</Text>
+            <Ionicons name="refresh" size={14} color="#F59E0B" />
+            <Text style={styles.resetText}>Refresh</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -172,6 +193,12 @@ export const TrendingSection: React.FC = () => {
     extrapolate: 'clamp',
   });
 
+  const upOpacity = pan.y.interpolate({
+    inputRange: [-SWIPE_THRESHOLD, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
@@ -180,7 +207,7 @@ export const TrendingSection: React.FC = () => {
           <Text style={styles.sectionTitle}>Trending Now</Text>
         </View>
         <Text style={styles.sectionSubtitle}>
-          Swipe right to watchlist · {items.length - currentIndex} left
+          {currentIndex + 1} of {items.length} · Swipe right to watchlist · Up for details
         </Text>
       </View>
 
@@ -201,7 +228,7 @@ export const TrendingSection: React.FC = () => {
           style={[
             styles.cardWrap,
             {
-              transform: [{ translateX: pan.x }, { rotate }],
+              transform: [{ translateX: pan.x }, { translateY: pan.y }, { rotate }],
             },
           ]}
         >
@@ -216,11 +243,15 @@ export const TrendingSection: React.FC = () => {
               {/* Swipe overlays */}
               <Animated.View style={[styles.swipeOverlay, styles.swipeRight, { opacity: rightOpacity }]}>
                 <Ionicons name="bookmark" size={28} color="#10B981" />
-                <Text style={styles.swipeLabelRight}>WATCHLIST</Text>
+                <Text style={styles.swipeLabelRight}>Added to Watchlist</Text>
               </Animated.View>
               <Animated.View style={[styles.swipeOverlay, styles.swipeLeft, { opacity: leftOpacity }]}>
                 <Ionicons name="close" size={28} color="#EF4444" />
-                <Text style={styles.swipeLabelLeft}>SKIP</Text>
+                <Text style={styles.swipeLabelLeft}>Skip</Text>
+              </Animated.View>
+              <Animated.View style={[styles.swipeOverlay, styles.swipeUp, { opacity: upOpacity }]}>
+                <Ionicons name="open-outline" size={28} color="#60A5FA" />
+                <Text style={styles.swipeLabelUp}>View Details</Text>
               </Animated.View>
 
               {/* Header: Rank + Ticker + Signal */}
@@ -374,6 +405,9 @@ const styles = StyleSheet.create({
   emptyText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
   resetBtn: {
     marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
@@ -417,6 +451,16 @@ const styles = StyleSheet.create({
   },
   swipeRight: { right: 16, borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)' },
   swipeLeft: { left: 16, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)' },
+  swipeUp: {
+    top: 'auto' as any,
+    bottom: 16,
+    left: 16,
+    right: 16,
+    justifyContent: 'center',
+    borderColor: '#60A5FA',
+    backgroundColor: 'rgba(96,165,250,0.1)',
+  },
+  swipeLabelUp: { color: '#60A5FA', fontSize: 14, fontWeight: '800' },
   swipeLabelRight: { color: '#10B981', fontSize: 14, fontWeight: '800' },
   swipeLabelLeft: { color: '#EF4444', fontSize: 14, fontWeight: '800' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
