@@ -9,11 +9,11 @@ import {
   deleteWatchlist,
 } from '../services/api';
 
-const STORAGE_KEY = 'fii_watchlists';
+const CACHE_KEY = '@fii_watchlists_cache';
 
-/** Persist watchlist state to AsyncStorage for offline access. */
-const _persist = (watchlists: Watchlist[]) => {
-  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(watchlists)).catch(() => {});
+/** Cache watchlist state locally for instant display and offline access. */
+const _cache = (watchlists: Watchlist[]) => {
+  AsyncStorage.setItem(CACHE_KEY, JSON.stringify(watchlists)).catch(() => {});
 };
 
 interface WatchlistStore {
@@ -43,18 +43,20 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
   loadWatchlists: async () => {
     set({ isLoading: true, error: null });
 
-    // Load from AsyncStorage first for instant display
+    // Load from local cache first for instant display
+    let hasCached = false;
     try {
-      const cached = await AsyncStorage.getItem(STORAGE_KEY);
+      const cached = await AsyncStorage.getItem(CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
           set({ watchlists: parsed });
+          hasCached = true;
         }
       }
     } catch {}
 
-    // Then sync from API
+    // Then sync from API (DynamoDB — source of truth)
     try {
       const data = await getWatchlists();
       const wls = data.watchlists || [];
@@ -62,9 +64,10 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
         wls.push({ id: 'default', name: 'My Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, isLoading: false });
-      _persist(wls);
+      _cache(wls);
     } catch {
-      set({ isLoading: false, error: 'Failed to load watchlists' });
+      // If we have cached data, silently continue (offline mode)
+      set({ isLoading: false, error: hasCached ? null : 'Failed to load watchlists' });
     }
   },
 
@@ -77,7 +80,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       const data = await saveWatchlist({ id, name, items: [] });
       const wls = data.watchlists || get().watchlists;
       set({ watchlists: wls });
-      _persist(wls);
+      _cache(wls);
     } catch {
       set({ error: 'Failed to create watchlist' });
     }
@@ -91,7 +94,7 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
         wls.push({ id: 'default', name: 'My Watchlist', items: [], createdAt: '', updatedAt: '' });
       }
       set({ watchlists: wls, activeWatchlistId: wls[0].id });
-      _persist(wls);
+      _cache(wls);
     } catch {
       set({ error: 'Failed to delete watchlist' });
     }
@@ -110,16 +113,16 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       return wl;
     });
     set({ watchlists: updated });
-    _persist(updated);
+    _cache(updated);
 
     try {
       const data = await addToWatchlist(watchlistId, ticker, companyName);
       const wls = data.watchlists || updated;
       set({ watchlists: wls });
-      _persist(wls);
+      _cache(wls);
     } catch {
       set({ watchlists, error: 'Failed to add to watchlist' });
-      _persist(watchlists);
+      _cache(watchlists);
     }
   },
 
@@ -132,16 +135,16 @@ export const useWatchlistStore = create<WatchlistStore>((set, get) => ({
       return wl;
     });
     set({ watchlists: updated });
-    _persist(updated);
+    _cache(updated);
 
     try {
       const data = await removeFromWatchlist(watchlistId, ticker);
       const wls = data.watchlists || updated;
       set({ watchlists: wls });
-      _persist(wls);
+      _cache(wls);
     } catch {
       set({ watchlists, error: 'Failed to remove from watchlist' });
-      _persist(watchlists);
+      _cache(watchlists);
     }
   },
 
