@@ -43,6 +43,23 @@ Routes:
   GET  /admin/agents                 — List agents with schedules & last run
   POST /admin/agents/<id>/run        — Manually trigger an agent
   GET  /admin/agents/<id>/history    — View agent run history
+
+  # ── User Data (DynamoDB sync) ──
+  GET    /user/portfolio              — List holdings (raw, no price enrichment)
+  PUT    /user/portfolio/<ticker>     — Add/update a single holding
+  DELETE /user/portfolio/<ticker>     — Remove a holding
+  GET    /user/watchlists             — List all watchlists
+  POST   /user/watchlists             — Create a watchlist
+  PUT    /user/watchlists/<id>        — Update a watchlist
+  DELETE /user/watchlists/<id>        — Delete a watchlist
+  GET    /user/preferences            — Get user preferences
+  PUT    /user/preferences            — Update user preferences
+  GET    /user/coach/progress         — Get coach progress + learning paths
+  PUT    /user/coach/progress         — Update coach progress
+  PUT    /user/coach/path/<id>        — Update learning path progress
+  GET    /user/chat                   — Get recent chat history
+  POST   /user/chat                   — Save a chat conversation
+  GET    /user/sync-status            — Sync timestamps for all data types
 """
 
 import json
@@ -172,6 +189,8 @@ def lambda_handler(event, context):
             return _handle_stress_test(http_method, path, query_params)
         elif path.startswith("/insights"):
             return _handle_insights(http_method, path, query_params)
+        elif path.startswith("/user/"):
+            return _handle_user_data(http_method, path, body, query_params, user_id)
         elif path.startswith("/admin/"):
             return _handle_admin(http_method, path, body, query_params)
         else:
@@ -5383,6 +5402,520 @@ def _handle_admin(method, path, body, query_params):
         return _response(200, {"agentId": agent_id, **current, "message": "Config updated"})
 
     return _response(404, {"error": "Admin route not found"})
+
+
+# ─── User Data Endpoints (/user/*) ───
+
+
+def _handle_user_data(method, path, body, query_params, user_id):
+    """Router for /user/* endpoints — all require authentication."""
+    if user_id == "anonymous":
+        return _response(401, {"error": "Authentication required", "code": "AUTH_REQUIRED"})
+
+    if "/coach/path/" in path:
+        path_id = path.split("/coach/path/")[-1].strip("/")
+        if method == "PUT":
+            return _handle_user_coach_path_put(path_id, body, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/coach/progress" in path:
+        if method == "GET":
+            return _handle_user_coach_progress_get(user_id)
+        elif method == "PUT":
+            return _handle_user_coach_progress_put(body, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/chat" in path:
+        if method == "GET":
+            context = query_params.get("context", "coach")
+            limit = int(query_params.get("limit", "20"))
+            return _handle_user_chat_get(user_id, context, limit)
+        elif method == "POST":
+            return _handle_user_chat_post(body, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/preferences" in path:
+        if method == "GET":
+            return _handle_user_preferences_get(user_id)
+        elif method == "PUT":
+            return _handle_user_preferences_put(body, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/portfolio/" in path:
+        ticker = path.split("/portfolio/")[-1].strip("/").upper()
+        if not ticker:
+            return _response(400, {"error": "Missing ticker", "code": "MISSING_TICKER"})
+        if method == "PUT":
+            return _handle_user_portfolio_ticker_put(ticker, body, user_id)
+        elif method == "DELETE":
+            return _handle_user_portfolio_ticker_delete(ticker, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/portfolio" in path:
+        if method == "GET":
+            return _handle_user_portfolio_list(user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/watchlists/" in path:
+        wl_id = path.split("/watchlists/")[-1].strip("/")
+        if not wl_id:
+            return _response(400, {"error": "Missing watchlist id", "code": "MISSING_ID"})
+        if method == "PUT":
+            return _handle_user_watchlist_update(wl_id, body, user_id)
+        elif method == "DELETE":
+            return _handle_user_watchlist_remove(wl_id, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/watchlists" in path:
+        if method == "GET":
+            return _handle_user_watchlists_list(user_id)
+        elif method == "POST":
+            return _handle_user_watchlist_create(body, user_id)
+        return _response(405, {"error": "Method not allowed"})
+    elif "/sync-status" in path:
+        if method == "GET":
+            return _handle_user_sync_status(user_id)
+        return _response(405, {"error": "Method not allowed"})
+
+    return _response(404, {"error": "User route not found", "code": "NOT_FOUND"})
+
+
+def _handle_user_preferences_get(user_id):
+    """GET /user/preferences — Return user preferences."""
+    record = db.get_item(f"USER#{user_id}", "PREFERENCES")
+    if not record:
+        return _response(200, {
+            "taxBracket": None,
+            "filingStatus": None,
+            "riskProfile": None,
+            "theme": "dark",
+            "onboardingComplete": False,
+            "dailyBriefing": True,
+            "weeklyRecap": True,
+            "volatilityAlerts": True,
+        })
+
+    # Strip DynamoDB keys
+    prefs = {k: v for k, v in record.items() if k not in ("PK", "SK")}
+    return _response(200, prefs)
+
+
+def _handle_user_preferences_put(body, user_id):
+    """PUT /user/preferences — Update user preferences."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    allowed_keys = {
+        "taxBracket", "filingStatus", "riskProfile", "theme",
+        "onboardingComplete", "dailyBriefing", "weeklyRecap",
+        "volatilityAlerts", "notificationsEnabled",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_keys}
+    if not updates:
+        return _response(400, {"error": "No valid preference fields provided", "code": "INVALID_BODY"})
+
+    updates["updatedAt"] = now
+
+    # Read-modify-write to preserve other preferences
+    existing = db.get_item(f"USER#{user_id}", "PREFERENCES") or {}
+    existing.update(updates)
+    existing["PK"] = f"USER#{user_id}"
+    existing["SK"] = "PREFERENCES"
+    db.put_item(existing)
+
+    prefs = {k: v for k, v in existing.items() if k not in ("PK", "SK")}
+    return _response(200, prefs)
+
+
+def _handle_user_coach_progress_get(user_id):
+    """GET /user/coach/progress — Return coach progress and learning path data."""
+    progress = db.get_item(f"USER#{user_id}", "COACH#PROGRESS")
+    if not progress:
+        progress = {
+            "xp": 0,
+            "streak": 0,
+            "lastActiveDate": None,
+            "completedLessons": [],
+            "achievementsUnlocked": [],
+            "disciplineScore": 0,
+            "cardsRead": [],
+            "savedCards": [],
+        }
+    else:
+        progress = {k: v for k, v in progress.items() if k not in ("PK", "SK")}
+        # Ensure completedLessons is deserialized
+        if isinstance(progress.get("completedLessons"), str):
+            progress["completedLessons"] = json.loads(progress["completedLessons"])
+
+    # Also fetch learning path progress
+    path_records = db.query(f"USER#{user_id}", sk_begins_with="COACH#PATH#")
+    paths = []
+    for rec in path_records:
+        p = {k: v for k, v in rec.items() if k not in ("PK", "SK")}
+        if isinstance(p.get("lessonsCompleted"), str):
+            p["lessonsCompleted"] = json.loads(p["lessonsCompleted"])
+        if isinstance(p.get("quizScores"), str):
+            p["quizScores"] = json.loads(p["quizScores"])
+        paths.append(p)
+
+    return _response(200, {"progress": progress, "learningPaths": paths})
+
+
+def _handle_user_coach_progress_put(body, user_id):
+    """PUT /user/coach/progress — Update coach progress."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    allowed_keys = {
+        "xp", "streak", "lastActiveDate", "completedLessons",
+        "achievementsUnlocked", "disciplineScore", "cardsRead", "savedCards",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_keys}
+    if not updates:
+        return _response(400, {"error": "No valid progress fields provided", "code": "INVALID_BODY"})
+
+    # Serialize lists to JSON strings for DynamoDB
+    for key in ("completedLessons", "achievementsUnlocked", "cardsRead", "savedCards"):
+        if key in updates and isinstance(updates[key], list):
+            updates[key] = json.dumps(updates[key])
+
+    updates["updatedAt"] = now
+
+    existing = db.get_item(f"USER#{user_id}", "COACH#PROGRESS") or {}
+    existing.update(updates)
+    existing["PK"] = f"USER#{user_id}"
+    existing["SK"] = "COACH#PROGRESS"
+    db.put_item(existing)
+
+    result = {k: v for k, v in existing.items() if k not in ("PK", "SK")}
+    # Deserialize for response
+    for key in ("completedLessons", "achievementsUnlocked", "cardsRead", "savedCards"):
+        if key in result and isinstance(result[key], str):
+            result[key] = json.loads(result[key])
+
+    return _response(200, result)
+
+
+def _handle_user_coach_path_put(path_id, body, user_id):
+    """PUT /user/coach/path/{id} — Update learning path progress."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    if not path_id:
+        return _response(400, {"error": "Missing path id", "code": "MISSING_PATH_ID"})
+
+    allowed_keys = {
+        "lessonsCompleted", "quizScores", "currentLesson",
+        "startedAt", "completedAt",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_keys}
+
+    # Serialize complex types
+    for key in ("lessonsCompleted",):
+        if key in updates and isinstance(updates[key], list):
+            updates[key] = json.dumps(updates[key])
+    for key in ("quizScores",):
+        if key in updates and isinstance(updates[key], dict):
+            updates[key] = json.dumps(updates[key])
+
+    updates["pathId"] = path_id
+    updates["updatedAt"] = now
+
+    existing = db.get_item(f"USER#{user_id}", f"COACH#PATH#{path_id}") or {}
+    existing.update(updates)
+    existing["PK"] = f"USER#{user_id}"
+    existing["SK"] = f"COACH#PATH#{path_id}"
+    if "startedAt" not in existing:
+        existing["startedAt"] = now
+    db.put_item(existing)
+
+    result = {k: v for k, v in existing.items() if k not in ("PK", "SK")}
+    for key in ("lessonsCompleted",):
+        if key in result and isinstance(result[key], str):
+            result[key] = json.loads(result[key])
+    for key in ("quizScores",):
+        if key in result and isinstance(result[key], str):
+            result[key] = json.loads(result[key])
+
+    return _response(200, result)
+
+
+def _handle_user_chat_get(user_id, context, limit):
+    """GET /user/chat — Return recent chat conversations."""
+    sk_prefix = f"CHAT#{context}#"
+    records = db.query(
+        f"USER#{user_id}",
+        sk_begins_with=sk_prefix,
+        limit=limit,
+        scan_forward=False,  # Most recent first
+    )
+
+    conversations = []
+    for rec in records:
+        conv = {k: v for k, v in rec.items() if k not in ("PK", "SK")}
+        if isinstance(conv.get("messages"), str):
+            conv["messages"] = json.loads(conv["messages"])
+        conversations.append(conv)
+
+    return _response(200, {"conversations": conversations, "count": len(conversations)})
+
+
+def _handle_user_chat_post(body, user_id):
+    """POST /user/chat — Save a chat conversation."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+
+    context = body.get("context", "coach")
+    messages = body.get("messages", [])
+
+    if not messages:
+        return _response(400, {"error": "Messages required", "code": "MISSING_MESSAGES"})
+
+    # Serialize messages
+    item = {
+        "PK": f"USER#{user_id}",
+        "SK": f"CHAT#{context}#{ts}",
+        "messages": json.dumps(messages),
+        "context": context,
+        "createdAt": now,
+        "messageCount": len(messages),
+    }
+
+    # Set TTL for auto-cleanup: keep for 90 days
+    import time
+    item["ttl"] = int(time.time()) + (90 * 24 * 60 * 60)
+
+    db.put_item(item)
+
+    # Enforce max 20 conversations per context — delete oldest if over limit
+    all_chats = db.query(
+        f"USER#{user_id}",
+        sk_begins_with=f"CHAT#{context}#",
+        scan_forward=True,
+    )
+    if len(all_chats) > 20:
+        for old in all_chats[:-20]:
+            db.delete_item(old["PK"], old["SK"])
+
+    return _response(200, {"saved": True, "sk": item["SK"], "createdAt": now})
+
+
+def _handle_user_portfolio_list(user_id):
+    """GET /user/portfolio — List all holdings (raw, without price enrichment)."""
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if not record or not record.get("holdings"):
+        return _response(200, {"holdings": []})
+
+    holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+    return _response(200, {"holdings": holdings_raw})
+
+
+def _handle_user_portfolio_ticker_put(ticker, body, user_id):
+    """PUT /user/portfolio/{ticker} — Add or update a single holding."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    shares = body.get("shares")
+    avg_cost = body.get("avgCost") or body.get("costBasis")
+
+    if shares is None or avg_cost is None:
+        return _response(400, {"error": "shares and avgCost are required", "code": "INVALID_BODY"})
+
+    try:
+        shares = float(shares)
+        avg_cost = float(avg_cost)
+    except (ValueError, TypeError):
+        return _response(400, {"error": "shares and avgCost must be numbers", "code": "INVALID_BODY"})
+
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    holdings = []
+    if record and record.get("holdings"):
+        holdings = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+
+    # Update existing or add new
+    found = False
+    for h in holdings:
+        if h.get("ticker", "").upper() == ticker:
+            h["shares"] = shares
+            h["avgCost"] = avg_cost
+            h["updatedAt"] = now
+            if "companyName" in body:
+                h["companyName"] = body["companyName"]
+            found = True
+            break
+
+    if not found:
+        holdings.append({
+            "id": ticker,
+            "ticker": ticker,
+            "companyName": body.get("companyName", ticker),
+            "shares": shares,
+            "avgCost": avg_cost,
+            "dateAdded": now,
+        })
+
+    db.put_item({
+        "PK": f"USER#{user_id}",
+        "SK": "PORTFOLIO",
+        "holdings": json.dumps(holdings),
+        "lastUpdated": now,
+    })
+
+    return _response(200, {"holdings": holdings, "updated": ticker})
+
+
+def _handle_user_portfolio_ticker_delete(ticker, user_id):
+    """DELETE /user/portfolio/{ticker} — Remove a holding."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if not record or not record.get("holdings"):
+        return _response(200, {"holdings": [], "deleted": ticker})
+
+    holdings = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+    holdings = [h for h in holdings if h.get("ticker", "").upper() != ticker]
+
+    db.put_item({
+        "PK": f"USER#{user_id}",
+        "SK": "PORTFOLIO",
+        "holdings": json.dumps(holdings),
+        "lastUpdated": now,
+    })
+
+    return _response(200, {"holdings": holdings, "deleted": ticker})
+
+
+def _handle_user_watchlists_list(user_id):
+    """GET /user/watchlists — List all watchlists."""
+    record = db.get_item(f"USER#{user_id}", "WATCHLISTS")
+    if not record or not record.get("watchlists"):
+        return _response(200, {"watchlists": []})
+
+    watchlists = json.loads(record["watchlists"]) if isinstance(record["watchlists"], str) else record["watchlists"]
+    return _response(200, {"watchlists": watchlists})
+
+
+def _handle_user_watchlist_create(body, user_id):
+    """POST /user/watchlists — Create a new watchlist."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    name = body.get("name", "").strip()
+    if not name:
+        return _response(400, {"error": "Watchlist name is required", "code": "MISSING_NAME"})
+
+    wl_id = body.get("id") or name.lower().replace(" ", "-").replace("/", "-")
+    tickers = body.get("tickers", [])
+    items = body.get("items", [])
+
+    # Convert tickers array to items format if needed
+    if tickers and not items:
+        items = [{"ticker": t, "companyName": t, "addedAt": now} for t in tickers]
+
+    record = db.get_item(f"USER#{user_id}", "WATCHLISTS")
+    existing = []
+    if record and record.get("watchlists"):
+        existing = json.loads(record["watchlists"]) if isinstance(record["watchlists"], str) else record["watchlists"]
+
+    # Check for duplicate id
+    if any(wl["id"] == wl_id for wl in existing):
+        return _response(409, {"error": "Watchlist already exists", "code": "DUPLICATE_ID"})
+
+    new_wl = {
+        "id": wl_id,
+        "name": name,
+        "items": items,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    existing.append(new_wl)
+
+    db.put_item({
+        "PK": f"USER#{user_id}",
+        "SK": "WATCHLISTS",
+        "watchlists": json.dumps(existing),
+        "lastUpdated": now,
+    })
+
+    return _response(201, {"watchlist": new_wl, "watchlists": existing})
+
+
+def _handle_user_watchlist_update(wl_id, body, user_id):
+    """PUT /user/watchlists/{id} — Update a watchlist."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    record = db.get_item(f"USER#{user_id}", "WATCHLISTS")
+    if not record or not record.get("watchlists"):
+        return _response(404, {"error": "Watchlist not found", "code": "NOT_FOUND"})
+
+    existing = json.loads(record["watchlists"]) if isinstance(record["watchlists"], str) else record["watchlists"]
+
+    found = False
+    for wl in existing:
+        if wl["id"] == wl_id:
+            if "name" in body:
+                wl["name"] = body["name"]
+            if "items" in body:
+                wl["items"] = body["items"]
+            if "tickers" in body:
+                wl["items"] = [
+                    {"ticker": t, "companyName": t, "addedAt": now}
+                    for t in body["tickers"]
+                ]
+            wl["updatedAt"] = now
+            found = True
+            break
+
+    if not found:
+        return _response(404, {"error": "Watchlist not found", "code": "NOT_FOUND"})
+
+    db.put_item({
+        "PK": f"USER#{user_id}",
+        "SK": "WATCHLISTS",
+        "watchlists": json.dumps(existing),
+        "lastUpdated": now,
+    })
+
+    target = next(wl for wl in existing if wl["id"] == wl_id)
+    return _response(200, {"watchlist": target, "watchlists": existing})
+
+
+def _handle_user_watchlist_remove(wl_id, user_id):
+    """DELETE /user/watchlists/{id} — Delete a watchlist."""
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    record = db.get_item(f"USER#{user_id}", "WATCHLISTS")
+    if not record or not record.get("watchlists"):
+        return _response(200, {"watchlists": [], "deleted": wl_id})
+
+    existing = json.loads(record["watchlists"]) if isinstance(record["watchlists"], str) else record["watchlists"]
+    before_count = len(existing)
+    existing = [wl for wl in existing if wl["id"] != wl_id]
+
+    if len(existing) == before_count:
+        return _response(404, {"error": "Watchlist not found", "code": "NOT_FOUND"})
+
+    db.put_item({
+        "PK": f"USER#{user_id}",
+        "SK": "WATCHLISTS",
+        "watchlists": json.dumps(existing),
+        "lastUpdated": now,
+    })
+
+    return _response(200, {"watchlists": existing, "deleted": wl_id})
+
+
+def _handle_user_sync_status(user_id):
+    """GET /user/sync-status — Return last sync timestamps for all user data types."""
+    portfolio = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    watchlists = db.get_item(f"USER#{user_id}", "WATCHLISTS")
+    preferences = db.get_item(f"USER#{user_id}", "PREFERENCES")
+    coach = db.get_item(f"USER#{user_id}", "COACH#PROGRESS")
+
+    return _response(200, {
+        "portfolio": portfolio.get("lastUpdated") if portfolio else None,
+        "watchlists": watchlists.get("lastUpdated") if watchlists else None,
+        "preferences": preferences.get("updatedAt") if preferences else None,
+        "coachProgress": coach.get("updatedAt") if coach else None,
+        "synced": True,
+    })
 
 
 # ─── Response Helper ───
