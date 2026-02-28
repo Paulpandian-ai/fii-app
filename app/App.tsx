@@ -7,6 +7,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { dataRefreshManager } from './src/services/DataRefreshManager';
+import { syncService } from './src/services/SyncService';
+import { runMigration } from './src/services/MigrationService';
+import { getCurrentSession } from './src/services/auth';
 
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { FeedScreen } from './src/screens/FeedScreen';
@@ -229,6 +232,22 @@ export default function App() {
       setShowOnboarding(val !== 'true');
     });
 
+    // Initialize SyncService for cloud sync
+    syncService.initialize().then(async () => {
+      // Check auth and run migration if authenticated
+      try {
+        const session = await getCurrentSession();
+        if (session?.idToken) {
+          syncService.setAuthenticated(true);
+          // Run one-time migration from AsyncStorage to DynamoDB
+          const result = await runMigration();
+          if (result.migrated && result.itemsMigrated.length > 0) {
+            console.log('[App] Migration complete:', result.itemsMigrated);
+          }
+        }
+      } catch {}
+    });
+
     // Stagger startup loads: let Feed screen data load first (immediate),
     // then load events + push notifications after a short delay to avoid
     // overwhelming Finnhub-backed endpoints with concurrent requests.
@@ -248,6 +267,7 @@ export default function App() {
       clearTimeout(eventsTimer);
       clearTimeout(pushTimer);
       appStateSubscription.remove();
+      syncService.destroy();
     };
   }, [loadEventsFeed]);
 

@@ -21,7 +21,8 @@ import type { RootStackParamList } from '../types';
 import { DisclaimerFull } from '../components/DisclaimerBanner';
 import { useEventStore } from '../store/eventStore';
 import { useSubscriptionStore } from '../store/subscriptionStore';
-import { getAdminAgents, updateAdminAgentConfig, runAdminAgent } from '../services/api';
+import { getAdminAgents, updateAdminAgentConfig, runAdminAgent, getUserPreferences } from '../services/api';
+import { syncService } from '../services/SyncService';
 
 const TAX_BRACKETS = [10, 12, 22, 24, 32, 35, 37];
 
@@ -112,9 +113,10 @@ export const SettingsScreen: React.FC = () => {
   const updatePreferences = useEventStore((s) => s.updatePreferences);
   const loadPreferences = useEventStore((s) => s.loadPreferences);
 
-  // Load settings
+  // Load settings: local cache first, then cloud (source of truth)
   useEffect(() => {
     const load = async () => {
+      // Load from local cache for instant display
       try {
         const profile = await AsyncStorage.getItem('@fii_risk_profile');
         if (profile) setRiskProfile(profile);
@@ -126,8 +128,20 @@ export const SettingsScreen: React.FC = () => {
         if (weekly !== null) setWeeklyRecap(weekly === 'true');
         const vol = await AsyncStorage.getItem('@fii_volatility_alerts');
         if (vol !== null) setVolatilityAlerts(vol === 'true');
+      } catch {}
+
+      // Then fetch from DynamoDB (source of truth)
+      try {
+        const cloudPrefs = await getUserPreferences();
+        if (cloudPrefs) {
+          if (cloudPrefs.riskProfile) setRiskProfile(cloudPrefs.riskProfile);
+          if (cloudPrefs.taxBracket != null) setTaxBracket(cloudPrefs.taxBracket);
+          if (cloudPrefs.dailyBriefing != null) setDailyBriefing(cloudPrefs.dailyBriefing);
+          if (cloudPrefs.weeklyRecap != null) setWeeklyRecap(cloudPrefs.weeklyRecap);
+          if (cloudPrefs.volatilityAlerts != null) setVolatilityAlerts(cloudPrefs.volatilityAlerts);
+        }
       } catch {
-        // Use defaults
+        // Cloud unavailable — use cached values
       }
     };
     load();
@@ -137,11 +151,13 @@ export const SettingsScreen: React.FC = () => {
   const saveProfile = useCallback(async (profile: string) => {
     setRiskProfile(profile);
     await AsyncStorage.setItem('@fii_risk_profile', profile);
+    syncService.syncToCloud('preferences', 'PUT', { riskProfile: profile });
   }, []);
 
   const saveBracket = useCallback(async (bracket: number) => {
     setTaxBracket(bracket);
     await AsyncStorage.setItem('@fii_tax_bracket', bracket.toString());
+    syncService.syncToCloud('preferences', 'PUT', { taxBracket: bracket });
   }, []);
 
   const handleExportData = useCallback(async () => {
@@ -456,7 +472,7 @@ export const SettingsScreen: React.FC = () => {
           <Text style={styles.toggleLabel}>Daily market briefing</Text>
           <Switch
             value={dailyBriefing}
-            onValueChange={(v) => { setDailyBriefing(v); AsyncStorage.setItem('@fii_daily_briefing', v.toString()); }}
+            onValueChange={(v) => { setDailyBriefing(v); AsyncStorage.setItem('@fii_daily_briefing', v.toString()); syncService.syncToCloud('preferences', 'PUT', { dailyBriefing: v }); }}
             trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(96,165,250,0.3)' }}
             thumbColor={dailyBriefing ? '#60A5FA' : '#888'}
           />
@@ -465,7 +481,7 @@ export const SettingsScreen: React.FC = () => {
           <Text style={styles.toggleLabel}>Weekly recap</Text>
           <Switch
             value={weeklyRecap}
-            onValueChange={(v) => { setWeeklyRecap(v); AsyncStorage.setItem('@fii_weekly_recap', v.toString()); }}
+            onValueChange={(v) => { setWeeklyRecap(v); AsyncStorage.setItem('@fii_weekly_recap', v.toString()); syncService.syncToCloud('preferences', 'PUT', { weeklyRecap: v }); }}
             trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(96,165,250,0.3)' }}
             thumbColor={weeklyRecap ? '#60A5FA' : '#888'}
           />
@@ -474,7 +490,7 @@ export const SettingsScreen: React.FC = () => {
           <Text style={styles.toggleLabel}>Volatility alerts</Text>
           <Switch
             value={volatilityAlerts}
-            onValueChange={(v) => { setVolatilityAlerts(v); AsyncStorage.setItem('@fii_volatility_alerts', v.toString()); }}
+            onValueChange={(v) => { setVolatilityAlerts(v); AsyncStorage.setItem('@fii_volatility_alerts', v.toString()); syncService.syncToCloud('preferences', 'PUT', { volatilityAlerts: v }); }}
             trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(96,165,250,0.3)' }}
             thumbColor={volatilityAlerts ? '#60A5FA' : '#888'}
           />
