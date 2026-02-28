@@ -553,4 +553,81 @@ export const updateAdminAgentConfig = async (agentId: string, config: { enabled?
   return data;
 };
 
+// ─── User Data Sync (/user/*) ───
+
+export const getUserPreferences = async () => {
+  const { data } = await api.get('/user/preferences');
+  return data;
+};
+
+export const updateUserPreferences = async (prefs: Record<string, any>) => {
+  const { data } = await api.put('/user/preferences', prefs);
+  return data;
+};
+
+export const getUserPortfolio = async () => {
+  const { data } = await api.get('/user/portfolio');
+  return data;
+};
+
+export const putUserPortfolioTicker = async (ticker: string, holding: { shares: number; avgCost: number; companyName?: string }) => {
+  const { data } = await api.put(`/user/portfolio/${ticker}`, holding);
+  return data;
+};
+
+export const deleteUserPortfolioTicker = async (ticker: string) => {
+  const { data } = await api.delete(`/user/portfolio/${ticker}`);
+  return data;
+};
+
+export const getUserWatchlists = async () => {
+  const { data } = await api.get('/user/watchlists');
+  return data;
+};
+
+export const createUserWatchlist = async (watchlist: { id?: string; name: string; tickers?: string[]; items?: any[] }) => {
+  const { data } = await api.post('/user/watchlists', watchlist);
+  return data;
+};
+
+export const updateUserWatchlist = async (id: string, updates: { name?: string; items?: any[]; tickers?: string[] }) => {
+  const { data } = await api.put(`/user/watchlists/${id}`, updates);
+  return data;
+};
+
+export const deleteUserWatchlist = async (id: string) => {
+  const { data } = await api.delete(`/user/watchlists/${id}`);
+  return data;
+};
+
+export const getUserCoachProgress = async () => {
+  const { data } = await api.get('/user/coach/progress');
+  return data;
+};
+
+export const updateUserCoachProgress = async (progress: Record<string, any>) => {
+  const { data } = await api.put('/user/coach/progress', progress);
+  return data;
+};
+
+export const updateUserCoachPath = async (pathId: string, progress: Record<string, any>) => {
+  const { data } = await api.put(`/user/coach/path/${pathId}`, progress);
+  return data;
+};
+
+export const getUserChatHistory = async (context: string = 'coach', limit: number = 20) => {
+  const { data } = await api.get('/user/chat', { params: { context, limit: String(limit) } });
+  return data;
+};
+
+export const saveUserChat = async (messages: any[], context: string = 'coach') => {
+  const { data } = await api.post('/user/chat', { messages, context });
+  return data;
+};
+
+export const getUserSyncStatus = async () => {
+  const { data } = await api.get('/user/sync-status');
+  return data;
+};
+
 export default api;
