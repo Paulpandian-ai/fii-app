@@ -19,10 +19,16 @@ import { FeedCard } from '../components/FeedCard';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
 import { Skeleton } from '../components/Skeleton';
+import { LiveIndicator } from '../components/LiveIndicator';
+import { LastUpdated } from '../components/LastUpdated';
+import { RefreshProgressBar } from '../components/RefreshProgressBar';
 import { useFeedStore } from '../store/feedStore';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useEventStore } from '../store/eventStore';
-import { getFeed, getScreener, getInsightsAlerts } from '../services/api';
+import { useSignalStore } from '../store/signalStore';
+import { useDataRefresh } from '../hooks/useDataRefresh';
+import { dataRefreshManager } from '../services/DataRefreshManager';
+import { getFeed, getScreener, getInsightsAlerts, getBatchPrices } from '../services/api';
 import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -142,18 +148,54 @@ function buildSmartFeed(results: any[]): FeedItem[] {
 }
 
 export const FeedScreen: React.FC = () => {
-  const { setItems, setCurrentIndex, isLoading, setLoading, setError } = useFeedStore();
+  const { items: feedItems, setItems, setCurrentIndex, isLoading, setLoading, setError, lastUpdated } = useFeedStore();
   const portfolioTickers = usePortfolioStore((s) => s.getPortfolioTickers)();
   const liveBannerEvent = useEventStore((s) => s.liveBannerEvent);
   const showLiveBanner = useEventStore((s) => s.showLiveBanner);
   const dismissLiveBanner = useEventStore((s) => s.dismissLiveBanner);
   const loadEventsFeed = useEventStore((s) => s.loadEventsFeed);
+  const updateEnrichmentPrices = useSignalStore((s) => s.updateEnrichmentPrices);
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // ─── Data polling: batch price updates every 30s ───
+  useDataRefresh(
+    'feed-prices',
+    async () => {
+      const tickers = feedItems.map((i) => i.ticker).filter(Boolean);
+      if (tickers.length === 0) return;
+      setIsPolling(true);
+      try {
+        const data = await getBatchPrices(tickers.slice(0, 50));
+        if (data?.prices) {
+          updateEnrichmentPrices(data.prices);
+          useFeedStore.getState().updatePrices(data.prices);
+        }
+      } finally {
+        setIsPolling(false);
+      }
+    },
+    30_000,
+  );
+
+  // ─── Data polling: signal/feed refresh every 60s ───
+  useDataRefresh(
+    'feed-signals',
+    async () => {
+      const tickers = feedItems.map((i) => i.ticker).filter(Boolean).slice(0, 20);
+      if (tickers.length === 0) return;
+      try {
+        const { batchSignals } = await import('../services/api');
+        await batchSignals(tickers);
+      } catch {}
+    },
+    60_000,
+  );
 
   useEffect(() => {
     // Load feed immediately (visible on screen)
@@ -373,7 +415,10 @@ export const FeedScreen: React.FC = () => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadFeed();
+    await Promise.all([
+      loadFeed(),
+      dataRefreshManager.refreshAll(),
+    ]);
     setRefreshing(false);
   }, []);
 
@@ -401,6 +446,13 @@ export const FeedScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
+      <RefreshProgressBar visible={isPolling} />
+
+      {/* Live status + last updated */}
+      <View style={styles.statusRow}>
+        <LiveIndicator />
+        <LastUpdated timestamp={lastUpdated} />
+      </View>
 
       {/* Settings gear */}
       <TouchableOpacity style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')} accessibilityRole="button" accessibilityLabel="Open settings">
@@ -504,6 +556,15 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  statusRow: {
+    position: 'absolute',
+    top: 54,
+    left: 16,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   settingsBtn: {
     position: 'absolute',
