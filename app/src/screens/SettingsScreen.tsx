@@ -108,6 +108,22 @@ export const SettingsScreen: React.FC = () => {
   const [weeklyRecap, setWeeklyRecap] = useState(true);
   const [volatilityAlerts, setVolatilityAlerts] = useState(true);
 
+  // Sync status
+  const [syncPending, setSyncPending] = useState(0);
+  const [syncOnline, setSyncOnline] = useState(true);
+  const [syncLastAt, setSyncLastAt] = useState<number | null>(null);
+  const [syncAuth, setSyncAuth] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = syncService.subscribe((status) => {
+      setSyncPending(status.pendingCount);
+      setSyncOnline(status.isOnline);
+      setSyncLastAt(status.lastSyncedAt);
+      setSyncAuth(status.isAuthenticated);
+    });
+    return unsubscribe;
+  }, []);
+
   // Event alert preferences
   const preferences = useEventStore((s) => s.preferences);
   const updatePreferences = useEventStore((s) => s.updatePreferences);
@@ -730,6 +746,38 @@ export const SettingsScreen: React.FC = () => {
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
         </TouchableOpacity>
 
+        {/* Cloud Sync Status */}
+        <Text style={styles.sectionHeader}>Cloud Sync</Text>
+        <View style={styles.syncStatusCard}>
+          <View style={styles.syncStatusRow}>
+            <Ionicons
+              name={!syncAuth ? 'cloud-offline-outline' : syncPending > 0 ? 'cloud-upload-outline' : 'cloud-done-outline'}
+              size={22}
+              color={!syncAuth ? '#888' : syncPending > 0 ? '#FBBF24' : '#10B981'}
+            />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.syncStatusText}>
+                {!syncAuth
+                  ? 'Sign in to sync data across devices'
+                  : !syncOnline
+                    ? 'Offline — changes will sync when reconnected'
+                    : syncPending > 0
+                      ? `${syncPending} change${syncPending > 1 ? 's' : ''} pending sync`
+                      : 'All data synced'}
+              </Text>
+              {syncLastAt && (
+                <Text style={styles.syncSubtext}>
+                  Last synced: {new Date(syncLastAt).toLocaleString()}
+                </Text>
+              )}
+            </View>
+            <View style={[
+              styles.syncDot,
+              { backgroundColor: !syncAuth || !syncOnline ? '#888' : syncPending > 0 ? '#FBBF24' : '#10B981' },
+            ]} />
+          </View>
+        </View>
+
         {/* Data */}
         <Text style={styles.sectionHeader}>Data</Text>
         <TouchableOpacity style={styles.actionRow} onPress={handleExportData} activeOpacity={0.7}>
@@ -1136,5 +1184,32 @@ const styles = StyleSheet.create({
   agentRunText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  syncStatusCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    padding: 14,
+  },
+  syncStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  syncStatusText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  syncSubtext: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  syncDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginLeft: 8,
   },
 });
