@@ -240,10 +240,7 @@ export default function App() {
         if (session?.idToken) {
           syncService.setAuthenticated(true);
           // Run one-time migration from AsyncStorage to DynamoDB
-          const result = await runMigration();
-          if (result.migrated && result.itemsMigrated.length > 0) {
-            console.log('[App] Migration complete:', result.itemsMigrated);
-          }
+          await runMigration();
         }
       } catch {}
     });

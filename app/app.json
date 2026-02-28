@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "FII - Factor Impact Intelligence",
-    "slug": "fii-app",
+    "name": "Factor Impact Intelligence",
+    "slug": "fii",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,11 +10,12 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0D1B3E"
+      "backgroundColor": "#0A1628"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.fii.app"
+      "bundleIdentifier": "com.factorimpact.fii",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
