@@ -11,18 +11,17 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList, RootStackParamList } from '../types';
-import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import type { RootTabParamList } from '../types';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 
 import { useCoachStore } from '../store/coachStore';
 import { DailyBriefing } from '../components/DailyBriefing';
-import { DisciplineScore } from '../components/DisciplineScore';
-import { AchievementBadges } from '../components/AchievementBadges';
 import { MarketContextCards } from '../components/MarketContextCards';
+import { LearningPaths } from '../components/LearningPaths';
+import { AskCoach } from '../components/AskCoach';
+import { ProgressSection } from '../components/ProgressSection';
 import { VolatilityAlert } from '../components/VolatilityAlert';
-import { WeeklyRecap } from '../components/WeeklyRecap';
 
 export const CoachScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
@@ -35,18 +34,19 @@ export const CoachScreen: React.FC = () => {
     isScoreLoading,
     achievements,
     isAchievementsLoading,
-    weekly,
-    isWeeklyLoading,
+    learningPaths,
+    isLearningPathsLoading,
+    completedLessons,
     hasLoaded,
     loadAll,
     dismissDaily,
     logEvent,
-    loadWeekly,
+    completeLesson,
   } = useCoachStore();
 
-  // Volatility alert state (simulated — in prod, check SPY on load)
+  // Volatility alert state
   const [showVolatilityAlert, setShowVolatilityAlert] = useState(false);
-  const [spyDrop] = useState(0); // In prod: check SPY drop % on app open
+  const [spyDrop] = useState(0);
 
   // Load data on mount
   useEffect(() => {
@@ -55,7 +55,7 @@ export const CoachScreen: React.FC = () => {
     }
   }, [hasLoaded, loadAll]);
 
-  // Check for volatility alert (simulated: only show if SPY drops > 2%)
+  // Check for volatility alert
   useEffect(() => {
     if (spyDrop < -2) {
       setShowVolatilityAlert(true);
@@ -85,10 +85,6 @@ export const CoachScreen: React.FC = () => {
     logEvent('cards_read');
   }, [logEvent]);
 
-  const handleRefreshWeekly = useCallback(() => {
-    loadWeekly();
-  }, [loadWeekly]);
-
   const isLoading = isDailyLoading || isScoreLoading || isAchievementsLoading;
 
   if (!hasLoaded && isLoading) {
@@ -98,7 +94,7 @@ export const CoachScreen: React.FC = () => {
           <Text style={styles.topBarTitle}>Coach</Text>
         </View>
         <View style={{ padding: 16, gap: 16 }}>
-          <Skeleton width="100%" height={120} borderRadius={12} />
+          <Skeleton width="100%" height={160} borderRadius={12} />
           <Skeleton width="100%" height={80} borderRadius={12} />
           <Skeleton width="100%" height={80} borderRadius={12} />
           <Skeleton width="100%" height={100} borderRadius={12} />
@@ -140,7 +136,7 @@ export const CoachScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Section 1: Daily Briefing */}
+        {/* SECTION 1: Daily Briefing */}
         {daily && !dailyDismissed && (
           <DailyBriefing
             briefing={daily}
@@ -148,32 +144,31 @@ export const CoachScreen: React.FC = () => {
           />
         )}
 
-        {/* Section 2: Discipline Score */}
-        <DisciplineScore
-          data={score}
-          isLoading={isScoreLoading}
-        />
-
-        {/* Section 3: Achievement Badges */}
-        <AchievementBadges
-          data={achievements}
-          isLoading={isAchievementsLoading}
-        />
-
-        {/* Section 4: Market Context Cards */}
+        {/* SECTION 2: Market Context Stories */}
         <MarketContextCards onCardsRead={handleCardsRead} />
 
-        {/* Section 7: Weekly Recap */}
-        <WeeklyRecap
-          data={weekly}
-          isLoading={isWeeklyLoading}
-          onRefresh={handleRefreshWeekly}
-        />
+        {/* SECTION 3: Learning Paths */}
+        {learningPaths && (
+          <LearningPaths
+            paths={learningPaths.paths}
+            completedLessons={completedLessons}
+            onCompleteLesson={completeLesson}
+          />
+        )}
 
-        <DisclaimerBanner />
+        {/* SECTION 4: Ask Your Coach */}
+        <AskCoach />
+
+        {/* SECTION 5: Your Progress */}
+        <ProgressSection
+          score={score}
+          isScoreLoading={isScoreLoading}
+          achievements={achievements}
+          isAchievementsLoading={isAchievementsLoading}
+        />
       </ScrollView>
 
-      {/* Section 5: Volatility Alert (Modal overlay) */}
+      {/* Volatility Alert (Modal overlay) */}
       <VolatilityAlert
         visible={showVolatilityAlert}
         spyDropPct={spyDrop}
