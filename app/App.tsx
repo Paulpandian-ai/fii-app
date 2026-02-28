@@ -43,7 +43,6 @@ import { WealthAdvisorScreen } from './src/screens/WealthAdvisorScreen';
 import { TaxPlaybookScreen } from './src/screens/TaxPlaybookScreen';
 import { AICoachScreen } from './src/screens/AICoachScreen';
 import { useCoachStore } from './src/store/coachStore';
-import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
@@ -225,7 +224,6 @@ async function setupPushNotifications() {
 
 export default function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
-  const loadEventsFeed = useEventStore((s) => s.loadEventsFeed);
 
   useEffect(() => {
     AsyncStorage.getItem('@fii_onboarding_complete').then((val) => {
@@ -245,10 +243,7 @@ export default function App() {
       } catch {}
     });
 
-    // Stagger startup loads: let Feed screen data load first (immediate),
-    // then load events + push notifications after a short delay to avoid
-    // overwhelming Finnhub-backed endpoints with concurrent requests.
-    const eventsTimer = setTimeout(() => loadEventsFeed(), 3000);
+    // Push notifications setup (deferred to avoid competing with Feed's API calls)
     const pushTimer = setTimeout(() => setupPushNotifications(), 5000);
 
     // Pause/resume data polling based on app state (foreground/background)
@@ -261,12 +256,11 @@ export default function App() {
     });
 
     return () => {
-      clearTimeout(eventsTimer);
       clearTimeout(pushTimer);
       appStateSubscription.remove();
       syncService.destroy();
     };
-  }, [loadEventsFeed]);
+  }, []);
 
   // Wait for onboarding check
   if (showOnboarding === null) return null;

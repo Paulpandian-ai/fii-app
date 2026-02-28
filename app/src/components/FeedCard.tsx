@@ -70,7 +70,7 @@ const MetricSkeleton: React.FC = () => (
   <Skeleton width={36} height={16} borderRadius={4} />
 );
 
-export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
+const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const score = safeNum(item.compositeScore);
 
   const ownedShares = usePortfolioStore((s) => s.getSharesForTicker)(item.ticker);
@@ -616,6 +616,10 @@ export const FeedCard: React.FC<FeedCardProps> = ({ item, onPress }) => {
     </TouchableOpacity>
   );
 };
+
+export const FeedCard = React.memo(FeedCardInner, (prev, next) =>
+  prev.item.id === next.item.id && prev.item.ticker === next.item.ticker
+);
 
 const styles = StyleSheet.create({
   cardWrapper: {

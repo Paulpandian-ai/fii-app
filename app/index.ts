@@ -1,6 +1,10 @@
+import { enableFreeze } from 'react-native-screens';
 import { registerRootComponent } from 'expo';
 
 import App from './App';
+
+// Freeze inactive screens to prevent background re-renders
+enableFreeze(true);
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

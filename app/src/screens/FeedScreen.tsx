@@ -1,16 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Dimensions,
-  FlatList,
   StatusBar,
   TouchableOpacity,
   RefreshControl,
   Animated,
 } from 'react-native';
 import type { ViewToken } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -148,8 +148,14 @@ function buildSmartFeed(results: any[]): FeedItem[] {
 }
 
 export const FeedScreen: React.FC = () => {
-  const { items: feedItems, setItems, setCurrentIndex, isLoading, setLoading, setError, lastUpdated } = useFeedStore();
-  const portfolioTickers = usePortfolioStore((s) => s.getPortfolioTickers)();
+  const feedItems = useFeedStore((s) => s.items);
+  const setItems = useFeedStore((s) => s.setItems);
+  const setCurrentIndex = useFeedStore((s) => s.setCurrentIndex);
+  const isLoading = useFeedStore((s) => s.isLoading);
+  const setLoading = useFeedStore((s) => s.setLoading);
+  const setError = useFeedStore((s) => s.setError);
+  const lastUpdated = useFeedStore((s) => s.lastUpdated);
+  const portfolioTickers = usePortfolioStore((s) => s.holdings).map((h) => h.ticker);
   const liveBannerEvent = useEventStore((s) => s.liveBannerEvent);
   const showLiveBanner = useEventStore((s) => s.showLiveBanner);
   const dismissLiveBanner = useEventStore((s) => s.dismissLiveBanner);
@@ -159,7 +165,7 @@ export const FeedScreen: React.FC = () => {
   const [searchVisible, setSearchVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
+  const flashListRef = useRef<any>(null);
   const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -404,14 +410,6 @@ export const FeedScreen: React.FC = () => {
     [handleCardPress]
   );
 
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: SCREEN_HEIGHT,
-      offset: SCREEN_HEIGHT * index,
-      index,
-    }),
-    []
-  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -501,8 +499,8 @@ export const FeedScreen: React.FC = () => {
         </Animated.View>
       )}
 
-      <FlatList
-        ref={flatListRef}
+      <FlashList
+        ref={flashListRef}
         data={feed}
         renderItem={renderItem}
         keyExtractor={(item, index) => item.id ?? (item as any).postId ?? (item as any).ticker ?? 'item-' + index}
@@ -511,13 +509,8 @@ export const FeedScreen: React.FC = () => {
         snapToAlignment="start"
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
-        getItemLayout={getItemLayout}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        initialNumToRender={2}
-        removeClippedSubviews={true}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

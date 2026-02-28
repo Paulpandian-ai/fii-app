@@ -5,6 +5,69 @@ import type { Signal } from '../types';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.fii.app';
 
+// ─── Request deduplication & response cache ───
+// If the same GET endpoint is called within the TTL window,
+// return the cached response or deduplicate in-flight requests.
+const DEFAULT_CACHE_TTL = 30_000; // 30s
+const PRICE_CACHE_TTL = 15_000;   // 15s for price data
+const LONG_CACHE_TTL = 300_000;   // 5 min for slow-changing data
+
+interface CacheEntry { data: any; cachedAt: number; ttl: number }
+
+const _responseCache = new Map<string, CacheEntry>();
+const _inflightRequests = new Map<string, Promise<any>>();
+
+function _getTtl(path: string): number {
+  if (path.startsWith('/price') || path.startsWith('/prices')) return PRICE_CACHE_TTL;
+  if (path.startsWith('/feed') || path.startsWith('/screener')) return DEFAULT_CACHE_TTL;
+  if (path.startsWith('/baskets') || path.startsWith('/earnings') || path.startsWith('/track-record')) return LONG_CACHE_TTL;
+  if (path.startsWith('/coach/') || path.startsWith('/insights/')) return LONG_CACHE_TTL;
+  return DEFAULT_CACHE_TTL;
+}
+
+function _cacheKey(path: string, params?: Record<string, any>): string {
+  return params ? `${path}:${JSON.stringify(params)}` : path;
+}
+
+/** Deduplicated GET: returns cached data if fresh, or deduplicates in-flight requests. */
+async function _deduplicatedGet<T = any>(path: string, params?: Record<string, any>): Promise<T> {
+  const key = _cacheKey(path, params);
+  const ttl = _getTtl(path);
+
+  // 1. Check response cache
+  const cached = _responseCache.get(key);
+  if (cached && (Date.now() - cached.cachedAt) < cached.ttl) {
+    return cached.data;
+  }
+
+  // 2. Deduplicate in-flight request
+  const inflight = _inflightRequests.get(key);
+  if (inflight) return inflight;
+
+  // 3. Make the actual request
+  const promise = api.get(path, { params }).then(({ data }) => {
+    _responseCache.set(key, { data, cachedAt: Date.now(), ttl });
+    _inflightRequests.delete(key);
+    return data;
+  }).catch((err) => {
+    _inflightRequests.delete(key);
+    throw err;
+  });
+
+  _inflightRequests.set(key, promise);
+  return promise;
+}
+
+// Evict stale cache entries every 60s
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of _responseCache) {
+    if (now - entry.cachedAt > entry.ttl * 2) {
+      _responseCache.delete(key);
+    }
+  }
+}, 60_000);
+
 /** Helper: extract signal summaries from any API response and cache them. */
 const _cacheSignals = (
   items: Array<{ ticker?: string; score?: number; signal?: string; compositeScore?: number }>,
@@ -66,9 +129,8 @@ api.interceptors.response.use(
 // ─── Feed ───
 
 export const getFeed = async (cursor?: string) => {
-  const params = cursor ? { cursor } : {};
-  const { data } = await api.get('/feed', { params });
-  // Cache signal data from feed items
+  const params = cursor ? { cursor } : undefined;
+  const data = await _deduplicatedGet('/feed', params);
   _cacheSignals(data.items || []);
   return data;
 };
@@ -76,73 +138,62 @@ export const getFeed = async (cursor?: string) => {
 // ─── Price ───
 
 export const getPrice = async (ticker: string) => {
-  const { data } = await api.get(`/price/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/price/${ticker}`);
 };
 
 export const getBatchPrices = async (tickers: string[]) => {
   if (tickers.length === 0) return { prices: {} };
-  const { data } = await api.get('/prices/batch', {
-    params: { tickers: tickers.join(',') },
-  });
-  return data;
+  return _deduplicatedGet('/prices/batch', { tickers: tickers.join(',') });
 };
 
 // ─── Technicals ───
 
 export const getTechnicals = async (ticker: string) => {
-  const { data } = await api.get(`/technicals/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/technicals/${ticker}`);
 };
 
 // ─── Fundamentals ───
 
 export const getFundamentals = async (ticker: string) => {
-  const { data } = await api.get(`/fundamentals/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/fundamentals/${ticker}`);
 };
 
 // ─── Factors ───
 
 export const getFactors = async (ticker: string) => {
-  const { data } = await api.get(`/factors/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/factors/${ticker}`);
 };
 
 export const getAltData = async (ticker: string) => {
-  const { data } = await api.get(`/altdata/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/altdata/${ticker}`);
 };
 
 export const getFairPrice = async (ticker: string) => {
-  const { data } = await api.get(`/fair-price/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/fair-price/${ticker}`);
 };
 
 // ─── Charts ───
 
 export const getChartData = async (ticker: string, resolution: string = 'D', range: string = '6M') => {
-  const { data } = await api.get(`/charts/${ticker}`, { params: { resolution, range } });
-  return data;
+  return _deduplicatedGet(`/charts/${ticker}`, { resolution, range });
 };
 
 // ─── Screener ───
 
 export const getScreener = async (params: Record<string, string> = {}) => {
-  const { data } = await api.get('/screener', { params });
+  const data = await _deduplicatedGet('/screener', params);
   _cacheSignals(data.results || []);
   return data;
 };
 
 export const getScreenerTemplates = async () => {
-  const { data } = await api.get('/screener/templates');
-  return data;
+  return _deduplicatedGet('/screener/templates');
 };
 
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {
-  const { data } = await api.get('/search', { params: { q: query } });
+  const data = await _deduplicatedGet('/search', { q: query });
   _cacheSignals(data.results || []);
   return data;
 };
@@ -150,7 +201,7 @@ export const searchTickers = async (query: string) => {
 // ─── Signals ───
 
 export const getSignalDetail = async (ticker: string) => {
-  const { data } = await api.get(`/signals/${ticker}`);
+  const data = await _deduplicatedGet(`/signals/${ticker}`);
   if (data.ticker) {
     _cacheSignals([data]);
   }
@@ -163,9 +214,7 @@ export const generateSignal = async (ticker: string) => {
 };
 
 export const batchSignals = async (tickers: string[]) => {
-  const { data } = await api.get('/signals/batch', {
-    params: { tickers: tickers.join(',') },
-  });
+  const data = await _deduplicatedGet('/signals/batch', { tickers: tickers.join(',') });
   _cacheSignals(data.signals || []);
   return data;
 };
@@ -178,8 +227,7 @@ export const refreshAllSignals = async () => {
 // ─── Portfolio ───
 
 export const getPortfolio = async () => {
-  const { data } = await api.get('/portfolio');
-  return data;
+  return _deduplicatedGet('/portfolio');
 };
 
 export const savePortfolio = async (holdings: any[]) => {
@@ -193,22 +241,20 @@ export const parsePortfolioCsv = async (csvContent: string) => {
 };
 
 export const getPortfolioSummary = async () => {
-  const { data } = await api.get('/portfolio/summary');
-  return data;
+  return _deduplicatedGet('/portfolio/summary');
 };
 
 // ─── Baskets ───
 
 export const getBaskets = async () => {
-  const { data } = await api.get('/baskets');
-  // Cache signal data from all basket stocks
+  const data = await _deduplicatedGet('/baskets');
   const allStocks = (data.baskets || []).flatMap((b: any) => b.stocks || []);
   _cacheSignals(allStocks);
   return data;
 };
 
 export const getBasketDetail = async (id: string) => {
-  const { data } = await api.get(`/baskets/${id}`);
+  const data = await _deduplicatedGet(`/baskets/${id}`);
   _cacheSignals(data.stocks || []);
   return data;
 };
@@ -216,7 +262,7 @@ export const getBasketDetail = async (id: string) => {
 // ─── Trending ───
 
 export const getTrending = async () => {
-  const { data } = await api.get('/trending');
+  const data = await _deduplicatedGet('/trending');
   _cacheSignals(data.items || []);
   return data;
 };
@@ -224,7 +270,7 @@ export const getTrending = async () => {
 // ─── Discovery ───
 
 export const getDiscoveryCards = async () => {
-  const { data } = await api.get('/discovery');
+  const data = await _deduplicatedGet('/discovery');
   _cacheSignals(data.cards || []);
   return data;
 };
@@ -232,8 +278,7 @@ export const getDiscoveryCards = async () => {
 // ─── Watchlist ───
 
 export const getWatchlists = async () => {
-  const { data } = await api.get('/watchlist');
-  return data;
+  return _deduplicatedGet('/watchlist');
 };
 
 export const saveWatchlist = async (watchlist: { id?: string; name: string; items: any[] }) => {
@@ -259,8 +304,7 @@ export const deleteWatchlist = async (name: string) => {
 // ─── Portfolio Health ───
 
 export const getPortfolioHealth = async () => {
-  const { data } = await api.get('/portfolio/health');
-  return data;
+  return _deduplicatedGet('/portfolio/health');
 };
 
 // ─── Strategy ───
@@ -289,8 +333,7 @@ export const runRebalance = async () => {
 };
 
 export const getAchievements = async () => {
-  const { data } = await api.get('/strategy/achievements');
-  return data;
+  return _deduplicatedGet('/strategy/achievements');
 };
 
 export const runBacktest = async (tickers?: string[], period?: string) => {
@@ -311,8 +354,7 @@ export const runTaxHarvest = async (bracket: number) => {
 };
 
 export const getCorrelation = async () => {
-  const { data } = await api.get('/strategy/correlation');
-  return data;
+  return _deduplicatedGet('/strategy/correlation');
 };
 
 export const getAdvice = async () => {
@@ -321,54 +363,45 @@ export const getAdvice = async () => {
 };
 
 export const getReportCard = async () => {
-  const { data } = await api.get('/strategy/report-card');
-  return data;
+  return _deduplicatedGet('/strategy/report-card');
 };
 
 // ─── Stress Test ───
 
 export const getStressTest = async (ticker: string, scenario: string = 'severely_adverse') => {
-  const { data } = await api.get(`/stock/${ticker}/stress-test`, { params: { scenario } });
-  return data;
+  return _deduplicatedGet(`/stock/${ticker}/stress-test`, { scenario });
 };
 
 export const getStressTestAll = async (ticker: string) => {
-  const { data } = await api.get(`/stock/${ticker}/stress-test/all`);
-  return data;
+  return _deduplicatedGet(`/stock/${ticker}/stress-test/all`);
 };
 
 // ─── AI Insights ───
 
 export const getInsightsFeed = async (limit: number = 20) => {
-  const { data } = await api.get('/insights/feed', { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet('/insights/feed', { limit: String(limit) });
 };
 
 export const getInsightsAlerts = async (limit: number = 10) => {
-  const { data } = await api.get('/insights/alerts', { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet('/insights/alerts', { limit: String(limit) });
 };
 
 export const getInsightsForTicker = async (ticker: string, limit: number = 5) => {
-  const { data } = await api.get(`/insights/${ticker}`, { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet(`/insights/${ticker}`, { limit: String(limit) });
 };
 
 // ─── Coach ───
 
 export const getCoachDaily = async () => {
-  const { data } = await api.get('/coach/daily');
-  return data;
+  return _deduplicatedGet('/coach/daily');
 };
 
 export const getCoachScore = async () => {
-  const { data } = await api.get('/coach/score');
-  return data;
+  return _deduplicatedGet('/coach/score');
 };
 
 export const getCoachAchievements = async () => {
-  const { data } = await api.get('/coach/achievements');
-  return data;
+  return _deduplicatedGet('/coach/achievements');
 };
 
 export const postCoachEvent = async (event: string, amount?: number) => {
@@ -377,21 +410,19 @@ export const postCoachEvent = async (event: string, amount?: number) => {
 };
 
 export const getCoachWeekly = async () => {
-  const { data } = await api.get('/coach/weekly');
-  return data;
+  return _deduplicatedGet('/coach/weekly');
 };
 
 // ─── Earnings Calendar ───
 
 export const getEarningsCalendar = async () => {
-  const { data } = await api.get('/earnings/calendar');
-  return data;
+  return _deduplicatedGet('/earnings/calendar');
 };
 
 // ─── Market Movers ───
 
 export const getMarketMovers = async () => {
-  const { data } = await api.get('/market/movers');
+  const data = await _deduplicatedGet('/market/movers');
   _cacheSignals([
     ...(data.gainers || []),
     ...(data.losers || []),
@@ -405,20 +436,17 @@ export const getMarketMovers = async () => {
 // ─── Track Record ───
 
 export const getTrackRecord = async () => {
-  const { data } = await api.get('/track-record');
-  return data;
+  return _deduplicatedGet('/track-record');
 };
 
 export const getTrackRecordTicker = async (ticker: string) => {
-  const { data } = await api.get(`/track-record/${ticker}`);
-  return data;
+  return _deduplicatedGet(`/track-record/${ticker}`);
 };
 
 // ─── Discussion ───
 
 export const getDiscussion = async (ticker: string, limit: number = 20) => {
-  const { data } = await api.get(`/discuss/${ticker}`, { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet(`/discuss/${ticker}`, { limit: String(limit) });
 };
 
 export const createPost = async (ticker: string, content: string, sentiment: string, displayName?: string) => {
@@ -434,8 +462,7 @@ export const reactToPost = async (ticker: string, postId: string, reaction: stri
 // ─── Profile ───
 
 export const getMyProfile = async () => {
-  const { data } = await api.get('/profile/me');
-  return data;
+  return _deduplicatedGet('/profile/me');
 };
 
 export const updateMyProfile = async (updates: Record<string, string>) => {
@@ -444,15 +471,13 @@ export const updateMyProfile = async (updates: Record<string, string>) => {
 };
 
 export const getPublicProfile = async (userId: string) => {
-  const { data } = await api.get(`/profile/${userId}`);
-  return data;
+  return _deduplicatedGet(`/profile/${userId}`);
 };
 
 // ─── Leaderboard ───
 
 export const getLeaderboard = async () => {
-  const { data } = await api.get('/leaderboard');
-  return data;
+  return _deduplicatedGet('/leaderboard');
 };
 
 // ─── AI Chat ───
@@ -465,30 +490,25 @@ export const sendChatMessage = async (message: string, context?: { currentTicker
 // ─── Events ───
 
 export const getEventsForTicker = async (ticker: string, params: Record<string, string> = {}) => {
-  const { data } = await api.get(`/events/${ticker}`, { params });
-  return data;
+  return _deduplicatedGet(`/events/${ticker}`, params);
 };
 
 export const getEventsFeed = async (limit: number = 50) => {
-  const { data } = await api.get('/events/feed', { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet('/events/feed', { limit: String(limit) });
 };
 
 export const getSignalHistory = async (ticker: string, days: number = 30) => {
-  const { data } = await api.get(`/events/signal-history/${ticker}`, { params: { days: String(days) } });
-  return data;
+  return _deduplicatedGet(`/events/signal-history/${ticker}`, { days: String(days) });
 };
 
 export const getAlerts = async (limit: number = 20) => {
-  const { data } = await api.get('/alerts', { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet('/alerts', { limit: String(limit) });
 };
 
 // ─── Notifications ───
 
 export const getNotificationPreferences = async () => {
-  const { data } = await api.get('/notifications/preferences');
-  return data;
+  return _deduplicatedGet('/notifications/preferences');
 };
 
 export const saveNotificationPreferences = async (prefs: Record<string, any>) => {
@@ -504,33 +524,28 @@ export const registerDeviceToken = async (token: string, platform: string = 'exp
 // ─── Subscription ───
 
 export const getSubscriptionStatus = async () => {
-  const { data } = await api.get('/subscription/status');
-  return data;
+  return _deduplicatedGet('/subscription/status');
 };
 
 export const getSubscriptionUsage = async () => {
-  const { data } = await api.get('/subscription/usage');
-  return data;
+  return _deduplicatedGet('/subscription/usage');
 };
 
 // ─── Affiliates ───
 
 export const getAffiliateBrokers = async (ticker?: string) => {
-  const params = ticker ? { ticker } : {};
-  const { data } = await api.get('/affiliate/brokers', { params });
-  return data;
+  const params = ticker ? { ticker } : undefined;
+  return _deduplicatedGet('/affiliate/brokers', params);
 };
 
 export const getAffiliateLink = async (broker: string, ticker: string) => {
-  const { data } = await api.get('/affiliate/link', { params: { broker, ticker } });
-  return data;
+  return _deduplicatedGet('/affiliate/link', { broker, ticker });
 };
 
 // ─── Admin: Agent Control ───
 
 export const getAdminAgents = async () => {
-  const { data } = await api.get('/admin/agents');
-  return data;
+  return _deduplicatedGet('/admin/agents');
 };
 
 export const runAdminAgent = async (agentId: string) => {
@@ -539,13 +554,11 @@ export const runAdminAgent = async (agentId: string) => {
 };
 
 export const getAdminAgentHistory = async (agentId: string, limit: number = 10) => {
-  const { data } = await api.get(`/admin/agents/${agentId}/history`, { params: { limit: String(limit) } });
-  return data;
+  return _deduplicatedGet(`/admin/agents/${agentId}/history`, { limit: String(limit) });
 };
 
 export const getAdminAgentConfig = async (agentId: string) => {
-  const { data } = await api.get(`/admin/agents/${agentId}/config`);
-  return data;
+  return _deduplicatedGet(`/admin/agents/${agentId}/config`);
 };
 
 export const updateAdminAgentConfig = async (agentId: string, config: { enabled?: boolean; customSchedule?: string | null }) => {
@@ -556,8 +569,7 @@ export const updateAdminAgentConfig = async (agentId: string, config: { enabled?
 // ─── User Data Sync (/user/*) ───
 
 export const getUserPreferences = async () => {
-  const { data } = await api.get('/user/preferences');
-  return data;
+  return _deduplicatedGet('/user/preferences');
 };
 
 export const updateUserPreferences = async (prefs: Record<string, any>) => {
@@ -566,8 +578,7 @@ export const updateUserPreferences = async (prefs: Record<string, any>) => {
 };
 
 export const getUserPortfolio = async () => {
-  const { data } = await api.get('/user/portfolio');
-  return data;
+  return _deduplicatedGet('/user/portfolio');
 };
 
 export const putUserPortfolioTicker = async (ticker: string, holding: { shares: number; avgCost: number; companyName?: string }) => {
@@ -581,8 +592,7 @@ export const deleteUserPortfolioTicker = async (ticker: string) => {
 };
 
 export const getUserWatchlists = async () => {
-  const { data } = await api.get('/user/watchlists');
-  return data;
+  return _deduplicatedGet('/user/watchlists');
 };
 
 export const createUserWatchlist = async (watchlist: { id?: string; name: string; tickers?: string[]; items?: any[] }) => {
@@ -601,8 +611,7 @@ export const deleteUserWatchlist = async (id: string) => {
 };
 
 export const getUserCoachProgress = async () => {
-  const { data } = await api.get('/user/coach/progress');
-  return data;
+  return _deduplicatedGet('/user/coach/progress');
 };
 
 export const updateUserCoachProgress = async (progress: Record<string, any>) => {
@@ -616,8 +625,7 @@ export const updateUserCoachPath = async (pathId: string, progress: Record<strin
 };
 
 export const getUserChatHistory = async (context: string = 'coach', limit: number = 20) => {
-  const { data } = await api.get('/user/chat', { params: { context, limit: String(limit) } });
-  return data;
+  return _deduplicatedGet('/user/chat', { context, limit: String(limit) });
 };
 
 export const saveUserChat = async (messages: any[], context: string = 'coach') => {
@@ -626,8 +634,7 @@ export const saveUserChat = async (messages: any[], context: string = 'coach') =
 };
 
 export const getUserSyncStatus = async () => {
-  const { data } = await api.get('/user/sync-status');
-  return data;
+  return _deduplicatedGet('/user/sync-status');
 };
 
 export default api;
