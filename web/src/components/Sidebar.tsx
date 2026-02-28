@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
+import { signOut } from '@/lib/auth';
 
 const NAV_ITEMS = [
   {
@@ -59,8 +60,15 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, clearAuth } = useAuthStore();
+
+  const handleLogout = () => {
+    try { signOut(); } catch { /* ignore */ }
+    clearAuth();
+    router.push('/login');
+  };
 
   return (
     <aside
@@ -123,20 +131,35 @@ export function Sidebar() {
       </button>
 
       {/* User / Settings */}
-      <div className="border-t border-fii-border p-3">
+      <div className="border-t border-fii-border p-3 space-y-2">
         {isAuthenticated && user ? (
-          <div className={cn('flex items-center gap-2', collapsed && 'justify-center')}>
-            <div className="w-8 h-8 rounded-full bg-fii-accent/20 flex items-center justify-center flex-shrink-0">
-              <span className="text-fii-accent text-xs font-bold">
-                {user.email?.[0]?.toUpperCase() || 'U'}
-              </span>
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-fii-text truncate">{user.email}</p>
+          <>
+            <div className={cn('flex items-center gap-2', collapsed && 'justify-center')}>
+              <div className="w-8 h-8 rounded-full bg-fii-accent/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-fii-accent text-xs font-bold">
+                  {user.email?.[0]?.toUpperCase() || 'U'}
+                </span>
               </div>
-            )}
-          </div>
+              {!collapsed && (
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-fii-text truncate">{user.email}</p>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={handleLogout}
+              className={cn(
+                'flex items-center gap-2 w-full px-3 py-2 rounded-lg text-fii-muted hover:bg-fii-card hover:text-red-400 transition-colors',
+                collapsed && 'justify-center',
+              )}
+              title="Sign out"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              {!collapsed && <span className="text-xs">Sign Out</span>}
+            </button>
+          </>
         ) : (
           <Link
             href="/login"

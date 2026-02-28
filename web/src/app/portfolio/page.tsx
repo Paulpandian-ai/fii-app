@@ -11,7 +11,8 @@ import { DisclaimerBanner } from '@/components/DisclaimerBanner';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
 import { useSignalStore } from '@/store/signalStore';
 import * as api from '@/lib/api';
-import type { TrendingItem, PortfolioHealth, Watchlist } from '@/types';
+import type { TrendingItem } from '@/types';
+import { WatchlistSection } from './WatchlistSection';
 
 function PortfolioContent() {
   const {
@@ -20,7 +21,7 @@ function PortfolioContent() {
     isLoading, error, loadPortfolio, loadSummary, loadHealth,
   } = usePortfolioStore();
 
-  const { watchlists, loadWatchlists, activeWatchlistId, setActiveWatchlist } = useWatchlistStore();
+  const { watchlists, loadWatchlists, activeWatchlistId, setActiveWatchlist, createWatchlist, removeWatchlist } = useWatchlistStore();
   const { signals } = useSignalStore();
 
   const [trending, setTrending] = useState<TrendingItem[]>([]);
@@ -342,53 +343,13 @@ function PortfolioContent() {
       )}
 
       {/* 4. Watchlists */}
-      <div className="bg-fii-card rounded-xl border border-fii-border overflow-hidden">
-        <div className="px-4 py-3 border-b border-fii-border">
-          <h3 className="text-sm font-semibold text-white">Watchlists</h3>
-        </div>
-        {watchlists.length > 0 ? (
-          <>
-            <div className="flex gap-1 p-2 border-b border-fii-border overflow-x-auto">
-              {watchlists.map((wl) => (
-                <button
-                  key={wl.id}
-                  onClick={() => setActiveWatchlist(wl.id)}
-                  className={cn(
-                    'px-3 py-1 text-xs rounded-full transition-colors flex-shrink-0',
-                    activeWatchlistId === wl.id ? 'bg-fii-accent/20 text-fii-accent' : 'bg-fii-bg text-fii-text-secondary hover:bg-fii-card-hover',
-                  )}
-                >
-                  {wl.name}
-                </button>
-              ))}
-            </div>
-            <div>
-              {(watchlists.find((w) => w.id === activeWatchlistId)?.items || []).map((item) => (
-                <div key={item.ticker} className="flex items-center justify-between px-4 py-2.5 border-b border-fii-border last:border-0">
-                  <div>
-                    <span className="font-semibold text-white text-sm">{item.ticker}</span>
-                    <span className="text-xs text-fii-text-secondary ml-2">{item.companyName}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {item.price && <span className="text-sm text-white">{formatCurrency(item.price)}</span>}
-                    {item.changePercent != null && (
-                      <span className={cn('text-xs', item.changePercent >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                        {formatPercent(item.changePercent)}
-                      </span>
-                    )}
-                    {item.score && <span className="text-xs text-fii-accent">{item.score.toFixed(1)}</span>}
-                  </div>
-                </div>
-              ))}
-              {(watchlists.find((w) => w.id === activeWatchlistId)?.items || []).length === 0 && (
-                <div className="py-8 text-center text-fii-muted text-xs">Empty watchlist</div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="py-8 text-center text-fii-muted text-xs">No watchlists yet</div>
-        )}
-      </div>
+      <WatchlistSection
+        watchlists={watchlists}
+        activeWatchlistId={activeWatchlistId}
+        setActiveWatchlist={setActiveWatchlist}
+        createWatchlist={createWatchlist}
+        removeWatchlist={removeWatchlist}
+      />
     </div>
   );
 }

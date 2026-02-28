@@ -36,13 +36,13 @@ const SECONDARY_CARDS = [
     title: 'Signal Backtester',
     description: 'Test FII signals against historical performance',
     icon: '📊',
-    href: '/strategy/wealth-advisor',
+    href: '/strategy/backtester',
   },
   {
     title: 'Earnings Calendar',
     description: 'Upcoming earnings dates for your watchlist',
     icon: '📅',
-    href: '/strategy/wealth-advisor',
+    href: '/strategy/earnings',
   },
 ];
 

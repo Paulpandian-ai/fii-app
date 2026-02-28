@@ -2,14 +2,14 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useFeedStore } from '@/store/feedStore';
-import { useSignalStore } from '@/store/signalStore';
 import * as api from '@/lib/api';
 import { dataRefreshManager } from '@/lib/DataRefreshManager';
-import type { FeedItem, PriceData, FullAnalysis, FactorAnalysis, FundamentalAnalysis } from '@/types';
+import type { FeedItem, PriceData } from '@/types';
 import { StockList } from './StockList';
 import { StockDetail } from './StockDetail';
 import { DisclaimerBanner } from '@/components/DisclaimerBanner';
 import { StockRowSkeleton } from '@/components/Skeleton';
+import { cn } from '@/lib/utils';
 
 export default function FeedPage() {
   const { items, setItems, setLoading, isLoading, setError, error } = useFeedStore();
@@ -19,6 +19,7 @@ export default function FeedPage() {
   const [priceData, setPriceData] = useState<Record<string, PriceData>>({});
   const [isLive, setIsLive] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   const loadFeed = useCallback(async () => {
     setLoading(true);
@@ -102,6 +103,14 @@ export default function FeedPage() {
 
   const selectedItem = items.find((i) => i.ticker === selectedTicker) || null;
 
+  const handleSelect = (ticker: string) => {
+    setSelectedTicker(ticker);
+    // Open mobile slide-over on small screens
+    if (window.innerWidth < 1024) {
+      setMobileDetailOpen(true);
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}
@@ -171,7 +180,7 @@ export default function FeedPage() {
                 items={filteredItems}
                 priceData={priceData}
                 selectedTicker={selectedTicker}
-                onSelect={setSelectedTicker}
+                onSelect={handleSelect}
               />
             )}
           </div>
@@ -191,6 +200,31 @@ export default function FeedPage() {
           )}
         </div>
       </div>
+
+      {/* Mobile stock detail slide-over */}
+      {mobileDetailOpen && selectedItem && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col bg-fii-bg animate-slide-up">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-fii-border bg-fii-bg-dark">
+            <button
+              onClick={() => setMobileDetailOpen(false)}
+              className="flex items-center gap-1 text-fii-accent text-sm"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <span className="text-white font-semibold">{selectedItem.ticker}</span>
+            <div className="w-12" />
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <StockDetail
+              item={selectedItem}
+              priceData={priceData[selectedItem.ticker]}
+            />
+          </div>
+        </div>
+      )}
 
       <DisclaimerBanner />
     </div>
