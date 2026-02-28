@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 3.0.0"
+    "version": ">= 18.0.6",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -17,9 +18,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "PLACEHOLDER",
-        "ascAppId": "PLACEHOLDER",
-        "appleTeamId": "PLACEHOLDER"
+        "appleId": "accede.excellence@gmail.com",
+        "ascAppId": "6759844335",
+        "appleTeamId": "LHD5ZUYJ97"
       }
     }
   }
