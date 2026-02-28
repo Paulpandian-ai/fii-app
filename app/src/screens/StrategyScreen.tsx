@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Share,
   Alert,
+  Animated,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,23 +18,10 @@ import type { RootStackParamList } from '../types';
 
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useStrategyStore } from '../store/strategyStore';
+import { useSignalStore } from '../store/signalStore';
+import { getInsightsFeed } from '../services/api';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { Skeleton } from '../components/Skeleton';
-import { ErrorState } from '../components/ErrorState';
-
-const GRADE_COLORS: Record<string, string> = {
-  'A+': '#10B981',
-  A: '#10B981',
-  'A-': '#34D399',
-  'B+': '#34D399',
-  B: '#60A5FA',
-  'B-': '#60A5FA',
-  'C+': '#FBBF24',
-  C: '#FBBF24',
-  'C-': '#F59E0B',
-  D: '#EF4444',
-  F: '#EF4444',
-};
 
 const formatMoney = (v: unknown): string => {
   const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -60,125 +48,137 @@ export const StrategyScreen: React.FC = () => {
     isAdviceLoading,
     reportCard,
     isReportCardLoading,
+    moves,
     hasRun,
     error: strategyError,
     runFullSimulation,
   } = useStrategyStore();
 
+  const signals = useSignalStore((s) => s.signals);
+
   const isAnyLoading =
     isOptimizing || isDiversifying || isTaxLoading || isAdviceLoading || isReportCardLoading;
 
-  const handleRunSimulation = useCallback(() => {
-    const value = totalValue > 0 ? totalValue : 50000;
-    runFullSimulation(value);
-  }, [totalValue, runFullSimulation]);
+  // Market pulse state
+  const [marketPulse, setMarketPulse] = useState<string>('');
+  const [marketPulseExpanded, setMarketPulseExpanded] = useState(false);
+  const [marketPulseFull, setMarketPulseFull] = useState<string>('');
+  const [pulseLoading, setPulseLoading] = useState(true);
 
-  // Compute card summaries
-  const sharpe = (optimization?.optimized?.sharpeRatio ?? 0).toFixed(2);
-  const targetSharpe = '0.75';
-  const simGrade = reportCard?.grades?.find((g) => g.category === 'Optimization')?.grade ?? '--';
+  // Load market pulse on mount
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await getInsightsFeed(1);
+        if (!mounted) return;
+        const insight = data?.insights?.[0];
+        if (insight) {
+          setMarketPulse(insight.title || insight.summary || 'Markets are active today.');
+          setMarketPulseFull(
+            insight.summary || insight.body || insight.title || 'Markets are active today. Check your portfolio for updates.'
+          );
+        } else {
+          setMarketPulse('Markets are active today. Tap to see your portfolio update.');
+          setMarketPulseFull('Markets are active today. Run a full analysis to get personalized insights about your portfolio performance and recommendations.');
+        }
+      } catch {
+        if (mounted) {
+          setMarketPulse('Markets are active today. Tap to see your portfolio update.');
+          setMarketPulseFull('Markets are active today. Run a full analysis to get personalized insights.');
+        }
+      } finally {
+        if (mounted) setPulseLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
-  const taxSavings = formatMoney(taxHarvest?.totalTaxSavings ?? 0);
-  const taxGrade = reportCard?.grades?.find((g) => g.category === 'Tax Efficiency')?.grade ?? '--';
+  // Auto-run simulation if we have portfolio and haven't run yet
+  useEffect(() => {
+    if (hasPortfolio && !hasRun && !isAnyLoading && !strategyError) {
+      const value = totalValue > 0 ? totalValue : 50000;
+      runFullSimulation(value);
+    }
+  }, [hasPortfolio, hasRun, isAnyLoading, strategyError, totalValue, runFullSimulation]);
 
-  const divScore = Math.round(diversification?.diversificationScore ?? 0);
-  const divGrade = diversification?.grade ?? reportCard?.grades?.find((g) => g.category === 'Diversification')?.grade ?? '--';
+  // Compute card previews
+  const rebalanceCount = moves.length;
+  const sharpeImprovement = optimization
+    ? ((optimization.optimized?.sharpeRatio ?? 0) - (optimization.currentPortfolio?.sharpeRatio ?? 0))
+    : 0;
+  const annualImprovement = sharpeImprovement > 0
+    ? Math.round(sharpeImprovement * (totalValue > 0 ? totalValue : 50000) * 0.1)
+    : 0;
+
+  const taxOpportunities = taxHarvest?.losses?.length ?? 0;
+  const taxSavings = taxHarvest?.totalTaxSavings ?? 0;
 
   const adviceCount = advice.length;
+  const topAdvice = advice[0];
 
-  const overall = reportCard?.overall ?? '--';
-  const overallColor = GRADE_COLORS[overall] ?? '#60A5FA';
-  const overallScore = reportCard?.overallScore ?? 0;
+  // Compute Strategy Score (0-100)
+  const computeStrategyScore = (): number => {
+    if (!hasRun) return 0;
+    let score = 0;
+    let components = 0;
 
-  // Compute improvement summary
-  const sharpeImprovement = optimization
-    ? ((optimization.optimized?.sharpeRatio ?? 0) - (optimization.currentPortfolio?.sharpeRatio ?? 0)).toFixed(2)
-    : '0.00';
-  const savingsText = formatMoney(taxHarvest?.totalTaxSavings ?? 0);
+    // Diversification score (0-25)
+    if (diversification) {
+      score += Math.min(25, (diversification.diversificationScore / 100) * 25);
+      components++;
+    }
+
+    // Tax efficiency (0-25)
+    if (taxHarvest) {
+      const taxScore = taxHarvest.losses.length === 0 ? 25 : Math.max(0, 25 - taxHarvest.losses.length * 5);
+      score += taxScore;
+      components++;
+    }
+
+    // Risk management via Sharpe (0-25)
+    if (optimization) {
+      const currentSharpe = optimization.currentPortfolio?.sharpeRatio ?? 0;
+      score += Math.min(25, (currentSharpe / 1.5) * 25);
+      components++;
+    }
+
+    // Signal alignment (0-25)
+    if (holdings.length > 0) {
+      const buyCount = holdings.filter((h) => {
+        const sig = signals[h.ticker];
+        return sig?.signal === 'BUY';
+      }).length;
+      score += Math.min(25, (buyCount / holdings.length) * 25);
+      components++;
+    }
+
+    return components > 0 ? Math.round(score) : 0;
+  };
+
+  const strategyScore = computeStrategyScore();
+  const scoreColor =
+    strategyScore >= 75 ? '#10B981' :
+    strategyScore >= 50 ? '#60A5FA' :
+    strategyScore >= 25 ? '#FBBF24' : '#EF4444';
 
   const handleShare = useCallback(async () => {
-    if (!reportCard) return;
     try {
-      let message = 'My FII Strategy Report Card\n\n';
-      message += `Overall Grade: ${reportCard.overall} (${reportCard.overallScore}/100)\n\n`;
-      for (const g of reportCard.grades) {
-        message += `${g.category}: ${g.grade} — ${g.comment}\n`;
+      let message = `My FII Strategy Score: ${strategyScore}/100\n\n`;
+      if (reportCard) {
+        message += `Overall Grade: ${reportCard.overall}\n`;
+        for (const g of reportCard.grades) {
+          message += `${g.category}: ${g.grade}\n`;
+        }
       }
       message += '\nRun your own analysis at factorimpact.app';
-      await Share.share({ message, title: 'FII Report Card' });
+      await Share.share({ message, title: 'FII Strategy Report' });
     } catch (error: any) {
       if (error?.message !== 'User did not share') {
         Alert.alert('Share failed', 'Could not share your report card');
       }
     }
-  }, [reportCard]);
-
-  interface CardConfig {
-    id: string;
-    title: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    iconColor: string;
-    subtitle: string;
-    grade: string;
-    screen: keyof RootStackParamList;
-  }
-
-  const cards: CardConfig[] = [
-    {
-      id: 'simulator',
-      title: 'Wealth Simulator',
-      icon: 'rocket',
-      iconColor: '#60A5FA',
-      subtitle: `Sharpe: ${sharpe} | Target: ${targetSharpe}`,
-      grade: simGrade,
-      screen: 'WealthSimulator',
-    },
-    {
-      id: 'tax',
-      title: 'Tax Strategy',
-      icon: 'receipt',
-      iconColor: '#10B981',
-      subtitle: `Savings: ${taxSavings} available`,
-      grade: taxGrade,
-      screen: 'TaxStrategy',
-    },
-    {
-      id: 'xray',
-      title: 'Portfolio X-Ray',
-      icon: 'scan',
-      iconColor: '#8B5CF6',
-      subtitle: `Diversification: ${divScore}/100`,
-      grade: divGrade,
-      screen: 'PortfolioXRay',
-    },
-    {
-      id: 'advisor',
-      title: 'AI Advisor',
-      icon: 'sparkles',
-      iconColor: '#FBBF24',
-      subtitle: `${adviceCount} recommendation${adviceCount !== 1 ? 's' : ''} ready`,
-      grade: adviceCount > 0 ? '' : '--',
-      screen: 'AIAdvisor',
-    },
-    {
-      id: 'backtest',
-      title: 'Signal Backtester',
-      icon: 'time-outline',
-      iconColor: '#F472B6',
-      subtitle: 'See how FII signals performed',
-      grade: '',
-      screen: 'Backtest',
-    },
-    {
-      id: 'earnings',
-      title: 'Earnings Calendar',
-      icon: 'calendar',
-      iconColor: '#3B82F6',
-      subtitle: 'Upcoming reports & analysis',
-      grade: '',
-      screen: 'EarningsCalendar',
-    },
-  ];
+  }, [strategyScore, reportCard]);
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
@@ -196,90 +196,220 @@ export const StrategyScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Run Simulation CTA if not run yet */}
-        {!hasRun && !isAnyLoading && (
-          <View style={styles.ctaContainer}>
-            {hasPortfolio ? (
-              <TouchableOpacity
-                style={styles.ctaButton}
-                onPress={handleRunSimulation}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['#3B82F6', '#8B5CF6']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.ctaGradient}
-                >
-                  <Ionicons name="flash" size={20} color="#FFFFFF" />
-                  <Text style={styles.ctaText}>Run Full Analysis</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+        {/* ═══ MARKET PULSE BANNER ═══ */}
+        <TouchableOpacity
+          style={styles.pulseBanner}
+          onPress={() => setMarketPulseExpanded(!marketPulseExpanded)}
+          activeOpacity={0.8}
+        >
+          <LinearGradient
+            colors={['rgba(96,165,250,0.12)', 'rgba(139,92,246,0.08)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.pulseGradient}
+          >
+            <View style={styles.pulseHeader}>
+              <View style={styles.pulseDot} />
+              <Text style={styles.pulseLabel}>MARKET PULSE</Text>
+              <Ionicons
+                name={marketPulseExpanded ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color="rgba(255,255,255,0.4)"
+              />
+            </View>
+            {pulseLoading ? (
+              <Skeleton width="100%" height={16} borderRadius={4} />
             ) : (
-              <View style={styles.ctaEmptyCard}>
-                <Ionicons name="briefcase-outline" size={32} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.ctaEmptyTitle}>Add 3+ holdings first</Text>
-                <Text style={styles.ctaEmptySubtitle}>
-                  Go to Portfolio tab to add holdings, then come back to run analysis.
+              <>
+                <Text style={styles.pulseText} numberOfLines={marketPulseExpanded ? 6 : 2}>
+                  {marketPulseExpanded ? marketPulseFull : marketPulse}
+                </Text>
+                <Text style={styles.pulseDisclaimer}>
+                  For educational purposes only. Not investment advice.
+                </Text>
+              </>
+            )}
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* ═══ MAIN STRATEGY CARDS ═══ */}
+
+        {/* CARD 1: Wealth Advisor */}
+        <TouchableOpacity
+          style={styles.mainCard}
+          onPress={() => navigation.navigate('WealthAdvisor')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.mainCardInner}>
+            <View style={styles.mainCardLeft}>
+              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(96,165,250,0.12)' }]}>
+                <Text style={{ fontSize: 24 }}>💰</Text>
+              </View>
+              <View style={styles.mainCardInfo}>
+                <Text style={styles.mainCardTitle}>Wealth Advisor</Text>
+                <Text style={styles.mainCardPreview} numberOfLines={1}>
+                  {isAnyLoading && !hasRun
+                    ? 'Analyzing your portfolio...'
+                    : rebalanceCount > 0
+                    ? `${rebalanceCount} rebalancing opportunit${rebalanceCount === 1 ? 'y' : 'ies'} found`
+                    : annualImprovement > 0
+                    ? `Your portfolio could improve by ${formatMoney(annualImprovement)}/year`
+                    : hasRun
+                    ? 'Portfolio analysis ready'
+                    : 'Get personalized wealth recommendations'}
                 </Text>
               </View>
-            )}
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
           </View>
-        )}
+        </TouchableOpacity>
 
-        {/* 2x2 Card Grid */}
-        <View style={styles.cardGrid}>
-          {cards.map((card) => {
-            const gradeColor = GRADE_COLORS[card.grade] ?? 'rgba(255,255,255,0.3)';
-            return (
-              <TouchableOpacity
-                key={card.id}
-                style={styles.card}
-                onPress={() => navigation.navigate(card.screen as any)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.cardHeader}>
-                  <View style={[styles.cardIcon, { backgroundColor: `${card.iconColor}15` }]}>
-                    <Ionicons name={card.icon} size={22} color={card.iconColor} />
-                  </View>
-                  {card.grade ? (
-                    <View style={[styles.gradeBadge, { borderColor: gradeColor }]}>
-                      <Text style={[styles.gradeText, { color: gradeColor }]}>
-                        {card.grade}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
-                  )}
-                </View>
-                <Text style={styles.cardTitle}>{card.title}</Text>
-                <Text style={styles.cardSubtitle} numberOfLines={1}>
-                  {card.subtitle}
+        {/* CARD 2: Tax Playbook */}
+        <TouchableOpacity
+          style={styles.mainCard}
+          onPress={() => navigation.navigate('TaxPlaybook')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.mainCardInner}>
+            <View style={styles.mainCardLeft}>
+              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+                <Text style={{ fontSize: 24 }}>📋</Text>
+              </View>
+              <View style={styles.mainCardInfo}>
+                <Text style={styles.mainCardTitle}>Tax Playbook</Text>
+                <Text style={styles.mainCardPreview} numberOfLines={1}>
+                  {isTaxLoading
+                    ? 'Scanning for tax opportunities...'
+                    : taxOpportunities > 0
+                    ? `${taxOpportunities} tax-loss harvesting opportunit${taxOpportunities === 1 ? 'y' : 'ies'}`
+                    : taxSavings > 0
+                    ? `Estimated tax savings: ${formatMoney(taxSavings)}`
+                    : hasRun
+                    ? 'No harvesting opportunities right now'
+                    : 'Find tax-saving opportunities'}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+          </View>
+        </TouchableOpacity>
+
+        {/* CARD 3: AI Coach */}
+        <TouchableOpacity
+          style={styles.mainCard}
+          onPress={() => navigation.navigate('AICoach')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.mainCardInner}>
+            <View style={styles.mainCardLeft}>
+              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(251,191,36,0.12)' }]}>
+                <Text style={{ fontSize: 24 }}>🤖</Text>
+              </View>
+              <View style={styles.mainCardInfo}>
+                <Text style={styles.mainCardTitle}>AI Coach</Text>
+                <Text style={styles.mainCardPreview} numberOfLines={1}>
+                  {isAdviceLoading
+                    ? 'Generating insights...'
+                    : topAdvice
+                    ? `New insight: ${topAdvice.title}`
+                    : adviceCount > 0
+                    ? `${adviceCount} recommendation${adviceCount !== 1 ? 's' : ''} ready`
+                    : hasRun
+                    ? 'Weekly portfolio review ready'
+                    : 'Get AI-powered portfolio coaching'}
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+          </View>
+        </TouchableOpacity>
+
+        {/* ═══ SECONDARY CARDS (2-column row) ═══ */}
+        <View style={styles.secondaryRow}>
+          <TouchableOpacity
+            style={styles.secondaryCard}
+            onPress={() => navigation.navigate('Backtest')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.secondaryIcon, { backgroundColor: 'rgba(244,114,182,0.12)' }]}>
+              <Ionicons name="time-outline" size={20} color="#F472B6" />
+            </View>
+            <Text style={styles.secondaryTitle}>Signal Backtester</Text>
+            <Text style={styles.secondarySubtitle}>See how FII signals performed</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryCard}
+            onPress={() => navigation.navigate('EarningsCalendar')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.secondaryIcon, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+              <Ionicons name="calendar" size={20} color="#3B82F6" />
+            </View>
+            <Text style={styles.secondaryTitle}>Earnings Calendar</Text>
+            <Text style={styles.secondarySubtitle}>Upcoming reports & analysis</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Overall Grade Hero */}
-        {(hasRun || reportCard) && (
-          <View style={styles.overallContainer}>
-            <LinearGradient
-              colors={['#1A1A2E', '#16213E', '#0F3460']}
-              style={styles.overallCard}
-            >
-              <Text style={styles.overallLabel}>OVERALL STRATEGY GRADE</Text>
-              <Text style={[styles.overallGrade, { color: overallColor }]}>
-                {overall}
+        {/* ═══ STRATEGY SCORE ═══ */}
+        <View style={styles.scoreContainer}>
+          <LinearGradient
+            colors={['#1A1A2E', '#16213E', '#0F3460']}
+            style={styles.scoreCard}
+          >
+            <Text style={styles.scoreLabel}>STRATEGY SCORE</Text>
+
+            {/* Score ring */}
+            <View style={styles.scoreRingContainer}>
+              <View style={[styles.scoreRingOuter, { borderColor: `${scoreColor}30` }]}>
+                <View style={[styles.scoreRingInner, { borderColor: scoreColor }]}>
+                  <Text style={[styles.scoreValue, { color: scoreColor }]}>
+                    {hasRun ? strategyScore : '--'}
+                  </Text>
+                  <Text style={styles.scoreMax}>/100</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Score breakdown */}
+            {hasRun && (
+              <View style={styles.scoreBreakdown}>
+                <View style={styles.scoreItem}>
+                  <View style={[styles.scoreItemDot, { backgroundColor: '#8B5CF6' }]} />
+                  <Text style={styles.scoreItemLabel}>Diversification</Text>
+                </View>
+                <View style={styles.scoreItem}>
+                  <View style={[styles.scoreItemDot, { backgroundColor: '#10B981' }]} />
+                  <Text style={styles.scoreItemLabel}>Tax Efficiency</Text>
+                </View>
+                <View style={styles.scoreItem}>
+                  <View style={[styles.scoreItemDot, { backgroundColor: '#60A5FA' }]} />
+                  <Text style={styles.scoreItemLabel}>Risk Management</Text>
+                </View>
+                <View style={styles.scoreItem}>
+                  <View style={[styles.scoreItemDot, { backgroundColor: '#FBBF24' }]} />
+                  <Text style={styles.scoreItemLabel}>Signal Alignment</Text>
+                </View>
+              </View>
+            )}
+
+            {!hasRun && !isAnyLoading && (
+              <Text style={styles.scoreEmpty}>
+                {hasPortfolio
+                  ? 'Running analysis...'
+                  : 'Add 3+ holdings to see your Strategy Score'}
               </Text>
-              <Text style={styles.overallScore}>{overallScore}/100</Text>
+            )}
 
-              {(optimization || taxHarvest) && (
-                <Text style={styles.improvementText}>
-                  Implementing all suggestions: +{sharpeImprovement} Sharpe, {savingsText} tax savings
-                </Text>
-              )}
+            {isAnyLoading && !hasRun && (
+              <View style={{ marginTop: 12, gap: 8 }}>
+                <Skeleton width="100%" height={12} borderRadius={4} />
+                <Skeleton width="80%" height={12} borderRadius={4} />
+              </View>
+            )}
 
+            {/* Share button */}
+            {hasRun && (
               <TouchableOpacity
                 style={styles.shareButton}
                 onPress={handleShare}
@@ -288,32 +418,9 @@ export const StrategyScreen: React.FC = () => {
                 <Ionicons name="share-social" size={16} color="#FFFFFF" />
                 <Text style={styles.shareText}>Share Report Card</Text>
               </TouchableOpacity>
-            </LinearGradient>
-          </View>
-        )}
-
-        {/* Loading state when simulation is running */}
-        {isAnyLoading && !hasRun && (
-          <View style={styles.loadingContainer}>
-            <View style={{ width: '100%', paddingHorizontal: 16, gap: 12, marginBottom: 16 }}>
-              <Skeleton width="100%" height={80} borderRadius={12} />
-              <Skeleton width="100%" height={80} borderRadius={12} />
-              <Skeleton width="100%" height={60} borderRadius={12} />
-            </View>
-            <Text style={styles.loadingText}>Running full analysis...</Text>
-            <Text style={styles.loadingSubtext}>
-              Optimizing portfolio, scanning taxes, analyzing diversification
-            </Text>
-          </View>
-        )}
-
-        {/* Error state when simulation fails */}
-        {strategyError && !isAnyLoading && !hasRun && (
-          <ErrorState
-            message={strategyError}
-            onRetry={handleRunSimulation}
-          />
-        )}
+            )}
+          </LinearGradient>
+        </View>
 
         <DisclaimerBanner />
       </ScrollView>
@@ -341,133 +448,207 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
   },
-  ctaContainer: {
+
+  // ─── Market Pulse ───
+  pulseBanner: {
     marginHorizontal: 16,
     marginBottom: 20,
-  },
-  ctaButton: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
   },
-  ctaGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
-    borderRadius: 16,
-  },
-  ctaText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  ctaEmptyCard: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    padding: 24,
+  pulseGradient: {
+    padding: 14,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(96,165,250,0.15)',
   },
-  ctaEmptyTitle: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-  ctaEmptySubtitle: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  cardGrid: {
+  pulseHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    gap: 10,
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
   },
-  card: {
-    width: '47.5%',
+  pulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  pulseLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    flex: 1,
+  },
+  pulseText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  pulseDisclaimer: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 9,
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+
+  // ─── Main Strategy Cards ───
+  mainCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 16,
-    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
-    flexGrow: 1,
+    overflow: 'hidden',
   },
-  cardHeader: {
+  mainCardInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    padding: 16,
   },
-  cardIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  mainCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 14,
+  },
+  mainCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  gradeBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+  mainCardInfo: {
+    flex: 1,
   },
-  gradeText: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  cardTitle: {
+  mainCardTitle: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 3,
   },
-  cardSubtitle: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
+  mainCardPreview: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
     fontWeight: '500',
   },
-  overallContainer: {
-    marginHorizontal: 16,
-    marginTop: 20,
+
+  // ─── Secondary Cards ───
+  secondaryRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 20,
   },
-  overallCard: {
+  secondaryCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  secondaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  secondaryTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  secondarySubtitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+
+  // ─── Strategy Score ───
+  scoreContainer: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  scoreCard: {
     alignItems: 'center',
     borderRadius: 20,
     padding: 28,
     borderWidth: 1,
-    borderColor: 'rgba(251,191,36,0.15)',
+    borderColor: 'rgba(96,165,250,0.12)',
   },
-  overallLabel: {
+  scoreLabel: {
     color: 'rgba(255,255,255,0.35)',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 2,
-    marginBottom: 8,
+    marginBottom: 16,
   },
-  overallGrade: {
-    fontSize: 72,
+  scoreRingContainer: {
+    marginBottom: 16,
+  },
+  scoreRingOuter: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreRingInner: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  scoreValue: {
+    fontSize: 36,
     fontWeight: '900',
   },
-  overallScore: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  improvementText: {
-    color: 'rgba(255,255,255,0.45)',
+  scoreMax: {
+    color: 'rgba(255,255,255,0.3)',
     fontSize: 12,
+    fontWeight: '600',
+    marginTop: -2,
+  },
+  scoreBreakdown: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 4,
+  },
+  scoreItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  scoreItemDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  scoreItemLabel: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  scoreEmpty: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
     textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 18,
+    marginTop: 4,
   },
   shareButton: {
     flexDirection: 'row',
@@ -484,23 +665,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  loadingText: {
-    color: '#60A5FA',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 16,
-  },
-  loadingSubtext: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 6,
-    marginHorizontal: 40,
-    lineHeight: 18,
   },
 });

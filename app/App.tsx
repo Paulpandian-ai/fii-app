@@ -34,6 +34,9 @@ import { AIChatScreen } from './src/screens/AIChatScreen';
 import { PaywallScreen } from './src/screens/PaywallScreen';
 import { PrivacyPolicyScreen } from './src/screens/PrivacyPolicyScreen';
 import { TermsOfServiceScreen } from './src/screens/TermsOfServiceScreen';
+import { WealthAdvisorScreen } from './src/screens/WealthAdvisorScreen';
+import { TaxPlaybookScreen } from './src/screens/TaxPlaybookScreen';
+import { AICoachScreen } from './src/screens/AICoachScreen';
 import { useCoachStore } from './src/store/coachStore';
 import { useEventStore } from './src/store/eventStore';
 import { registerDeviceToken } from './src/services/api';
@@ -110,6 +113,15 @@ const WrappedAIChat = (props: any) => (
 );
 const WrappedPaywall = (props: any) => (
   <ErrorBoundary screenName="PaywallScreen"><PaywallScreen {...props} /></ErrorBoundary>
+);
+const WrappedWealthAdvisor = () => (
+  <ErrorBoundary screenName="WealthAdvisorScreen"><WealthAdvisorScreen /></ErrorBoundary>
+);
+const WrappedTaxPlaybook = () => (
+  <ErrorBoundary screenName="TaxPlaybookScreen"><TaxPlaybookScreen /></ErrorBoundary>
+);
+const WrappedAICoach = () => (
+  <ErrorBoundary screenName="AICoachScreen"><AICoachScreen /></ErrorBoundary>
 );
 const WrappedPrivacyPolicy = () => (
   <ErrorBoundary screenName="PrivacyPolicyScreen"><PrivacyPolicyScreen /></ErrorBoundary>
@@ -268,8 +280,18 @@ export default function App() {
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen
+          name="WealthAdvisor"
+          component={WrappedWealthAdvisor}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
           name="TaxStrategy"
           component={WrappedTaxStrategy}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="TaxPlaybook"
+          component={WrappedTaxPlaybook}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen
@@ -280,6 +302,11 @@ export default function App() {
         <Stack.Screen
           name="AIAdvisor"
           component={WrappedAIAdvisor}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="AICoach"
+          component={WrappedAICoach}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

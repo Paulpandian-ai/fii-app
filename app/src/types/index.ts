@@ -1083,9 +1083,12 @@ export type RootStackParamList = {
   AIChat: { ticker?: string };
   Profile: undefined;
   WealthSimulator: undefined;
+  WealthAdvisor: undefined;
   TaxStrategy: undefined;
+  TaxPlaybook: undefined;
   PortfolioXRay: undefined;
   AIAdvisor: undefined;
+  AICoach: undefined;
   Backtest: undefined;
   Settings: undefined;
   EarningsCalendar: undefined;
