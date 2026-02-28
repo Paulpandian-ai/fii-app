@@ -810,12 +810,45 @@ export interface DailyBriefingData {
   date: string;
   greeting: string;
   summary: string;
+  insightOfTheDay: string;
+  fullBriefing: string;
   stats: {
     portfolioChange: number;
     portfolioChangePct: number;
     signalsChanged: number;
     streak: number;
   };
+  updatedAt: string;
+}
+
+// ─── Learning Path Types ───
+
+export interface LessonQuiz {
+  question: string;
+  options: string[];
+  correctIndex: number;
+}
+
+export interface Lesson {
+  id: string;
+  title: string;
+  screens: string[];
+  quiz: LessonQuiz[];
+  xpReward: number;
+}
+
+export interface LearningPath {
+  id: string;
+  title: string;
+  emoji: string;
+  description: string;
+  lessons: Lesson[];
+  completedLessonIds: string[];
+}
+
+export interface LearningPathsData {
+  paths: LearningPath[];
+  totalXP: number;
   updatedAt: string;
 }
 
