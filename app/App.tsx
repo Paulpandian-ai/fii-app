@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { dataRefreshManager } from './src/services/DataRefreshManager';
 
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { FeedScreen } from './src/screens/FeedScreen';
@@ -233,9 +235,19 @@ export default function App() {
     const eventsTimer = setTimeout(() => loadEventsFeed(), 3000);
     const pushTimer = setTimeout(() => setupPushNotifications(), 5000);
 
+    // Pause/resume data polling based on app state (foreground/background)
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        dataRefreshManager.resume();
+      } else {
+        dataRefreshManager.pause();
+      }
+    });
+
     return () => {
       clearTimeout(eventsTimer);
       clearTimeout(pushTimer);
+      appStateSubscription.remove();
     };
   }, [loadEventsFeed]);
 
