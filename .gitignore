@@ -40,3 +40,8 @@ backend/*.json
 !backend/template.yaml
 models.py
 FII_Architecture_Diagram.html
+
+# Next.js (web)
+web/.next/
+web/node_modules/
+web/.env.local
