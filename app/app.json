@@ -14,8 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.factorimpact.fii",
-      "buildNumber": "1"
+      "bundleIdentifier": "com.fii.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -28,6 +30,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "12da63cd-f1c0-4acf-881a-3140ddcdbf30"
+      }
     }
   }
 }
