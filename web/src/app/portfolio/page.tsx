@@ -40,24 +40,30 @@ function PortfolioContent() {
     }).catch(() => {});
   }, [loadPortfolio, loadSummary, loadHealth, loadWatchlists]);
 
-  // Calculate sector allocation
+  // Calculate sector allocation from batch prices
   useEffect(() => {
     if (holdings.length === 0) return;
-    const sectors: Record<string, number> = {};
-    for (const h of holdings) {
-      const value = h.totalValue || h.shares * (h.currentPrice || h.avgCost);
-      const sector = 'Unknown'; // Would need sector data from price endpoint
-      sectors[sector] = (sectors[sector] || 0) + value;
-    }
-    const total = Object.values(sectors).reduce((a, b) => a + b, 0);
-    const colors = ['#60A5FA', '#34D399', '#FBBF24', '#F97316', '#A78BFA', '#EC4899', '#06B6D4'];
-    setSectorData(
-      Object.entries(sectors).map(([sector, value], i) => ({
-        sector,
-        weight: total > 0 ? value / total : 0,
-        color: colors[i % colors.length],
-      })),
-    );
+    const tickers = holdings.map((h) => h.ticker);
+    api.getBatchPrices(tickers).then((data) => {
+      const prices = (data as { prices: Record<string, { sector?: string }> }).prices || {};
+      const sectors: Record<string, number> = {};
+      for (const h of holdings) {
+        const value = h.totalValue || h.shares * (h.currentPrice || h.avgCost);
+        const sector = prices[h.ticker]?.sector || 'Other';
+        sectors[sector] = (sectors[sector] || 0) + value;
+      }
+      const total = Object.values(sectors).reduce((a, b) => a + b, 0);
+      const colors = ['#60A5FA', '#34D399', '#FBBF24', '#F97316', '#A78BFA', '#EC4899', '#06B6D4', '#F43F5E', '#14B8A6', '#8B5CF6'];
+      setSectorData(
+        Object.entries(sectors)
+          .sort(([, a], [, b]) => b - a)
+          .map(([sector, value], i) => ({
+            sector,
+            weight: total > 0 ? value / total : 0,
+            color: colors[i % colors.length],
+          })),
+      );
+    }).catch(() => {});
   }, [holdings]);
 
   const handleSort = (col: string) => {
@@ -104,7 +110,7 @@ function PortfolioContent() {
   return (
     <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-6">
       {/* 1. Portfolio Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <div className="lg:col-span-2 bg-fii-card rounded-xl border border-fii-border p-6">
           <p className="text-sm text-fii-text-secondary mb-1">Total Portfolio Value</p>
           <p className="text-3xl font-bold text-white">{formatCurrency(totalValue)}</p>
@@ -136,6 +142,55 @@ function PortfolioContent() {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Sector Allocation Donut */}
+        <div className="bg-fii-card rounded-xl border border-fii-border p-6">
+          <p className="text-sm text-fii-text-secondary mb-3">Sector Allocation</p>
+          {sectorData.length > 0 ? (
+            <div className="flex flex-col items-center">
+              <svg viewBox="0 0 100 100" className="w-28 h-28 mb-3">
+                {(() => {
+                  let cumulative = 0;
+                  return sectorData.map((s, i) => {
+                    const startAngle = cumulative * 360;
+                    cumulative += s.weight;
+                    const endAngle = cumulative * 360;
+                    const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+                    const startRad = ((startAngle - 90) * Math.PI) / 180;
+                    const endRad = ((endAngle - 90) * Math.PI) / 180;
+                    const x1 = 50 + 40 * Math.cos(startRad);
+                    const y1 = 50 + 40 * Math.sin(startRad);
+                    const x2 = 50 + 40 * Math.cos(endRad);
+                    const y2 = 50 + 40 * Math.sin(endRad);
+                    const ix1 = 50 + 25 * Math.cos(endRad);
+                    const iy1 = 50 + 25 * Math.sin(endRad);
+                    const ix2 = 50 + 25 * Math.cos(startRad);
+                    const iy2 = 50 + 25 * Math.sin(startRad);
+                    return (
+                      <path
+                        key={i}
+                        d={`M ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A 25 25 0 ${largeArc} 0 ${ix2} ${iy2} Z`}
+                        fill={s.color}
+                        opacity={0.85}
+                      />
+                    );
+                  });
+                })()}
+              </svg>
+              <div className="space-y-1 w-full">
+                {sectorData.slice(0, 5).map((s) => (
+                  <div key={s.sector} className="flex items-center gap-2 text-xs">
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                    <span className="text-fii-text-secondary truncate flex-1">{s.sector}</span>
+                    <span className="text-white font-medium">{(s.weight * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-fii-muted text-sm">Add holdings to see allocation</div>
+          )}
         </div>
 
         {/* Health Card */}

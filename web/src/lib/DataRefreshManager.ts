@@ -1,4 +1,4 @@
-type FetchFn = (signal: AbortSignal) => Promise<void>;
+type FetchFn = (signal?: AbortSignal) => Promise<void>;
 
 interface Stream {
   key: string;

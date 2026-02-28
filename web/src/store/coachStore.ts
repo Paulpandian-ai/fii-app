@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DailyBriefingData, DisciplineScoreData, AchievementsData, WeeklyRecapData, ChatMessage } from '@/types';
+import type { DailyBriefingData, DisciplineScoreData, AchievementsData, WeeklyRecapData, ChatMessage, LearningPath } from '@/types';
 import * as api from '@/lib/api';
 
 interface CoachStore {
@@ -7,12 +7,14 @@ interface CoachStore {
   score: DisciplineScoreData | null;
   achievements: AchievementsData | null;
   weekly: WeeklyRecapData | null;
+  learningPaths: LearningPath[];
   chatMessages: ChatMessage[];
   isLoading: boolean;
   loadDaily: () => Promise<void>;
   loadScore: () => Promise<void>;
   loadAchievements: () => Promise<void>;
   loadWeekly: () => Promise<void>;
+  loadLearningPaths: () => Promise<void>;
   loadAll: () => Promise<void>;
   addChatMessage: (msg: ChatMessage) => void;
 }
@@ -22,6 +24,7 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
   score: null,
   achievements: null,
   weekly: null,
+  learningPaths: [],
   chatMessages: [],
   isLoading: false,
 
@@ -53,10 +56,17 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     } catch { /* ignore */ }
   },
 
+  loadLearningPaths: async () => {
+    try {
+      const data = await api.getUserPreferences() as { learningPaths?: LearningPath[] };
+      if (data.learningPaths) set({ learningPaths: data.learningPaths });
+    } catch { /* ignore */ }
+  },
+
   loadAll: async () => {
     set({ isLoading: true });
-    const { loadDaily, loadScore, loadAchievements, loadWeekly } = get();
-    await Promise.allSettled([loadDaily(), loadScore(), loadAchievements(), loadWeekly()]);
+    const { loadDaily, loadScore, loadAchievements, loadWeekly, loadLearningPaths } = get();
+    await Promise.allSettled([loadDaily(), loadScore(), loadAchievements(), loadWeekly(), loadLearningPaths()]);
     set({ isLoading: false });
   },
 

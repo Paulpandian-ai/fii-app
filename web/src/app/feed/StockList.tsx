@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatPercent, getScoreColor } from '@/lib/utils';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -13,6 +14,25 @@ interface StockListProps {
 }
 
 export function StockList({ items, priceData, selectedTicker, onSelect }: StockListProps) {
+  const prevPrices = useRef<Record<string, number>>({});
+  const [flashTickers, setFlashTickers] = useState<Record<string, 'up' | 'down'>>({});
+
+  useEffect(() => {
+    const newFlashes: Record<string, 'up' | 'down'> = {};
+    for (const [ticker, data] of Object.entries(priceData)) {
+      const prev = prevPrices.current[ticker];
+      if (prev != null && data.price !== prev) {
+        newFlashes[ticker] = data.price > prev ? 'up' : 'down';
+      }
+      prevPrices.current[ticker] = data.price;
+    }
+    if (Object.keys(newFlashes).length > 0) {
+      setFlashTickers(newFlashes);
+      const timer = setTimeout(() => setFlashTickers({}), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [priceData]);
+
   return (
     <div>
       {items.map((item) => {
@@ -20,6 +40,7 @@ export function StockList({ items, priceData, selectedTicker, onSelect }: StockL
         const isSelected = selectedTicker === item.ticker;
         const changePercent = price?.changePercent ?? 0;
         const changeColor = changePercent >= 0 ? 'text-emerald-400' : 'text-red-400';
+        const flash = flashTickers[item.ticker];
 
         return (
           <button
@@ -30,6 +51,8 @@ export function StockList({ items, priceData, selectedTicker, onSelect }: StockL
               isSelected
                 ? 'bg-fii-accent/5 border-l-2 border-l-fii-accent'
                 : 'hover:bg-fii-card/50',
+              flash === 'up' && 'animate-pulse-green',
+              flash === 'down' && 'animate-pulse-red',
             )}
           >
             {/* Score badge */}
