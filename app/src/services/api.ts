@@ -80,6 +80,14 @@ export const getPrice = async (ticker: string) => {
   return data;
 };
 
+export const getBatchPrices = async (tickers: string[]) => {
+  if (tickers.length === 0) return { prices: {} };
+  const { data } = await api.get('/prices/batch', {
+    params: { tickers: tickers.join(',') },
+  });
+  return data;
+};
+
 // ─── Technicals ───
 
 export const getTechnicals = async (ticker: string) => {

@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import type { Holding, PortfolioSummary } from '../types';
 import { getPortfolio, savePortfolio, getPortfolioSummary } from '../services/api';
 
+/** Price update payload from batch price polling. */
+export interface PriceUpdate {
+  price: number;
+  change: number;
+  changePercent: number;
+  previousClose: number;
+}
+
 interface PortfolioStore {
   holdings: Holding[];
   totalValue: number;
@@ -13,6 +21,7 @@ interface PortfolioStore {
   summary: PortfolioSummary | null;
   isLoading: boolean;
   error: string | null;
+  lastUpdated: number;
 
   loadPortfolio: () => Promise<void>;
   loadSummary: () => Promise<void>;
@@ -22,6 +31,8 @@ interface PortfolioStore {
   importHoldings: (newHoldings: Omit<Holding, 'id'>[]) => Promise<void>;
   getPortfolioTickers: () => string[];
   getSharesForTicker: (ticker: string) => number;
+  /** Incrementally update holding prices without full API reload. */
+  updatePrices: (prices: Record<string, PriceUpdate>) => void;
 }
 
 export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
@@ -35,6 +46,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
   summary: null,
   isLoading: false,
   error: null,
+  lastUpdated: 0,
 
   loadPortfolio: async () => {
     set({ isLoading: true, error: null });
@@ -49,6 +61,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
         dailyChange: data?.dailyChange ?? 0,
         dailyChangePercent: data?.dailyChangePercent ?? 0,
         isLoading: false,
+        lastUpdated: Date.now(),
       });
     } catch (error) {
       console.error('[PortfolioStore] loadPortfolio failed:', error);
@@ -155,5 +168,53 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
   getSharesForTicker: (ticker) => {
     const holding = get().holdings.find((h) => h.ticker === ticker);
     return holding?.shares || 0;
+  },
+
+  updatePrices: (prices) => {
+    const { holdings } = get();
+    let newTotalValue = 0;
+    let newDailyChange = 0;
+
+    const updated = holdings.map((h) => {
+      const p = prices[h.ticker];
+      if (p) {
+        const currentPrice = p.price;
+        const totalValue = currentPrice * h.shares;
+        const gainLoss = totalValue - h.avgCost * h.shares;
+        const gainLossPct = h.avgCost > 0 ? (gainLoss / (h.avgCost * h.shares)) * 100 : 0;
+        const dailyHoldingChange = p.change * h.shares;
+        newTotalValue += totalValue;
+        newDailyChange += dailyHoldingChange;
+        return {
+          ...h,
+          currentPrice,
+          change: p.change,
+          changePercent: p.changePercent,
+          totalValue,
+          gainLoss,
+          gainLossPercent: Math.round(gainLossPct * 100) / 100,
+        };
+      }
+      newTotalValue += h.totalValue || 0;
+      newDailyChange += (h.change || 0) * h.shares;
+      return h;
+    });
+
+    const totalCost = get().totalCost;
+    const totalGainLoss = newTotalValue - totalCost;
+    const totalGainLossPct = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
+    const dailyChangePct = (newTotalValue - newDailyChange) > 0
+      ? (newDailyChange / (newTotalValue - newDailyChange)) * 100
+      : 0;
+
+    set({
+      holdings: updated,
+      totalValue: Math.round(newTotalValue * 100) / 100,
+      totalGainLoss: Math.round(totalGainLoss * 100) / 100,
+      totalGainLossPercent: Math.round(totalGainLossPct * 100) / 100,
+      dailyChange: Math.round(newDailyChange * 100) / 100,
+      dailyChangePercent: Math.round(dailyChangePct * 100) / 100,
+      lastUpdated: Date.now(),
+    });
   },
 }));

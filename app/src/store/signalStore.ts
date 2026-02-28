@@ -45,6 +45,7 @@ interface SignalStore {
   enrichmentCache: Record<string, EnrichmentData>;
   isLoading: boolean;
   error: string | null;
+  lastUpdated: number;
   setAnalysis: (ticker: string, analysis: FullAnalysis) => void;
   getAnalysis: (ticker: string) => FullAnalysis | undefined;
   /** Upsert one or more signal summaries. Use from API response handlers. */
@@ -53,6 +54,8 @@ interface SignalStore {
   getSignal: (ticker: string) => SignalSummary | undefined;
   /** Cache enrichment data for a ticker (called by FeedCard after API calls). */
   setEnrichment: (ticker: string, data: EnrichmentData) => void;
+  /** Update prices in the enrichment cache for tickers that already have cached data. */
+  updateEnrichmentPrices: (prices: Record<string, { price: number; change: number; changePercent: number }>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
 }
@@ -63,6 +66,7 @@ export const useSignalStore = create<SignalStore>((set, get) => ({
   enrichmentCache: {},
   isLoading: false,
   error: null,
+  lastUpdated: 0,
 
   setAnalysis: (ticker, analysis) =>
     set((state) => ({
@@ -80,7 +84,7 @@ export const useSignalStore = create<SignalStore>((set, get) => ({
           updated[item.ticker] = item;
         }
       }
-      return { signals: updated };
+      return { signals: updated, lastUpdated: Date.now() };
     }),
 
   getSignal: (ticker) => get().signals[ticker],
@@ -89,6 +93,25 @@ export const useSignalStore = create<SignalStore>((set, get) => ({
     set((state) => ({
       enrichmentCache: { ...state.enrichmentCache, [ticker]: data },
     })),
+
+  updateEnrichmentPrices: (prices) =>
+    set((state) => {
+      const updated = { ...state.enrichmentCache };
+      let changed = false;
+      for (const [ticker, p] of Object.entries(prices)) {
+        if (updated[ticker]) {
+          updated[ticker] = {
+            ...updated[ticker],
+            price: p.price,
+            change: p.change,
+            changePercent: p.changePercent,
+            cachedAt: Date.now(),
+          };
+          changed = true;
+        }
+      }
+      return changed ? { enrichmentCache: updated, lastUpdated: Date.now() } : {};
+    }),
 
   setLoading: (isLoading) => set({ isLoading }),
 
