@@ -14,6 +14,8 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../types';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
+import { LastUpdated } from '../components/LastUpdated';
+import { useDataRefresh } from '../hooks/useDataRefresh';
 
 import { useCoachStore } from '../store/coachStore';
 import { DailyBriefing } from '../components/DailyBriefing';
@@ -47,6 +49,21 @@ export const CoachScreen: React.FC = () => {
   // Volatility alert state
   const [showVolatilityAlert, setShowVolatilityAlert] = useState(false);
   const [spyDrop] = useState(0);
+  const [coachLastUpdated, setCoachLastUpdated] = useState(0);
+
+  // ─── Data polling: daily briefing refresh every 5min (not time-sensitive) ───
+  useDataRefresh(
+    'daily-briefing',
+    async () => {
+      try {
+        const { loadDaily } = useCoachStore.getState();
+        await loadDaily();
+        setCoachLastUpdated(Date.now());
+      } catch {}
+    },
+    300_000,
+    hasLoaded,
+  );
 
   // Load data on mount
   useEffect(() => {
@@ -120,7 +137,10 @@ export const CoachScreen: React.FC = () => {
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>Coach</Text>
+        <View>
+          <Text style={styles.topBarTitle}>Coach</Text>
+          {coachLastUpdated > 0 && <LastUpdated timestamp={coachLastUpdated} />}
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {isLoading && <ActivityIndicator color="#60A5FA" size="small" />}
           <TouchableOpacity onPress={() => navigation.getParent<any>()?.navigate('Leaderboard')}>

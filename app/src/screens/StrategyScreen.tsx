@@ -22,6 +22,8 @@ import { useSignalStore } from '../store/signalStore';
 import { getInsightsFeed } from '../services/api';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { Skeleton } from '../components/Skeleton';
+import { LastUpdated } from '../components/LastUpdated';
+import { useDataRefresh } from '../hooks/useDataRefresh';
 
 const formatMoney = (v: unknown): string => {
   const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -64,6 +66,26 @@ export const StrategyScreen: React.FC = () => {
   const [marketPulseExpanded, setMarketPulseExpanded] = useState(false);
   const [marketPulseFull, setMarketPulseFull] = useState<string>('');
   const [pulseLoading, setPulseLoading] = useState(true);
+  const [strategyLastUpdated, setStrategyLastUpdated] = useState(0);
+
+  // ─── Data polling: market pulse every 5min (strategy data is not time-sensitive) ───
+  useDataRefresh(
+    'market-pulse',
+    async () => {
+      try {
+        const data = await getInsightsFeed(1);
+        const insight = data?.insights?.[0];
+        if (insight) {
+          setMarketPulse(insight.title || insight.summary || 'Markets are active today.');
+          setMarketPulseFull(
+            insight.summary || insight.body || insight.title || 'Markets are active today. Check your portfolio for updates.'
+          );
+          setStrategyLastUpdated(Date.now());
+        }
+      } catch {}
+    },
+    300_000,
+  );
 
   // Load market pulse on mount
   useEffect(() => {
@@ -183,7 +205,10 @@ export const StrategyScreen: React.FC = () => {
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>Strategy</Text>
+        <View>
+          <Text style={styles.topBarTitle}>Strategy</Text>
+          {strategyLastUpdated > 0 && <LastUpdated timestamp={strategyLastUpdated} />}
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
           <TouchableOpacity onPress={() => navigation.navigate('Settings')}>

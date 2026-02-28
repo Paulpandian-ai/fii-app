@@ -21,8 +21,12 @@ import Slider from '@react-native-community/slider';
 import { Skeleton } from '../components/Skeleton';
 import { SectorHeatmap } from '../components/SectorHeatmap';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { LiveIndicator } from '../components/LiveIndicator';
+import { LastUpdated } from '../components/LastUpdated';
+import { RefreshProgressBar } from '../components/RefreshProgressBar';
 import { getScreener, getScreenerTemplates } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
+import { useDataRefresh } from '../hooks/useDataRefresh';
 import { useShallow } from 'zustand/react/shallow';
 import type { Signal, RootStackParamList } from '../types';
 
@@ -196,6 +200,29 @@ export const ScreenerScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [screenerLastUpdated, setScreenerLastUpdated] = useState(0);
+  const [isPolling, setIsPolling] = useState(false);
+
+  // ─── Data polling: screener refresh every 60s (only when tab is active) ───
+  useDataRefresh(
+    'screener',
+    async () => {
+      setIsPolling(true);
+      try {
+        const params = _buildParams(filters);
+        const data = await getScreener(params);
+        const items: ScreenerResult[] = data?.results ?? [];
+        if (items.length > 0) {
+          setResults(items);
+          setTotalCount(data?.total ?? items.length);
+          setScreenerLastUpdated(Date.now());
+        }
+      } finally {
+        setIsPolling(false);
+      }
+    },
+    60_000,
+  );
   const [hasMore, setHasMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -638,6 +665,7 @@ export const ScreenerScreen: React.FC = () => {
           ? `${filteredResults.length} of ${totalCount} stocks`
           : `Showing ${results.length} of ${totalCount} stocks`}
       </Text>
+      {screenerLastUpdated > 0 && <LastUpdated timestamp={screenerLastUpdated} />}
     </View>
   );
 
@@ -675,9 +703,14 @@ export const ScreenerScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      <RefreshProgressBar visible={isPolling} />
+
       {/* Header Bar */}
       <View style={styles.headerBar}>
-        <Text style={styles.screenTitle}>Screener</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={styles.screenTitle}>Screener</Text>
+          <LiveIndicator forceActive={!loading && results.length > 0} />
+        </View>
         <TouchableOpacity style={styles.filterButton} onPress={openFilterModal} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Open filters${activeFilterCount > 0 ? ', ' + activeFilterCount + ' active' : ''}`}>
           <Ionicons name="options-outline" size={18} color="#fff" />
           <Text style={styles.filterButtonText}>Filters</Text>
