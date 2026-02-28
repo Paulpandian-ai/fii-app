@@ -19,8 +19,9 @@ import type { RootStackParamList, Prescription } from '../types';
 
 import { useStrategyStore } from '../store/strategyStore';
 import { usePortfolioStore } from '../store/portfolioStore';
-import { useCoachStore } from '../store/coachStore';
+import { useCoachStore, type ChatMsg } from '../store/coachStore';
 import { getCoachWeekly, getAdvice, sendChatMessage } from '../services/api';
+import { syncService } from '../services/SyncService';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { Skeleton } from '../components/Skeleton';
 
@@ -30,12 +31,6 @@ const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string
   low: { bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', text: '#10B981', badge: '#10B981' },
 };
 
-interface ChatMsg {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-}
-
 const ASK_FII_SUGGESTIONS = [
   'Should I sell any of my stocks?',
   "What's my biggest risk right now?",
@@ -43,7 +38,7 @@ const ASK_FII_SUGGESTIONS = [
   'Am I diversified enough?',
 ];
 
-const CHAT_STORAGE_KEY = '@fii_coach_chat_history';
+const CHAT_CACHE_KEY = '@fii_coach_chat_screen_cache';
 
 export const AICoachScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -100,14 +95,13 @@ export const AICoachScreen: React.FC = () => {
     }
   }, [advice.length, isAdviceLoading, loadAdvice, reportCard, loadReportCard]);
 
-  // Load chat history
+  // Load chat history from local cache, then reconcile from cloud
   useEffect(() => {
     (async () => {
       try {
-        const stored = await AsyncStorage.getItem(CHAT_STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored) as ChatMsg[];
-          // Keep last 10 conversations (20 messages)
+        const cached = await AsyncStorage.getItem(CHAT_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached) as ChatMsg[];
           setMessages(parsed.slice(-20));
         } else {
           setMessages([{
@@ -126,10 +120,11 @@ export const AICoachScreen: React.FC = () => {
     })();
   }, []);
 
-  // Save chat history on change
+  // Cache chat history locally on change + sync to cloud
   useEffect(() => {
     if (messages.length > 1) {
-      AsyncStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-20))).catch(() => {});
+      const trimmed = messages.slice(-20);
+      AsyncStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(trimmed)).catch(() => {});
     }
   }, [messages]);
 
@@ -156,7 +151,15 @@ export const AICoachScreen: React.FC = () => {
         content: res.reply || res.response || "I couldn't generate a response. Please try again.",
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => {
+        const updated = [...prev, assistantMsg];
+        // Sync conversation to cloud after each assistant reply
+        syncService.syncToCloud('chat', 'POST', {
+          messages: updated.slice(-20),
+          context: 'coach',
+        });
+        return updated;
+      });
     } catch {
       setMessages((prev) => [...prev, {
         role: 'assistant',

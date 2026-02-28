@@ -13,9 +13,12 @@ import {
   getCoachAchievements,
   postCoachEvent,
   getCoachWeekly,
+  getUserCoachProgress,
+  getUserChatHistory,
 } from '../services/api';
+import { syncService } from '../services/SyncService';
 
-interface ChatMsg {
+export interface ChatMsg {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
@@ -62,10 +65,12 @@ interface CoachStore {
   loadChatHistory: () => Promise<void>;
   addChatMessage: (msg: ChatMsg) => void;
   setChatLoading: (loading: boolean) => void;
+  saveChatToCloud: () => void;
 }
 
-const CHAT_STORAGE_KEY = '@fii_coach_chat';
-const LESSONS_STORAGE_KEY = '@fii_completed_lessons';
+// Local cache keys (for instant display, not primary storage)
+const CHAT_CACHE_KEY = '@fii_coach_chat_cache';
+const LESSONS_CACHE_KEY = '@fii_completed_lessons_cache';
 
 // Default learning paths data (static content — in prod, fetch from API)
 const DEFAULT_LEARNING_PATHS: LearningPathsData = {
@@ -446,11 +451,32 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
   loadLearningPaths: async () => {
     set({ isLearningPathsLoading: true });
     try {
-      // Load completed lessons from local storage
-      const savedLessons = await AsyncStorage.getItem(LESSONS_STORAGE_KEY);
-      const completedSet = savedLessons ? new Set<string>(JSON.parse(savedLessons)) : new Set<string>();
+      // Load from local cache first for instant display
+      let completedSet = new Set<string>();
+      try {
+        const cached = await AsyncStorage.getItem(LESSONS_CACHE_KEY);
+        if (cached) completedSet = new Set<string>(JSON.parse(cached));
+      } catch {}
 
-      // Use default learning paths, with completed lessons applied
+      // Try to fetch from DynamoDB (source of truth)
+      try {
+        const cloudData = await getUserCoachProgress();
+        if (cloudData?.progress?.completedLessons) {
+          const cloudLessons = Array.isArray(cloudData.progress.completedLessons)
+            ? cloudData.progress.completedLessons
+            : [];
+          if (cloudLessons.length > 0) {
+            // Cloud wins on conflict — merge (union of both sets)
+            for (const id of cloudLessons) completedSet.add(id);
+          }
+          // Update local cache with merged data
+          AsyncStorage.setItem(LESSONS_CACHE_KEY, JSON.stringify([...completedSet])).catch(() => {});
+        }
+      } catch {
+        // API unavailable — use cached data
+      }
+
+      // Apply completed lessons to learning paths
       const paths = { ...DEFAULT_LEARNING_PATHS };
       paths.paths = paths.paths.map(path => ({
         ...path,
@@ -484,8 +510,14 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     const newCompleted = new Set(completedLessons);
     newCompleted.add(lessonId);
 
-    // Save to storage
-    AsyncStorage.setItem(LESSONS_STORAGE_KEY, JSON.stringify([...newCompleted])).catch(() => {});
+    // Cache locally for instant access
+    const completedArray = [...newCompleted];
+    AsyncStorage.setItem(LESSONS_CACHE_KEY, JSON.stringify(completedArray)).catch(() => {});
+
+    // Sync to cloud via SyncService (background, with retry)
+    syncService.syncToCloud('coach/progress', 'PUT', {
+      completedLessons: completedArray,
+    });
 
     // Update paths
     if (learningPaths) {
@@ -518,14 +550,28 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
 
   // Coach Chat
   loadChatHistory: async () => {
+    // Load from local cache first for instant display
     try {
-      const saved = await AsyncStorage.getItem(CHAT_STORAGE_KEY);
-      if (saved) {
-        const messages: ChatMsg[] = JSON.parse(saved);
-        set({ chatMessages: messages.slice(-20) }); // Keep last 20
+      const cached = await AsyncStorage.getItem(CHAT_CACHE_KEY);
+      if (cached) {
+        const messages: ChatMsg[] = JSON.parse(cached);
+        set({ chatMessages: messages.slice(-20) });
       }
-    } catch (error) {
-      console.error('[CoachStore] loadChatHistory failed:', error);
+    } catch {}
+
+    // Try to fetch from DynamoDB (source of truth)
+    try {
+      const cloudData = await getUserChatHistory('coach', 1);
+      if (cloudData?.conversations?.length > 0) {
+        const latest = cloudData.conversations[0];
+        const cloudMessages = Array.isArray(latest.messages) ? latest.messages : [];
+        if (cloudMessages.length > 0) {
+          set({ chatMessages: cloudMessages.slice(-20) });
+          AsyncStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(cloudMessages.slice(-20))).catch(() => {});
+        }
+      }
+    } catch {
+      // API unavailable — use cached data
     }
   },
 
@@ -533,7 +579,18 @@ export const useCoachStore = create<CoachStore>((set, get) => ({
     const { chatMessages } = get();
     const updated = [...chatMessages, msg].slice(-20);
     set({ chatMessages: updated });
-    AsyncStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    // Cache locally for instant access
+    AsyncStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+  },
+
+  /** Save current chat conversation to cloud. Call after a complete exchange. */
+  saveChatToCloud: () => {
+    const { chatMessages } = get();
+    if (chatMessages.length === 0) return;
+    syncService.syncToCloud('chat', 'POST', {
+      messages: chatMessages,
+      context: 'coach',
+    });
   },
 
   setChatLoading: (loading: boolean) => {
