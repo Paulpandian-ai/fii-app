@@ -1,6 +1,9 @@
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Holding, PortfolioSummary } from '../types';
 import { getPortfolio, savePortfolio, getPortfolioSummary } from '../services/api';
+
+const PORTFOLIO_CACHE_KEY = '@fii_portfolio_cache';
 
 /** Price update payload from batch price polling. */
 export interface PriceUpdate {
@@ -50,9 +53,30 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
 
   loadPortfolio: async () => {
     set({ isLoading: true, error: null });
+
+    // Load from local cache first for instant display
+    try {
+      const cached = await AsyncStorage.getItem(PORTFOLIO_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.holdings?.length > 0) {
+          set({
+            holdings: parsed.holdings,
+            totalValue: parsed.totalValue ?? 0,
+            totalCost: parsed.totalCost ?? 0,
+            totalGainLoss: parsed.totalGainLoss ?? 0,
+            totalGainLossPercent: parsed.totalGainLossPercent ?? 0,
+            dailyChange: parsed.dailyChange ?? 0,
+            dailyChangePercent: parsed.dailyChangePercent ?? 0,
+          });
+        }
+      }
+    } catch {}
+
+    // Then fetch from API (source of truth)
     try {
       const data = await getPortfolio();
-      set({
+      const state = {
         holdings: data?.holdings ?? [],
         totalValue: data?.totalValue ?? 0,
         totalCost: data?.totalCost ?? 0,
@@ -62,7 +86,10 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
         dailyChangePercent: data?.dailyChangePercent ?? 0,
         isLoading: false,
         lastUpdated: Date.now(),
-      });
+      };
+      set(state);
+      // Cache for offline access
+      AsyncStorage.setItem(PORTFOLIO_CACHE_KEY, JSON.stringify(state)).catch(() => {});
     } catch (error) {
       console.error('[PortfolioStore] loadPortfolio failed:', error);
       set({ isLoading: false, error: 'Failed to load portfolio' });
@@ -103,6 +130,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     }
 
     set({ holdings: updated });
+    // Cache optimistic state for offline access
+    AsyncStorage.setItem(PORTFOLIO_CACHE_KEY, JSON.stringify({ holdings: updated })).catch(() => {});
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
@@ -116,6 +145,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     const { holdings } = get();
     const updated = holdings.filter((h) => h.id !== holdingId);
     set({ holdings: updated });
+    AsyncStorage.setItem(PORTFOLIO_CACHE_KEY, JSON.stringify({ holdings: updated })).catch(() => {});
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
@@ -129,6 +159,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     const { holdings } = get();
     const updated = holdings.map((h) => (h.id === holdingId ? { ...h, ...updates } : h));
     set({ holdings: updated });
+    AsyncStorage.setItem(PORTFOLIO_CACHE_KEY, JSON.stringify({ holdings: updated })).catch(() => {});
     try {
       await savePortfolio(updated);
       await get().loadPortfolio();
@@ -154,6 +185,7 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
       }
     }
     set({ holdings: merged });
+    AsyncStorage.setItem(PORTFOLIO_CACHE_KEY, JSON.stringify({ holdings: merged })).catch(() => {});
     try {
       await savePortfolio(merged);
       await get().loadPortfolio();
