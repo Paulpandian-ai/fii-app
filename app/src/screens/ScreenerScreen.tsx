@@ -23,6 +23,7 @@ import { SectorHeatmap } from '../components/SectorHeatmap';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getScreener, getScreenerTemplates } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { Signal, RootStackParamList } from '../types';
 
 // ─── Constants ───
@@ -178,7 +179,7 @@ export const ScreenerScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // Watchlist integration
-  const watchlistTickers = useWatchlistStore((s) => s.getAllWatchlistTickers());
+  const watchlistTickers = useWatchlistStore(useShallow((s) => s.getAllWatchlistTickers()));
   const isInAnyWatchlist = useWatchlistStore((s) => s.isInAnyWatchlist);
   const addTicker = useWatchlistStore((s) => s.addTicker);
   const removeTicker = useWatchlistStore((s) => s.removeTicker);
