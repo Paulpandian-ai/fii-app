@@ -21,7 +21,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
-import { getPortfolioHealth } from '../services/api';
+import { getPortfolioHealth, getBatchPrices } from '../services/api';
 import { AddHoldingSheet } from '../components/AddHoldingSheet';
 import { CSVUploadSheet } from '../components/CSVUploadSheet';
 import { SearchOverlay } from '../components/SearchOverlay';
@@ -29,6 +29,11 @@ import { SectorPieChart } from '../components/SectorPieChart';
 import { TrendingSection } from '../components/TrendingSection';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
+import { LiveIndicator } from '../components/LiveIndicator';
+import { LastUpdated } from '../components/LastUpdated';
+import { RefreshProgressBar } from '../components/RefreshProgressBar';
+import { useDataRefresh } from '../hooks/useDataRefresh';
+import { dataRefreshManager } from '../services/DataRefreshManager';
 import type { Holding, PortfolioHealth, RootStackParamList, Watchlist, WatchlistItem } from '../types';
 
 // Enable LayoutAnimation on Android
@@ -303,9 +308,11 @@ export const PortfolioScreen: React.FC = () => {
     dailyChangePercent,
     isLoading,
     error,
+    lastUpdated,
     loadPortfolio,
     loadSummary,
     removeHolding,
+    updatePrices,
   } = usePortfolioStore();
 
   const {
@@ -332,6 +339,53 @@ export const PortfolioScreen: React.FC = () => {
   const [createWlVisible, setCreateWlVisible] = useState(false);
   const [newWlName, setNewWlName] = useState('');
   const [wlCollapsed, setWlCollapsed] = useState<Record<string, boolean>>({});
+
+  const [isPolling, setIsPolling] = useState(false);
+
+  // ─── Data polling: holdings prices every 30s during market hours ───
+  useDataRefresh(
+    'holdings-prices',
+    async () => {
+      const tickers = holdings.map((h) => h.ticker);
+      if (tickers.length === 0) return;
+      setIsPolling(true);
+      try {
+        const data = await getBatchPrices(tickers);
+        if (data?.prices) {
+          updatePrices(data.prices);
+        }
+      } finally {
+        setIsPolling(false);
+      }
+    },
+    30_000,
+    holdings.length > 0,
+  );
+
+  // ─── Data polling: portfolio summary every 60s ───
+  useDataRefresh(
+    'portfolio-summary',
+    async () => {
+      await loadSummary();
+    },
+    60_000,
+    holdings.length > 0,
+  );
+
+  // ─── Data polling: watchlist prices every 60s ───
+  const allWatchlistTickers = useWatchlistStore((s) => s.getAllWatchlistTickers)();
+  useDataRefresh(
+    'watchlist-prices',
+    async () => {
+      if (allWatchlistTickers.length === 0) return;
+      const data = await getBatchPrices(allWatchlistTickers);
+      if (data?.prices) {
+        useSignalStore.getState().updateEnrichmentPrices(data.prices);
+      }
+    },
+    60_000,
+    allWatchlistTickers.length > 0,
+  );
 
   const hasHoldings = holdings.length > 0;
   const isPositiveDaily = dailyChange >= 0;
@@ -383,6 +437,7 @@ export const PortfolioScreen: React.FC = () => {
       loadSummary(),
       loadHealthData(),
       loadWatchlists(),
+      dataRefreshManager.refreshAll(),
     ]);
     setRefreshing(false);
   }, [loadPortfolio, loadSummary, loadHealthData, loadWatchlists]);
@@ -619,25 +674,17 @@ export const PortfolioScreen: React.FC = () => {
   }
 
   // ═══════ MAIN RENDER ═══════
-  if (__DEV__) {
-    console.log('[PortfolioScreen] render start', {
-      hasHoldings,
-      holdingsCount: holdings.length,
-      healthLoading,
-      healthError,
-      sectorDataLen: sectorData.length,
-      watchlistsLen: watchlists.length,
-      collapsedHealth: collapsed.health,
-      collapsedHoldings: collapsed.holdings,
-      collapsedWatchlist: collapsed.watchlist,
-    });
-  }
 
   return (
     <LinearGradient colors={[COLORS.bg, COLORS.bgEnd]} style={styles.container}>
+      <RefreshProgressBar visible={isPolling} />
+
       {/* Top bar */}
       <View style={styles.topBar}>
-        <Text style={styles.topTitle}>Portfolio</Text>
+        <View style={styles.topBarLeft}>
+          <Text style={styles.topTitle}>Portfolio</Text>
+          <LiveIndicator />
+        </View>
         <View style={styles.topBarRight}>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setSearchVisible(true)}>
             <Ionicons name="search" size={20} color={COLORS.textSecondary} />
@@ -658,6 +705,12 @@ export const PortfolioScreen: React.FC = () => {
         }
       >
         {/* ═══════ 1. PORTFOLIO SUMMARY ═══════ */}
+
+        {lastUpdated > 0 && (
+          <View style={{ alignItems: 'center', paddingVertical: 4 }}>
+            <LastUpdated timestamp={lastUpdated} />
+          </View>
+        )}
 
         <View style={styles.section}>
           <View style={styles.staticHeader}>
@@ -1182,6 +1235,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   topTitle: { color: '#FFF', fontSize: 28, fontWeight: '800' },
+  topBarLeft: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8 },
   topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: {
     width: 36,
