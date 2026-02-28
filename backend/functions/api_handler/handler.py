@@ -15,6 +15,7 @@ Routes:
   GET  /baskets/<name>               — Single basket detail
   GET  /price/<ticker>               — Real-time price via Finnhub
   GET  /prices/<ticker>              — Alias for /price/<ticker>
+  GET  /prices/batch?tickers=A,B,C   — Lightweight batch price lookup
   GET  /technicals/<ticker>          — Technical indicators (15 indicators)
   GET  /fundamentals/<ticker>        — Financial health + DCF valuation
   GET  /altdata/<ticker>             — Alternative data (patents, contracts, FDA)
@@ -111,6 +112,8 @@ def lambda_handler(event, context):
             return _handle_market_movers(http_method)
         elif path.startswith("/feed"):
             return _handle_feed(http_method, body, user_id)
+        elif path == "/prices/batch":
+            return _handle_batch_prices(http_method, query_params)
         elif path.startswith("/prices/"):
             ticker = path.split("/prices/")[-1].strip("/").upper()
             return _handle_price(http_method, ticker)
@@ -1109,6 +1112,36 @@ def _format_price_response(ticker, data, source, note=None):
     if note:
         result["note"] = note
     return result
+
+
+def _handle_batch_prices(method, query_params):
+    """GET /prices/batch?tickers=AAPL,NVDA,MSFT — Lightweight batch price lookup."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    raw = query_params.get("tickers", "")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    if not tickers:
+        return _response(400, {"error": "tickers query param required"})
+    if len(tickers) > 50:
+        return _response(400, {"error": "Max 50 tickers per request"})
+
+    from datetime import datetime, timezone
+
+    prices = {}
+    for ticker in tickers:
+        if not ticker or len(ticker) > 10:
+            continue
+        cached = db.get_item(f"PRICE#{ticker}", "LATEST")
+        if cached:
+            prices[ticker] = {
+                "price": float(cached.get("price", 0) or 0),
+                "change": float(cached.get("change", 0) or 0),
+                "changePercent": float(cached.get("changePercent", 0) or 0),
+                "previousClose": float(cached.get("previousClose", 0) or 0),
+            }
+
+    return _response(200, {"prices": prices})
 
 
 def _handle_technicals(method, ticker):
