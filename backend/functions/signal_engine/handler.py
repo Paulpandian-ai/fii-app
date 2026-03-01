@@ -44,14 +44,10 @@ from models import (
     compute_composite_score,
     compute_dimension_scores,
     compute_weighted_composite,
-    compute_z_scores,
     determine_confidence,
     determine_signal,
     get_tier,
-    percentile_to_fii_score,
     score_to_label,
-    should_update_score,
-    z_to_percentile,
 )
 
 logger = logging.getLogger()
@@ -563,207 +559,138 @@ def _merge_precomputed_scores(
 
 
 def _normalize_signals() -> None:
-    """Normalize signals across all stocks using forced distribution.
+    """Apply forced distribution across all stocks.
 
-    Reads all SIGNAL#LATEST records, computes z-scores and percentile
-    ranks per dimension and composite, then assigns FII Scores 1-10
-    using forced distribution and educational score labels.
+    Ranks all stocks by composite score, assigns FII Score 1-10
+    using forced percentile buckets, and writes score_label +
+    percentile_rank to each SIGNAL#LATEST record.
     """
-    import math
-
-    all_items = []  # (ticker, item, raw_composite, dimension_raw_scores)
-
+    signal_items = []
     for ticker in ALL_SECURITIES:
         try:
             item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
             if item:
-                raw_composite = float(item.get("compositeScore", 0))
-                # Try to get per-factor scores from FACTORS record
-                factors_item = db.get_item(f"SIGNAL#{ticker}", "FACTORS")
-                factor_details = {}
-                if factors_item:
-                    fd_raw = factors_item.get("factorDetails", "{}")
-                    factor_details = json.loads(fd_raw) if isinstance(fd_raw, str) else fd_raw
-
-                # Compute per-dimension raw scores
-                dim_scores = {}
-                for dim_name, factor_ids in DIMENSION_FACTOR_MAP.items():
-                    scores = [
-                        float(factor_details.get(fid, {}).get("score", 0))
-                        for fid in factor_ids
-                    ]
-                    dim_scores[dim_name] = sum(scores) / len(scores) if scores else 0.0
-
-                all_items.append((ticker, item, raw_composite, dim_scores))
+                score = float(item.get("compositeScore", 0))
+                signal_items.append((ticker, item, score))
         except Exception:
             pass
 
-    if len(all_items) < 3:
-        logger.info("[SignalEngine] Not enough signals to normalize")
+    if len(signal_items) < 10:
+        logger.info(f"[SignalEngine] Only {len(signal_items)} signals, skipping normalization")
         return
 
-    # ── Step 1: Compute z-scores per dimension across all stocks ──
-    dim_names = list(DIMENSION_WEIGHTS.keys())
-    dim_raw_values = {dim: [] for dim in dim_names}
-    for _ticker, _item, _composite, dim_scores in all_items:
-        for dim in dim_names:
-            dim_raw_values[dim].append(dim_scores.get(dim, 0.0))
+    # Sort by composite score descending (best first)
+    signal_items.sort(key=lambda x: x[2], reverse=True)
+    total = len(signal_items)
 
-    # z-scores per dimension
-    dim_z_scores = {}
-    for dim in dim_names:
-        dim_z_scores[dim] = compute_z_scores(dim_raw_values[dim])
+    # Forced distribution buckets (cumulative %)
+    BUCKETS = [
+        (10, 0.05),   # top 5%
+        (9,  0.15),   # 5-15%
+        (8,  0.30),   # 15-30%
+        (7,  0.45),   # 30-45%
+        (6,  0.55),   # 45-55%
+        (5,  0.65),   # 55-65%
+        (4,  0.80),   # 65-80%
+        (3,  0.90),   # 80-90%
+        (2,  0.95),   # 90-95%
+        (1,  1.00),   # bottom 5%
+    ]
 
-    # ── Step 2: Convert to percentile ranks per dimension ──
-    dim_percentiles = {dim: [] for dim in dim_names}
-    for dim in dim_names:
-        dim_percentiles[dim] = [z_to_percentile(z) for z in dim_z_scores[dim]]
+    SCORE_LABELS = {
+        10: "Strong", 9: "Strong",
+        8: "Favorable", 7: "Favorable",
+        6: "Neutral", 5: "Neutral",
+        4: "Weak", 3: "Weak",
+        2: "Caution", 1: "Caution",
+    }
 
-    # ── Step 3: Compute weighted composite percentile ──
-    composite_percentiles = []
-    for i in range(len(all_items)):
-        weighted = 0.0
-        for dim in dim_names:
-            weighted += dim_percentiles[dim][i] * DIMENSION_WEIGHTS[dim]
-        composite_percentiles.append(weighted)
-
-    # ── Step 4: Compute sector-level percentile ranks ──
-    # Group by sector
-    sector_groups = {}  # sector -> list of (index, composite_percentile)
-    for i, (ticker, _item, _comp, _dims) in enumerate(all_items):
-        sector = STOCK_SECTORS.get(ticker, "Unknown")
+    # Group by sector for sector percentiles
+    sector_groups = {}
+    for i, (ticker, item, score) in enumerate(signal_items):
+        sector = item.get("sector", "Unknown")
         if sector not in sector_groups:
             sector_groups[sector] = []
-        sector_groups[sector].append((i, composite_percentiles[i]))
+        sector_groups[sector].append((i, ticker, score))
 
-    sector_percentiles = [0.0] * len(all_items)
-    for sector, entries in sector_groups.items():
-        if len(entries) < 2:
-            for idx, _ in entries:
-                sector_percentiles[idx] = 50.0
-            continue
-        # Rank within sector
-        sorted_entries = sorted(entries, key=lambda x: x[1])
-        for rank, (idx, _) in enumerate(sorted_entries):
-            sector_percentiles[idx] = (rank / (len(sorted_entries) - 1)) * 100.0
+    # Compute sector percentiles
+    sector_percentiles = {}
+    for sector, stocks in sector_groups.items():
+        stocks.sort(key=lambda x: x[2], reverse=True)
+        for rank, (orig_idx, ticker, score) in enumerate(stocks):
+            pct = int(100 * (1 - rank / max(len(stocks), 1)))
+            sector_percentiles[ticker] = pct
 
-    # ── Step 5: Apply forced distribution to assign FII Scores ──
     updated = 0
-    score_distribution = {}
+    distribution = {}
 
-    for i, (ticker, item, raw_composite, dim_scores) in enumerate(all_items):
-        pct = composite_percentiles[i]
-        fii_score = percentile_to_fii_score(pct)
-        score_label = score_to_label(fii_score)
+    for i, (ticker, item, score) in enumerate(signal_items):
+        # Universe percentile (100 = best)
+        percentile_rank = int(100 * (1 - i / total))
 
-        # Stability buffer — check previous score
-        old_score = item.get("previous_score")
-        old_pct = item.get("percentile_rank")
-        if old_score is not None:
-            try:
-                old_score = int(old_score)
-                old_pct = float(old_pct) if old_pct is not None else None
-                if not should_update_score(pct, old_score, old_pct):
-                    fii_score = old_score
-                    score_label = score_to_label(fii_score)
-            except (ValueError, TypeError):
-                pass
+        # Forced distribution FII Score
+        position = (i + 1) / total
+        fii_score = 1
+        for bucket_score, threshold in BUCKETS:
+            if position <= threshold:
+                fii_score = bucket_score
+                break
 
-        # Build factor_percentiles
-        factor_pcts = {}
-        for dim in dim_names:
-            factor_pcts[dim] = round(dim_percentiles[dim][i], 1)
+        score_label = SCORE_LABELS[fii_score]
+        sect_pct = sector_percentiles.get(ticker, 50)
 
-        # Identify top 3 score drivers
-        score_drivers = _compute_score_drivers(dim_scores, dim_percentiles, dim_names, i)
+        # Build score drivers from dimension scores
+        score_drivers = []
+        dim_scores = item.get("dimensionScores", {})
+        if dim_scores:
+            dims = []
+            for dim_name, dim_val in dim_scores.items():
+                try:
+                    val = float(dim_val) if isinstance(dim_val, str) else float(dim_val)
+                except (ValueError, TypeError):
+                    val = 5.0
+                dims.append((dim_name, val))
+            dims.sort(key=lambda x: abs(x[1] - 5.0), reverse=True)
+            for dim_name, val in dims[:3]:
+                direction = "positive" if val >= 5.0 else "negative"
+                score_drivers.append({
+                    "factor": dim_name,
+                    "direction": direction,
+                    "value": val
+                })
 
-        # Determine confidence
-        confidence_val = item.get("confidence", "MEDIUM")
+        # Track distribution
+        distribution[fii_score] = distribution.get(fii_score, 0) + 1
 
-        # Update DynamoDB with all new fields
+        # Update DynamoDB
         update_fields = {
-            "compositeScore": str(fii_score),
-            "signal": score_label,  # backward compat: "signal" field = score_label
+            "signal": score_label,
             "score_label": score_label,
-            "percentile_rank": int(round(pct)),
-            "sector_percentile": int(round(sector_percentiles[i])),
-            "factor_percentiles": json.dumps(factor_pcts),
-            "score_drivers": json.dumps(score_drivers),
-            "confidence": confidence_val,
-            "previous_score": str(fii_score),
+            "fii_score": str(fii_score),
+            "percentile_rank": percentile_rank,
+            "sector_percentile": sect_pct,
+            "score_drivers": score_drivers,
         }
 
-        try:
-            db.update_item(f"SIGNAL#{ticker}", "LATEST", update_fields)
-        except Exception as e:
-            logger.warning(f"[SignalEngine] Failed to update {ticker}: {e}")
-            continue
+        db.update_item(f"SIGNAL#{ticker}", "LATEST", update_fields)
+        updated += 1
 
-        # Also update the S3 detail file
+        # Also update S3 detail file
         try:
             s3_data = s3.read_json(f"signals/{ticker}.json")
             if s3_data:
-                s3_data["compositeScore"] = fii_score
                 s3_data["signal"] = score_label
                 s3_data["score_label"] = score_label
-                s3_data["percentile_rank"] = int(round(pct))
-                s3_data["sector_percentile"] = int(round(sector_percentiles[i]))
-                s3_data["factor_percentiles"] = factor_pcts
+                s3_data["fii_score"] = fii_score
+                s3_data["percentile_rank"] = percentile_rank
+                s3_data["sector_percentile"] = sect_pct
                 s3_data["score_drivers"] = score_drivers
                 s3.write_json(f"signals/{ticker}.json", s3_data)
-        except Exception as e:
-            logger.warning(f"[SignalEngine] Failed to update S3 for {ticker}: {e}")
+        except Exception:
+            pass
 
-        updated += 1
-        score_distribution[fii_score] = score_distribution.get(fii_score, 0) + 1
-
-    # Log distribution
-    dist_str = ", ".join(f"Score {s}: {c}" for s, c in sorted(score_distribution.items(), reverse=True))
-    logger.info(f"[SignalEngine] Forced distribution complete: {updated} stocks updated. {dist_str}")
-
-
-def _compute_score_drivers(
-    dim_scores: dict,
-    dim_percentiles: dict,
-    dim_names: list,
-    stock_index: int,
-) -> list[dict]:
-    """Identify top 3 factors with highest absolute impact on composite score."""
-    impacts = []
-    for dim in dim_names:
-        raw = dim_scores.get(dim, 0.0)
-        pct = dim_percentiles[dim][stock_index]
-        deviation = abs(pct - 50.0)  # deviation from median
-        direction = "positive" if pct >= 50 else "negative"
-
-        # Generate description from dimension name + direction
-        dim_labels = {
-            "supply_chain_upstream": "Upstream supply chain factors",
-            "supply_chain_downstream": "Downstream customer demand factors",
-            "geopolitical": "Geopolitical risk exposure",
-            "monetary": "Monetary policy and interest rate sensitivity",
-            "correlations": "Market correlation and sector dynamics",
-            "risk_performance": "Risk-adjusted performance metrics",
-        }
-        label = dim_labels.get(dim, dim)
-        if direction == "positive":
-            desc = f"{label} trending favorably"
-        else:
-            desc = f"{label} showing headwinds"
-
-        impacts.append({
-            "factor": dim,
-            "direction": direction,
-            "description": desc,
-            "deviation": deviation,
-        })
-
-    # Sort by absolute deviation, take top 3
-    impacts.sort(key=lambda x: x["deviation"], reverse=True)
-    return [
-        {"factor": d["factor"], "direction": d["direction"], "description": d["description"]}
-        for d in impacts[:3]
-    ]
+    dist_str = " | ".join(f"Score {k}: {v}" for k, v in sorted(distribution.items(), reverse=True))
+    logger.info(f"[SignalEngine] Forced distribution applied to {updated} stocks: {dist_str}")
 
 
 def _store_signal(ticker: str, result: dict) -> None:
