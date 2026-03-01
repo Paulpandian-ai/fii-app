@@ -7,9 +7,12 @@ into an ordered feed for the mobile app.
 
 import json
 import logging
+import os
 import sys
 import traceback
 from datetime import datetime, timezone
+
+import boto3
 
 sys.path.insert(0, "/opt/python")
 
@@ -17,6 +20,10 @@ import db
 import s3
 
 logger = logging.getLogger(__name__)
+
+# DynamoDB resource for inline chunked batch_get (bypass shared layer)
+_dynamodb = boto3.resource("dynamodb")
+_table_name = os.environ.get("TABLE_NAME", "fii-table-dev")
 
 EDUCATIONAL_CARDS = [
     {
@@ -88,7 +95,23 @@ def _compile_feed() -> list[dict]:
 
     # Batch-read all SIGNAL#* | LATEST items
     keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in ALL_SECURITIES]
-    items = db.batch_get(keys)
+
+    # Inline chunked BatchGetItem — do NOT rely on db.batch_get() because
+    # the SharedLayer build may cache a stale version without chunking.
+    # DynamoDB limits BatchGetItem to 100 keys per request.
+    all_items: list[dict] = []
+    for i in range(0, len(keys), 100):
+        chunk = keys[i : i + 100]
+        resp = _dynamodb.batch_get_item(
+            RequestItems={_table_name: {"Keys": chunk}}
+        )
+        all_items.extend(resp.get("Responses", {}).get(_table_name, []))
+        unprocessed = resp.get("UnprocessedKeys", {})
+        while unprocessed:
+            resp = _dynamodb.batch_get_item(RequestItems=unprocessed)
+            all_items.extend(resp.get("Responses", {}).get(_table_name, []))
+            unprocessed = resp.get("UnprocessedKeys", {})
+    items = all_items
 
     if not items:
         logger.warning("[FeedCompiler] No signal items found in DynamoDB")
