@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { ScoreLabel } from '../types';
 
 interface Props {
   visible: boolean;
@@ -30,8 +32,9 @@ export const ConvictionCheck: React.FC<Props> = ({
   onHold,
   onSellAnyway,
 }) => {
-  const isBuyOrHold = signal === 'BUY' || signal === 'STRONG BUY' || signal === 'HOLD';
-  const signalColor = isBuyOrHold ? '#10B981' : '#EF4444';
+  const scoreBasedLabel = getScoreLabel(fiiScore);
+  const isFavorable = scoreBasedLabel === 'Strong' || scoreBasedLabel === 'Favorable' || scoreBasedLabel === 'Neutral';
+  const signalColor = isFavorable ? '#00C9A7' : '#F5A623';
 
   return (
     <Modal
@@ -71,12 +74,12 @@ export const ConvictionCheck: React.FC<Props> = ({
             ]}
           >
             <Ionicons
-              name={isBuyOrHold ? 'checkmark-circle' : 'alert-circle'}
+              name={isFavorable ? 'checkmark-circle' : 'alert-circle'}
               size={20}
               color={signalColor}
             />
             <Text style={[styles.recommendText, { color: signalColor }]}>
-              {isBuyOrHold
+              {isFavorable
                 ? 'FII still rates this positively. Consider holding.'
                 : 'FII agrees — this might be a good exit point.'}
             </Text>
@@ -179,7 +182,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#10B981',
+    backgroundColor: '#00C9A7',
     borderRadius: 14,
     paddingVertical: 16,
   },
@@ -202,16 +205,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 16,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.4)',
-    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderColor: 'rgba(245,166,35,0.4)',
+    backgroundColor: 'rgba(245,166,35,0.08)',
   },
   sellButtonText: {
-    color: '#EF4444',
+    color: '#F5A623',
     fontSize: 16,
     fontWeight: '600',
   },
   scorePenalty: {
-    color: 'rgba(239,68,68,0.6)',
+    color: 'rgba(245,166,35,0.6)',
     fontSize: 12,
     fontWeight: '600',
   },

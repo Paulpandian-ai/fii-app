@@ -24,14 +24,14 @@ import type { DiscussionPost, RootStackParamList } from '../types';
 const MAX_CHARS = 500;
 
 const SENTIMENT_OPTIONS: { key: DiscussionPost['sentiment']; label: string; color: string }[] = [
-  { key: 'bullish', label: 'Bullish', color: '#10B981' },
-  { key: 'bearish', label: 'Bearish', color: '#EF4444' },
+  { key: 'bullish', label: 'Bullish', color: '#00C9A7' },
+  { key: 'bearish', label: 'Bearish', color: '#F5A623' },
   { key: 'neutral', label: 'Neutral', color: 'rgba(255,255,255,0.3)' },
 ];
 
 const SENTIMENT_COLORS: Record<DiscussionPost['sentiment'], string> = {
-  bullish: '#10B981',
-  bearish: '#EF4444',
+  bullish: '#00C9A7',
+  bearish: '#F5A623',
   neutral: 'rgba(255,255,255,0.3)',
 };
 
@@ -206,8 +206,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
             accessibilityRole="button"
             accessibilityLabel={`Bullish reaction, ${(item.bulls ?? 0).toFixed(0)} votes`}
           >
-            <Ionicons name="trending-up" size={18} color="#10B981" />
-            <Text style={[styles.reactionCount, { color: '#10B981' }]}>
+            <Ionicons name="trending-up" size={18} color="#00C9A7" />
+            <Text style={[styles.reactionCount, { color: '#00C9A7' }]}>
               {(item.bulls ?? 0).toFixed(0)}
             </Text>
           </TouchableOpacity>
@@ -219,8 +219,8 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
             accessibilityRole="button"
             accessibilityLabel={`Bearish reaction, ${(item.bears ?? 0).toFixed(0)} votes`}
           >
-            <Ionicons name="trending-down" size={18} color="#EF4444" />
-            <Text style={[styles.reactionCount, { color: '#EF4444' }]}>
+            <Ionicons name="trending-down" size={18} color="#F5A623" />
+            <Text style={[styles.reactionCount, { color: '#F5A623' }]}>
               {(item.bears ?? 0).toFixed(0)}
             </Text>
           </TouchableOpacity>
@@ -240,7 +240,7 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
           <View
             style={[
               styles.feedbackBar,
-              { backgroundColor: submitFeedback.type === 'success' ? '#10B981' : '#EF4444' },
+              { backgroundColor: submitFeedback.type === 'success' ? '#00C9A7' : '#F5A623' },
             ]}
           >
             <Text style={styles.feedbackText}>{submitFeedback.message}</Text>
@@ -306,7 +306,7 @@ export const DiscussionScreen: React.FC<DiscussionScreenProps> = ({ route, navig
         </View>
 
         {/* Character counter */}
-        <Text style={[styles.charCounter, remaining < 50 && { color: '#EF4444' }]}>
+        <Text style={[styles.charCounter, remaining < 50 && { color: '#F5A623' }]}>
           {remaining} characters remaining
         </Text>
       </View>

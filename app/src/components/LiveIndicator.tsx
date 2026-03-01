@@ -35,10 +35,10 @@ export const LiveIndicator: React.FC<LiveIndicatorProps> = ({ forceActive }) => 
       <Animated.View
         style={[
           styles.dot,
-          { backgroundColor: isActive ? '#10B981' : '#6B7280', opacity: pulseAnim },
+          { backgroundColor: isActive ? '#00C9A7' : '#6B7280', opacity: pulseAnim },
         ]}
       />
-      <Text style={[styles.label, { color: isActive ? '#10B981' : '#6B7280' }]}>
+      <Text style={[styles.label, { color: isActive ? '#00C9A7' : '#6B7280' }]}>
         {isActive ? 'Live' : 'Market Closed'}
       </Text>
     </View>

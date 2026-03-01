@@ -48,8 +48,8 @@ export const PriceFlash: React.FC<PriceFlashProps> = ({
     outputRange: [
       'rgba(0,0,0,0)',
       directionRef.current === 'up'
-        ? 'rgba(16,185,129,0.2)'
-        : 'rgba(239,68,68,0.2)',
+        ? 'rgba(0,201,167,0.2)'
+        : 'rgba(245,166,35,0.2)',
     ],
   });
 

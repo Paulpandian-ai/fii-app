@@ -70,7 +70,7 @@ export const VolatilityAlert: React.FC<Props> = ({
 
           {/* FII signals message */}
           <View style={styles.signalCard}>
-            <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+            <Ionicons name="checkmark-circle" size={20} color="#00C9A7" />
             <Text style={styles.signalText}>
               Your FII signals haven't changed. Your analysis is still valid.
             </Text>
@@ -176,12 +176,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(16,185,129,0.08)',
+    backgroundColor: 'rgba(0,201,167,0.08)',
     borderRadius: 12,
     padding: 12,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.15)',
+    borderColor: 'rgba(0,201,167,0.15)',
   },
   signalText: {
     color: 'rgba(255,255,255,0.7)',
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#10B981',
+    backgroundColor: '#00C9A7',
     borderRadius: 14,
     paddingVertical: 16,
     marginBottom: 10,

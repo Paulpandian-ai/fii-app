@@ -191,13 +191,13 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
           </View>
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Return</Text>
-            <Text style={[styles.metricValue, { color: '#10B981' }]}>
+            <Text style={[styles.metricValue, { color: '#00C9A7' }]}>
               {(liveMetrics.expectedReturn ?? 0).toFixed(1)}%
             </Text>
           </View>
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Risk</Text>
-            <Text style={[styles.metricValue, { color: '#EF4444' }]}>
+            <Text style={[styles.metricValue, { color: '#F5A623' }]}>
               {(liveMetrics.volatility ?? 0).toFixed(1)}%
             </Text>
           </View>
@@ -233,7 +233,7 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
               <Text style={styles.searchName} numberOfLines={1}>
                 {r.companyName}
               </Text>
-              <Ionicons name="add-circle" size={22} color="#10B981" />
+              <Ionicons name="add-circle" size={22} color="#00C9A7" />
             </TouchableOpacity>
           ))}
         </View>
@@ -252,7 +252,7 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
                 onPress={() => removeStock(s.ticker)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="close-circle" size={20} color="#EF4444" />
+                <Ionicons name="close-circle" size={20} color="#F5A623" />
               </TouchableOpacity>
             </View>
           ))}
@@ -295,13 +295,13 @@ export const BuildPortfolio: React.FC<Props> = ({ onChallengeComplete }) => {
               <Ionicons
                 name={(ch.icon as keyof typeof Ionicons.glyphMap) || 'trophy'}
                 size={20}
-                color={isCompleted ? '#10B981' : isActive ? '#FBBF24' : 'rgba(255,255,255,0.4)'}
+                color={isCompleted ? '#00C9A7' : isActive ? '#FBBF24' : 'rgba(255,255,255,0.4)'}
               />
               <View style={styles.challengeInfo}>
                 <Text
                   style={[
                     styles.challengeName,
-                    isCompleted && { color: '#10B981' },
+                    isCompleted && { color: '#00C9A7' },
                   ]}
                 >
                   {ch.name}
@@ -454,8 +454,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(251,191,36,0.06)',
   },
   challengeCompleted: {
-    borderColor: 'rgba(16,185,129,0.3)',
-    backgroundColor: 'rgba(16,185,129,0.06)',
+    borderColor: 'rgba(0,201,167,0.3)',
+    backgroundColor: 'rgba(0,201,167,0.06)',
   },
   challengeInfo: {
     flex: 1,

@@ -12,6 +12,7 @@ import { runMigration } from './src/services/MigrationService';
 import { getCurrentSession } from './src/services/auth';
 
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { DisclaimerModal } from './src/components/DisclaimerModal';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { StrategyScreen } from './src/screens/StrategyScreen';
@@ -185,7 +186,7 @@ function MainTabs() {
         options={{
           tabBarBadge: daily && !dailyDismissed ? '' : undefined,
           tabBarBadgeStyle: {
-            backgroundColor: '#EF4444',
+            backgroundColor: '#4A90D9',
             minWidth: 8,
             maxHeight: 8,
             borderRadius: 4,
@@ -277,6 +278,7 @@ export default function App() {
   return (
     <NavigationContainer>
       <StatusBar style="light" />
+      <DisclaimerModal />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen

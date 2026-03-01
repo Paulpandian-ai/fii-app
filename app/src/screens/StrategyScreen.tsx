@@ -21,6 +21,7 @@ import { useStrategyStore } from '../store/strategyStore';
 import { useSignalStore } from '../store/signalStore';
 import { getInsightsFeed } from '../services/api';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { DisclaimerFooter } from '../components/DisclaimerFooter';
 import { Skeleton } from '../components/Skeleton';
 import { LastUpdated } from '../components/LastUpdated';
 import { useDataRefresh } from '../hooks/useDataRefresh';
@@ -165,13 +166,13 @@ export const StrategyScreen: React.FC = () => {
       components++;
     }
 
-    // Signal alignment (0-25)
+    // Score alignment (0-25)
     if (holdings.length > 0) {
-      const buyCount = holdings.filter((h) => {
+      const highScoreCount = holdings.filter((h) => {
         const sig = signals[h.ticker];
-        return sig?.signal === 'BUY';
+        return sig?.score >= 7;
       }).length;
-      score += Math.min(25, (buyCount / holdings.length) * 25);
+      score += Math.min(25, (highScoreCount / holdings.length) * 25);
       components++;
     }
 
@@ -180,9 +181,9 @@ export const StrategyScreen: React.FC = () => {
 
   const strategyScore = computeStrategyScore();
   const scoreColor =
-    strategyScore >= 75 ? '#10B981' :
+    strategyScore >= 75 ? '#00C9A7' :
     strategyScore >= 50 ? '#60A5FA' :
-    strategyScore >= 25 ? '#FBBF24' : '#EF4444';
+    strategyScore >= 25 ? '#F5A623' : '#5856D6';
 
   const handleShare = useCallback(async () => {
     try {
@@ -259,7 +260,7 @@ export const StrategyScreen: React.FC = () => {
 
         {/* ═══ MAIN STRATEGY CARDS ═══ */}
 
-        {/* CARD 1: Wealth Advisor */}
+        {/* CARD 1: Portfolio Analytics */}
         <TouchableOpacity
           style={styles.mainCard}
           onPress={() => navigation.navigate('WealthAdvisor')}
@@ -271,7 +272,7 @@ export const StrategyScreen: React.FC = () => {
                 <Text style={{ fontSize: 24 }}>💰</Text>
               </View>
               <View style={styles.mainCardInfo}>
-                <Text style={styles.mainCardTitle}>Wealth Advisor</Text>
+                <Text style={styles.mainCardTitle}>Portfolio Analytics</Text>
                 <Text style={styles.mainCardPreview} numberOfLines={1}>
                   {isAnyLoading && !hasRun
                     ? 'Analyzing your portfolio...'
@@ -281,7 +282,7 @@ export const StrategyScreen: React.FC = () => {
                     ? `Your portfolio could improve by ${formatMoney(annualImprovement)}/year`
                     : hasRun
                     ? 'Portfolio analysis ready'
-                    : 'Get personalized wealth recommendations'}
+                    : 'Get personalized portfolio analytics'}
                 </Text>
               </View>
             </View>
@@ -289,7 +290,7 @@ export const StrategyScreen: React.FC = () => {
           </View>
         </TouchableOpacity>
 
-        {/* CARD 2: Tax Playbook */}
+        {/* CARD 2: Tax Education Calculator */}
         <TouchableOpacity
           style={styles.mainCard}
           onPress={() => navigation.navigate('TaxPlaybook')}
@@ -297,11 +298,11 @@ export const StrategyScreen: React.FC = () => {
         >
           <View style={styles.mainCardInner}>
             <View style={styles.mainCardLeft}>
-              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(16,185,129,0.12)' }]}>
+              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(0,201,167,0.12)' }]}>
                 <Text style={{ fontSize: 24 }}>📋</Text>
               </View>
               <View style={styles.mainCardInfo}>
-                <Text style={styles.mainCardTitle}>Tax Playbook</Text>
+                <Text style={styles.mainCardTitle}>Tax Education Calculator</Text>
                 <Text style={styles.mainCardPreview} numberOfLines={1}>
                   {isTaxLoading
                     ? 'Scanning for tax opportunities...'
@@ -359,8 +360,8 @@ export const StrategyScreen: React.FC = () => {
             <View style={[styles.secondaryIcon, { backgroundColor: 'rgba(244,114,182,0.12)' }]}>
               <Ionicons name="time-outline" size={20} color="#F472B6" />
             </View>
-            <Text style={styles.secondaryTitle}>Signal Backtester</Text>
-            <Text style={styles.secondarySubtitle}>See how FII signals performed</Text>
+            <Text style={styles.secondaryTitle}>Score Backtester</Text>
+            <Text style={styles.secondarySubtitle}>See how FII scores performed</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -404,7 +405,7 @@ export const StrategyScreen: React.FC = () => {
                   <Text style={styles.scoreItemLabel}>Diversification</Text>
                 </View>
                 <View style={styles.scoreItem}>
-                  <View style={[styles.scoreItemDot, { backgroundColor: '#10B981' }]} />
+                  <View style={[styles.scoreItemDot, { backgroundColor: '#00C9A7' }]} />
                   <Text style={styles.scoreItemLabel}>Tax Efficiency</Text>
                 </View>
                 <View style={styles.scoreItem}>
@@ -413,7 +414,7 @@ export const StrategyScreen: React.FC = () => {
                 </View>
                 <View style={styles.scoreItem}>
                   <View style={[styles.scoreItemDot, { backgroundColor: '#FBBF24' }]} />
-                  <Text style={styles.scoreItemLabel}>Signal Alignment</Text>
+                  <Text style={styles.scoreItemLabel}>Score Alignment</Text>
                 </View>
               </View>
             )}
@@ -448,6 +449,7 @@ export const StrategyScreen: React.FC = () => {
         </View>
 
         <DisclaimerBanner />
+        <DisclaimerFooter />
       </ScrollView>
     </LinearGradient>
   );
@@ -497,7 +499,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#10B981',
+    backgroundColor: '#00C9A7',
   },
   pulseLabel: {
     color: 'rgba(255,255,255,0.5)',

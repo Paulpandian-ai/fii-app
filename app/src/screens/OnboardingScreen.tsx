@@ -92,10 +92,10 @@ export const OnboardingScreen: React.FC<Props> = ({ onComplete }) => {
             </Animated.View>
             <Animated.View style={[styles.featureRow, { opacity: row2Opacity }]}>
               <View style={styles.featureIcon}>
-                <Ionicons name="checkmark-circle-outline" size={28} color="#10B981" />
+                <Ionicons name="checkmark-circle-outline" size={28} color="#00C9A7" />
               </View>
               <Text style={styles.featureText}>
-                Get transparent Buy/Hold/Sell signals
+                Get multi-factor stock analysis with FII Scores
               </Text>
             </Animated.View>
             <Animated.View style={[styles.featureRow, { opacity: row3Opacity }]}>
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   startButton: {
     width: '100%',
     alignItems: 'center',
-    backgroundColor: '#10B981',
+    backgroundColor: '#00C9A7',
     borderRadius: 14,
     paddingVertical: 16,
     marginTop: 20,

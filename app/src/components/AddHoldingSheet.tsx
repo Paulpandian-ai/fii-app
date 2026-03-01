@@ -238,7 +238,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
           {step === 3 && (
             <View style={styles.confirmation}>
               <View style={styles.checkCircle}>
-                <Ionicons name="checkmark" size={40} color="#10B981" />
+                <Ionicons name="checkmark" size={40} color="#00C9A7" />
               </View>
               <Text style={styles.confirmTicker}>{selectedTicker}</Text>
               <Text style={styles.confirmDetail}>
@@ -248,7 +248,7 @@ export const AddHoldingSheet: React.FC<AddHoldingSheetProps> = ({ visible, onClo
                 <Text
                   style={[
                     styles.confirmGainLoss,
-                    { color: addedGainLoss >= 0 ? '#10B981' : '#EF4444' },
+                    { color: addedGainLoss >= 0 ? '#00C9A7' : '#F5A623' },
                   ]}
                 >
                   {(addedGainLoss ?? 0) >= 0 ? '+' : ''}${(addedGainLoss ?? 0).toFixed(2)} unrealized
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,

@@ -8,10 +8,10 @@ interface FactorBarProps {
 }
 
 const getBarColor = (score: number): string => {
-  if (score <= -1) return '#EF4444';
+  if (score <= -1) return '#F5A623';
   if (score < 0) return '#F59E0B';
   if (score < 1) return '#F59E0B';
-  return '#10B981';
+  return '#00C9A7';
 };
 
 export const FactorBar: React.FC<FactorBarProps> = ({ factor, compact = false }) => {

@@ -159,13 +159,13 @@ export const TimeMachine: React.FC<Props> = ({
               <Path d={chartPaths.innerFanPath} fill="rgba(96,165,250,0.15)" />
 
               {/* Best case line */}
-              <Path d={chartPaths.bestPath} stroke="#10B981" strokeWidth={1.5} fill="none" opacity={0.6} />
+              <Path d={chartPaths.bestPath} stroke="#00C9A7" strokeWidth={1.5} fill="none" opacity={0.6} />
 
               {/* Median line */}
               <Path d={chartPaths.medianPath} stroke="#60A5FA" strokeWidth={2.5} fill="none" />
 
               {/* Worst case line */}
-              <Path d={chartPaths.worstPath} stroke="#EF4444" strokeWidth={1.5} fill="none" opacity={0.6} />
+              <Path d={chartPaths.worstPath} stroke="#F5A623" strokeWidth={1.5} fill="none" opacity={0.6} />
             </Svg>
           </View>
 
@@ -177,9 +177,9 @@ export const TimeMachine: React.FC<Props> = ({
               </Text>
 
               <View style={styles.statRow}>
-                <View style={[styles.statDot, { backgroundColor: '#10B981' }]} />
+                <View style={[styles.statDot, { backgroundColor: '#00C9A7' }]} />
                 <Text style={styles.statLabel}>Best case</Text>
-                <Text style={[styles.statValue, { color: '#10B981', fontSize: 20 }]}>
+                <Text style={[styles.statValue, { color: '#00C9A7', fontSize: 20 }]}>
                   {formatCurrency(stats.best)}
                 </Text>
               </View>
@@ -193,9 +193,9 @@ export const TimeMachine: React.FC<Props> = ({
               </View>
 
               <View style={styles.statRow}>
-                <View style={[styles.statDot, { backgroundColor: '#EF4444' }]} />
+                <View style={[styles.statDot, { backgroundColor: '#F5A623' }]} />
                 <Text style={styles.statLabel}>Worst case</Text>
-                <Text style={[styles.statValue, { color: '#EF4444', fontSize: 15 }]}>
+                <Text style={[styles.statValue, { color: '#F5A623', fontSize: 15 }]}>
                   {formatCurrency(stats.worst)}
                 </Text>
               </View>
@@ -208,9 +208,9 @@ export const TimeMachine: React.FC<Props> = ({
                     {
                       color:
                         stats.lossProbability > 15
-                          ? '#EF4444'
+                          ? '#F5A623'
                           : stats.lossProbability < 5
-                          ? '#10B981'
+                          ? '#00C9A7'
                           : '#FBBF24',
                     },
                   ]}

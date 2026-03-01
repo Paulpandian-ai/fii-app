@@ -34,6 +34,7 @@ import { LastUpdated } from '../components/LastUpdated';
 import { RefreshProgressBar } from '../components/RefreshProgressBar';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { dataRefreshManager } from '../services/DataRefreshManager';
+import { DisclaimerFooter } from '../components/DisclaimerFooter';
 import type { Holding, PortfolioHealth, RootStackParamList, Watchlist, WatchlistItem } from '../types';
 
 // Enable LayoutAnimation on Android
@@ -49,8 +50,8 @@ const COLORS = {
   cardBg: 'rgba(255,255,255,0.05)',
   cardBorder: 'rgba(255,255,255,0.06)',
   primary: '#60A5FA',
-  green: '#10B981',
-  red: '#EF4444',
+  green: '#00C9A7',
+  red: '#F5A623',
   amber: '#F59E0B',
   textPrimary: '#FFF',
   textSecondary: 'rgba(255,255,255,0.6)',
@@ -61,12 +62,12 @@ const COLORS = {
 
 const SECTOR_COLORS: Record<string, string> = {
   Technology: '#60A5FA',
-  Healthcare: '#10B981',
+  Healthcare: '#00C9A7',
   'Financial Services': '#F59E0B',
   Financials: '#F59E0B',
   'Consumer Cyclical': '#A78BFA',
   'Consumer Defensive': '#EC4899',
-  Energy: '#EF4444',
+  Energy: '#F5A623',
   'Communication Services': '#F97316',
   Industrials: '#34D399',
   'Real Estate': '#6366F1',
@@ -75,11 +76,11 @@ const SECTOR_COLORS: Record<string, string> = {
 };
 
 const GRADE_COLORS: Record<string, string> = {
-  A: '#10B981',
+  A: '#00C9A7',
   B: '#34D399',
   C: '#F59E0B',
   D: '#F97316',
-  F: '#EF4444',
+  F: '#F5A623',
 };
 
 // ─── Helpers ───
@@ -1146,6 +1147,8 @@ export const PortfolioScreen: React.FC = () => {
             </View>
           )}
         </View>
+
+        <DisclaimerFooter />
 
         {/* Bottom spacer for tab bar */}
         <View style={{ height: 40 }} />

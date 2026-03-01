@@ -1,23 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import type { Signal } from '../types';
+import type { ScoreLabel } from '../types';
+import { SCORE_COLORS, getScoreLabel } from '../utils/scoreColors';
 
 interface SignalBadgeProps {
-  signal: Signal;
+  scoreLabel?: ScoreLabel;
+  score?: number;
 }
 
-const SIGNAL_COLORS: Record<Signal, { bg: string; text: string }> = {
-  BUY: { bg: '#10B981', text: '#FFFFFF' },
-  HOLD: { bg: '#F59E0B', text: '#000000' },
-  SELL: { bg: '#EF4444', text: '#FFFFFF' },
-};
-
-export const SignalBadge: React.FC<SignalBadgeProps> = ({ signal }) => {
-  const colors = SIGNAL_COLORS[signal];
+export const SignalBadge: React.FC<SignalBadgeProps> = ({ scoreLabel, score }) => {
+  const label = scoreLabel ?? (score != null ? getScoreLabel(score) : 'Neutral');
+  const bgColor = SCORE_COLORS[label] || SCORE_COLORS.Neutral;
 
   return (
-    <View style={[styles.badge, { backgroundColor: colors.bg }]}>
-      <Text style={[styles.text, { color: colors.text }]}>{signal}</Text>
+    <View style={[styles.badge, { backgroundColor: bgColor }]}>
+      <Text style={styles.text}>{label}</Text>
     </View>
   );
 };
@@ -33,5 +30,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 2,
+    color: '#FFFFFF',
   },
 });

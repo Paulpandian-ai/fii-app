@@ -95,7 +95,7 @@ export const WealthSimulatorHero: React.FC<Props> = ({
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={isRunning ? ['#374151', '#4B5563'] : ['#10B981', '#059669']}
+              colors={isRunning ? ['#374151', '#4B5563'] : ['#00C9A7', '#009B85']}
               style={styles.buttonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   button: {
     borderRadius: 14,
     overflow: 'hidden',
-    shadowColor: '#10B981',
+    shadowColor: '#00C9A7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 12,

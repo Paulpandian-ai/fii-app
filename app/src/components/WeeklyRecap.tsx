@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { WeeklyRecapData } from '../types';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 interface Props {
   data: WeeklyRecapData | null;
@@ -62,7 +63,7 @@ export const WeeklyRecap: React.FC<Props> = ({
             <Text
               style={[
                 styles.statValue,
-                { color: isPositive ? '#10B981' : '#EF4444' },
+                { color: isPositive ? '#00C9A7' : '#F5A623' },
               ]}
             >
               {isPositive ? '+' : '-'}{formatMoney(weeklyChange)} ({isPositive ? '+' : ''}{(weeklyPct ?? 0).toFixed(1)}%)
@@ -92,6 +93,8 @@ export const WeeklyRecap: React.FC<Props> = ({
           <Ionicons name="chatbubble-ellipses" size={16} color="#8B5CF6" />
           <Text style={styles.claudeText}>{data.claudeLine}</Text>
         </View>
+
+        <AIContentDisclaimer />
       </View>
     </View>
   );

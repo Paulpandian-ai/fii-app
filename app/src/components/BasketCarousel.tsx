@@ -10,17 +10,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getBaskets } from '../services/api';
-import type { Basket, BasketStock, Signal } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { Basket, BasketStock, ScoreLabel } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH * 0.72;
 const CARD_GAP = 12;
-
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
 
 interface BasketCarouselProps {
   onSelectBasket?: (basket: Basket) => void;
@@ -64,9 +59,9 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket, 
         <Text style={styles.stockTicker}>{stock.ticker}</Text>
         <Text style={styles.stockWeight}>{((stock.weight ?? 0) * 100).toFixed(0)}%</Text>
       </View>
-      <View style={[styles.stockSignal, { backgroundColor: SIGNAL_COLORS[stock.signal] + '20' }]}>
-        <Text style={[styles.stockSignalText, { color: SIGNAL_COLORS[stock.signal] }]}>
-          {stock.signal}
+      <View style={[styles.stockSignal, { backgroundColor: getScoreColor(stock.score) + '20' }]}>
+        <Text style={[styles.stockSignalText, { color: getScoreColor(stock.score) }]}>
+          {stock.scoreLabel}
         </Text>
       </View>
       <Text style={styles.stockScore}>{(stock.score ?? 0).toFixed(1)}</Text>
@@ -121,7 +116,7 @@ export const BasketCarousel: React.FC<BasketCarouselProps> = ({ onSelectBasket, 
               <View style={styles.cardMeta}>
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>YTD</Text>
-                  <Text style={[styles.metaValue, { color: basket.returnYTD >= 0 ? '#10B981' : '#EF4444' }]}>
+                  <Text style={[styles.metaValue, { color: basket.returnYTD >= 0 ? '#00C9A7' : '#F5A623' }]}>
                     {(basket.returnYTD ?? 0) >= 0 ? '+' : ''}{(basket.returnYTD ?? 0).toFixed(1)}%
                   </Text>
                 </View>

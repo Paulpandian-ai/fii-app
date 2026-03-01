@@ -16,19 +16,14 @@ import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getEarningsCalendar } from '../services/api';
-import type { EarningsEntry, RootStackParamList, Signal } from '../types';
+import type { EarningsEntry, RootStackParamList, ScoreLabel } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
-
 const BEAT_COLORS = {
-  beat: '#10B981',
-  miss: '#EF4444',
+  beat: '#00C9A7',
+  miss: '#F5A623',
 };
 
 export const EarningsCalendarScreen: React.FC = () => {
@@ -145,7 +140,7 @@ export const EarningsCalendarScreen: React.FC = () => {
   const renderEarningsCard = ({ item }: { item: EarningsEntry }) => {
     const isExpanded = expandedTicker === item.ticker;
     const hasReported = item.actualEPS != null;
-    const beatColor = item.beatStreak >= 3 ? '#10B981' : item.beatStreak >= 1 ? '#F59E0B' : '#EF4444';
+    const beatColor = item.beatStreak >= 3 ? '#00C9A7' : item.beatStreak >= 1 ? '#F59E0B' : '#F5A623';
 
     return (
       <TouchableOpacity
@@ -164,10 +159,10 @@ export const EarningsCalendarScreen: React.FC = () => {
                 {item.timeOfDay}
               </Text>
             </View>
-            {item.signal && (
-              <View style={[styles.signalBadge, { backgroundColor: SIGNAL_COLORS[item.signal] + '20' }]}>
-                <Text style={[styles.signalText, { color: SIGNAL_COLORS[item.signal] }]}>
-                  {item.signal}
+            {item.aiScore != null && (
+              <View style={[styles.signalBadge, { backgroundColor: getScoreColor(item.aiScore) + '20' }]}>
+                <Text style={[styles.signalText, { color: getScoreColor(item.aiScore) }]}>
+                  {getScoreLabel(item.aiScore)}
                 </Text>
               </View>
             )}
@@ -184,7 +179,7 @@ export const EarningsCalendarScreen: React.FC = () => {
           {hasReported && (
             <View style={styles.metaItem}>
               <Text style={styles.metaLabel}>Actual</Text>
-              <Text style={[styles.metaValue, { color: (item.surprise ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.metaValue, { color: (item.surprise ?? 0) >= 0 ? '#00C9A7' : '#F5A623' }]}>
                 ${(item.actualEPS ?? 0).toFixed(2)}
               </Text>
             </View>
@@ -202,13 +197,13 @@ export const EarningsCalendarScreen: React.FC = () => {
         </View>
 
         {hasReported && item.surprisePercent != null && (
-          <View style={[styles.surpriseBanner, { backgroundColor: (item.surprisePercent ?? 0) >= 0 ? '#10B98115' : '#EF444415' }]}>
+          <View style={[styles.surpriseBanner, { backgroundColor: (item.surprisePercent ?? 0) >= 0 ? '#00C9A715' : '#F5A62315' }]}>
             <Ionicons
               name={(item.surprisePercent ?? 0) >= 0 ? 'trending-up' : 'trending-down'}
               size={16}
-              color={(item.surprisePercent ?? 0) >= 0 ? '#10B981' : '#EF4444'}
+              color={(item.surprisePercent ?? 0) >= 0 ? '#00C9A7' : '#F5A623'}
             />
-            <Text style={[styles.surpriseText, { color: (item.surprisePercent ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+            <Text style={[styles.surpriseText, { color: (item.surprisePercent ?? 0) >= 0 ? '#00C9A7' : '#F5A623' }]}>
               {(item.surprisePercent ?? 0) >= 0 ? '+' : ''}{(item.surprisePercent ?? 0).toFixed(1)}% surprise
             </Text>
           </View>
@@ -404,10 +399,10 @@ const styles = StyleSheet.create({
   calendarRow: { flexDirection: 'row', justifyContent: 'space-around' },
   calendarCell: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
   calendarCellToday: { backgroundColor: 'rgba(96,165,250,0.2)' },
-  calendarCellEarnings: { backgroundColor: 'rgba(16,185,129,0.15)' },
+  calendarCellEarnings: { backgroundColor: 'rgba(0,201,167,0.15)' },
   calendarDayNum: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
   calendarDayNumToday: { color: '#60A5FA', fontWeight: '700' },
-  calendarDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#10B981', marginTop: 1 },
+  calendarDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#00C9A7', marginTop: 1 },
   listContent: { paddingHorizontal: 16, paddingBottom: 40 },
   dateGroup: { marginTop: 16, marginBottom: 8 },
   dateBadge: {

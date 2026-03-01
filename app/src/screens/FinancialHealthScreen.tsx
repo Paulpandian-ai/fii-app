@@ -22,10 +22,10 @@ const safeNum = (v: unknown): number => {
 };
 
 const GRADE_COLORS: Record<string, string> = {
-  A: '#10B981', 'A-': '#10B981',
+  A: '#00C9A7', 'A-': '#00C9A7',
   'B+': '#34D399', B: '#34D399',
   'C+': '#F59E0B', C: '#F59E0B',
-  D: '#EF4444', F: '#EF4444',
+  D: '#F5A623', F: '#F5A623',
   'N/A': '#64748B',
 };
 
@@ -135,12 +135,12 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                 <Ionicons name="shield-checkmark-outline" size={20} color="#60A5FA" />
                 <Text style={styles.scoreCardTitle}>Altman Z-Score</Text>
                 <View style={[styles.zonePill, {
-                  backgroundColor: zScore.zone === 'safe' ? 'rgba(16,185,129,0.15)' :
-                    zScore.zone === 'gray' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                  backgroundColor: zScore.zone === 'safe' ? 'rgba(0,201,167,0.15)' :
+                    zScore.zone === 'gray' ? 'rgba(245,158,11,0.15)' : 'rgba(245,166,35,0.15)',
                 }]}>
                   <Text style={[styles.zonePillText, {
-                    color: zScore.zone === 'safe' ? '#10B981' :
-                      zScore.zone === 'gray' ? '#F59E0B' : '#EF4444',
+                    color: zScore.zone === 'safe' ? '#00C9A7' :
+                      zScore.zone === 'gray' ? '#F59E0B' : '#F5A623',
                   }]}>
                     {zScore.zone === 'safe' ? 'Safe' : zScore.zone === 'gray' ? 'Gray Zone' : 'Distress'}
                   </Text>
@@ -149,9 +149,9 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
               <Text style={styles.scoreValue}>{safeNum(zScore.value).toFixed(2)}</Text>
               {/* Z-Score gauge */}
               <View style={styles.gauge}>
-                <View style={[styles.gaugeZone, { flex: 1.81, backgroundColor: 'rgba(239,68,68,0.3)' }]} />
+                <View style={[styles.gaugeZone, { flex: 1.81, backgroundColor: 'rgba(245,166,35,0.3)' }]} />
                 <View style={[styles.gaugeZone, { flex: 1.18, backgroundColor: 'rgba(245,158,11,0.3)' }]} />
-                <View style={[styles.gaugeZone, { flex: 2, backgroundColor: 'rgba(16,185,129,0.3)' }]} />
+                <View style={[styles.gaugeZone, { flex: 2, backgroundColor: 'rgba(0,201,167,0.3)' }]} />
               </View>
               <View style={styles.gaugeLabels}>
                 <Text style={styles.gaugeLabel}>0</Text>
@@ -172,12 +172,12 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                 <Ionicons name="checkmark-circle-outline" size={20} color="#60A5FA" />
                 <Text style={styles.scoreCardTitle}>Piotroski F-Score</Text>
                 <View style={[styles.zonePill, {
-                  backgroundColor: fScore.interpretation === 'strong' ? 'rgba(16,185,129,0.15)' :
-                    fScore.interpretation === 'moderate' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                  backgroundColor: fScore.interpretation === 'strong' ? 'rgba(0,201,167,0.15)' :
+                    fScore.interpretation === 'moderate' ? 'rgba(245,158,11,0.15)' : 'rgba(245,166,35,0.15)',
                 }]}>
                   <Text style={[styles.zonePillText, {
-                    color: fScore.interpretation === 'strong' ? '#10B981' :
-                      fScore.interpretation === 'moderate' ? '#F59E0B' : '#EF4444',
+                    color: fScore.interpretation === 'strong' ? '#00C9A7' :
+                      fScore.interpretation === 'moderate' ? '#F59E0B' : '#F5A623',
                   }]}>
                     {fScore.interpretation}
                   </Text>
@@ -193,7 +193,7 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                       styles.dot,
                       {
                         backgroundColor: i < safeNum(fScore.value)
-                          ? '#10B981' : 'rgba(255,255,255,0.15)',
+                          ? '#00C9A7' : 'rgba(255,255,255,0.15)',
                       },
                     ]}
                   />
@@ -207,7 +207,7 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                       <Ionicons
                         name={c.earned ? 'checkmark-circle' : 'close-circle'}
                         size={16}
-                        color={c.earned ? '#10B981' : 'rgba(239,68,68,0.5)'}
+                        color={c.earned ? '#00C9A7' : 'rgba(245,166,35,0.5)'}
                       />
                       <Text style={styles.criteriaName}>{c.name}</Text>
                     </View>
@@ -225,11 +225,11 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                 <Text style={styles.scoreCardTitle}>Beneish M-Score</Text>
                 <View style={[styles.zonePill, {
                   backgroundColor: mScore.interpretation === 'unlikely_manipulator'
-                    ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                    ? 'rgba(0,201,167,0.15)' : 'rgba(245,166,35,0.15)',
                 }]}>
                   <Text style={[styles.zonePillText, {
                     color: mScore.interpretation === 'unlikely_manipulator'
-                      ? '#10B981' : '#EF4444',
+                      ? '#00C9A7' : '#F5A623',
                   }]}>
                     {mScore.interpretation === 'unlikely_manipulator' ? 'Clean' : 'Red Flag'}
                   </Text>
@@ -256,15 +256,15 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                 {dcf.upside != null && (
                   <View style={[styles.upsidePill, {
                     backgroundColor: dcf.upside >= 0
-                      ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                      ? 'rgba(0,201,167,0.15)' : 'rgba(245,166,35,0.15)',
                   }]}>
                     <Ionicons
                       name={dcf.upside >= 0 ? 'trending-up' : 'trending-down'}
                       size={16}
-                      color={dcf.upside >= 0 ? '#10B981' : '#EF4444'}
+                      color={dcf.upside >= 0 ? '#00C9A7' : '#F5A623'}
                     />
                     <Text style={[styles.upsideText, {
-                      color: dcf.upside >= 0 ? '#10B981' : '#EF4444',
+                      color: dcf.upside >= 0 ? '#00C9A7' : '#F5A623',
                     }]}>
                       {dcf.upside >= 0 ? '+' : ''}{safeNum(dcf.upside).toFixed(1)}%
                     </Text>
@@ -278,7 +278,7 @@ export const FinancialHealthScreen: React.FC<FinancialHealthScreenProps> = ({ ro
                   <View style={styles.thermoBar}>
                     <View style={[styles.thermoFill, {
                       width: `${Math.min(100, Math.max(10, (dcf.currentPrice / dcf.fairValue) * 100))}%`,
-                      backgroundColor: dcf.upside != null && dcf.upside >= 0 ? '#10B981' : '#EF4444',
+                      backgroundColor: dcf.upside != null && dcf.upside >= 0 ? '#00C9A7' : '#F5A623',
                     }]} />
                   </View>
                   <View style={styles.thermoLabels}>

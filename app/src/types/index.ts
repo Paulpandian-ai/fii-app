@@ -1,6 +1,6 @@
 // ─── Core Domain Types ───
 
-export type Signal = 'BUY' | 'HOLD' | 'SELL';
+export type ScoreLabel = 'Strong' | 'Favorable' | 'Neutral' | 'Weak' | 'Caution';
 export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
 export type FeedItemType = 'signal' | 'educational';
 
@@ -30,7 +30,7 @@ export interface FeedItem {
   ticker: string;
   companyName: string;
   compositeScore: number;   // 1-10
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   confidence?: Confidence;
   insight: string;          // Claude-generated one-liner
   topFactors: FactorScore[];
@@ -68,14 +68,14 @@ export interface SearchResult {
   exchange: string;
   sector: string;
   score: number | null;
-  signal: Signal | null;
+  scoreLabel: ScoreLabel | null;
 }
 
 export interface Alternative {
   ticker: string;
   companyName: string;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   reason: string;
   altType: string;
 }
@@ -97,7 +97,7 @@ export interface FullAnalysis {
   ticker: string;
   companyName: string;
   compositeScore: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   confidence: Confidence;
   insight: string;
   reasoning: string;
@@ -148,8 +148,8 @@ export interface PortfolioSummary {
   dailyChange: number;
   dailyChangePercent: number;
   biggestWinner: { ticker: string; gainLossPercent: number } | null;
-  biggestRisk: { ticker: string; signal: Signal; score: number } | null;
-  sellCount: number;
+  biggestRisk: { ticker: string; scoreLabel: ScoreLabel; score: number } | null;
+  cautionCount: number;
   holdingsCount: number;
 }
 
@@ -167,7 +167,7 @@ export interface BasketStock {
   companyName: string;
   weight: number;       // 0–1 allocation
   score: number;        // FII composite score
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   reason: string;       // why this stock is in the basket
 }
 
@@ -189,7 +189,7 @@ export interface WatchlistItem {
   companyName: string;
   addedAt: string;
   score?: number;
-  signal?: Signal;
+  scoreLabel?: ScoreLabel;
   price?: number;
   changePercent?: number;
 }
@@ -227,7 +227,7 @@ export interface TrendingItem {
   ticker: string;
   companyName: string;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   reason: string;         // why it's trending
   changePercent: number;
   volume: string;         // e.g. "12.3M"
@@ -248,7 +248,7 @@ export interface DiscoveryCard {
   ticker: string;
   companyName: string;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   insight: string;
   sector: string;
   price: number;
@@ -283,7 +283,7 @@ export interface AllocationItem {
   companyName: string;
   weight: number;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
 }
 
 export interface PortfolioMetrics {
@@ -360,7 +360,7 @@ export interface RebalanceMove {
   optimalWeight: number;
   direction: 'increase' | 'decrease';
   reason: string;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   score: number;
 }
 
@@ -454,8 +454,8 @@ export interface TaxHarvestResult {
 export interface Prescription {
   id: string;
   title: string;
-  diagnosis: string;
-  prescription: string;
+  observation: string;
+  insight: string;
   impact: string;
   icon: string;
   severity: 'low' | 'medium' | 'high';
@@ -483,7 +483,7 @@ export interface BacktestResult {
   ticker: string;
   companyName: string;
   signalDate: string;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   score: number;
   signalStrength: string;
   actualReturn: number;
@@ -494,9 +494,9 @@ export interface BacktestResult {
 
 export interface BacktestStats {
   hitRate: number;
-  buyAccuracy: number;
-  holdAccuracy: number;
-  sellAccuracy: number;
+  strongAccuracy: number;
+  neutralAccuracy: number;
+  cautionAccuracy: number;
   totalSignals: number;
   totalCorrect: number;
   totalBorderline: number;
@@ -761,7 +761,7 @@ export interface ScreenerResult {
   change: number;
   changePercent: number;
   aiScore: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
   confidence: string;
   technicalScore: number | null;
   fundamentalGrade: string;
@@ -932,7 +932,7 @@ export interface EventAlert {
 export interface SignalHistoryPoint {
   date: string;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
 }
 
 export interface NotificationPreferences {
@@ -960,7 +960,7 @@ export interface EarningsEntry {
   surprise: number | null;
   surprisePercent: number | null;
   aiScore: number | null;
-  signal: Signal | null;
+  scoreLabel: ScoreLabel | null;
   historicalSurprises: ('beat' | 'miss')[];
   beatStreak: number;
   quarter: number | null;
@@ -978,7 +978,7 @@ export interface MarketMover {
   marketCap: number;
   sector: string;
   aiScore: number | null;
-  signal: Signal | null;
+  scoreLabel: ScoreLabel | null;
   scoreChange?: number;
   prevScore?: number;
 }
@@ -1019,7 +1019,7 @@ export interface TickerPerformance {
   ticker: string;
   companyName: string;
   totalSignals: number;
-  buySignals: number;
+  strongSignals: number;
   avgReturn3M: number;
   hitRate: number;
 }

@@ -16,15 +16,15 @@ interface Props {
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
-  high: '#EF4444',
+  high: '#F5A623',
   medium: '#FBBF24',
-  low: '#10B981',
+  low: '#00C9A7',
 };
 
 const SEVERITY_BG: Record<string, string> = {
-  high: 'rgba(239,68,68,0.1)',
+  high: 'rgba(245,166,35,0.1)',
   medium: 'rgba(251,191,36,0.1)',
-  low: 'rgba(16,185,129,0.1)',
+  low: 'rgba(0,201,167,0.1)',
 };
 
 export const DiversificationCoach: React.FC<Props> = ({
@@ -115,7 +115,7 @@ export const DiversificationCoach: React.FC<Props> = ({
                 >
                   <Ionicons name="pulse" size={16} color={color} />
                   <Text style={[styles.applyButtonText, { color }]}>
-                    Apply Treatment
+                    Learn More
                   </Text>
                 </TouchableOpacity>
               </View>

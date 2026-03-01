@@ -21,7 +21,7 @@ interface Props {
 }
 
 const PATH_COLORS: Record<string, { primary: string; bg: string }> = {
-  basics: { primary: '#10B981', bg: 'rgba(16,185,129,0.08)' },
+  basics: { primary: '#00C9A7', bg: 'rgba(0,201,167,0.08)' },
   signals: { primary: '#60A5FA', bg: 'rgba(96,165,250,0.08)' },
   advanced: { primary: '#F59E0B', bg: 'rgba(245,158,11,0.08)' },
 };
@@ -203,10 +203,10 @@ export const LearningPaths: React.FC<Props> = ({ paths, completedLessons, onComp
 
                       if (showResult && isCorrect) {
                         optionStyle = { ...styles.quizOption, ...styles.quizOptionCorrect };
-                        textStyle = { ...styles.quizOptionText, color: '#10B981' };
+                        textStyle = { ...styles.quizOptionText, color: '#00C9A7' };
                       } else if (showResult && isSelected && !isCorrect) {
                         optionStyle = { ...styles.quizOption, ...styles.quizOptionWrong };
-                        textStyle = { ...styles.quizOptionText, color: '#EF4444' };
+                        textStyle = { ...styles.quizOptionText, color: '#F5A623' };
                       } else if (isSelected) {
                         optionStyle = { ...styles.quizOption, ...styles.quizOptionSelected };
                         textStyle = { ...styles.quizOptionText, color: '#60A5FA' };
@@ -221,10 +221,10 @@ export const LearningPaths: React.FC<Props> = ({ paths, completedLessons, onComp
                         >
                           <Text style={textStyle}>{opt}</Text>
                           {showResult && isCorrect && (
-                            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                            <Ionicons name="checkmark-circle" size={18} color="#00C9A7" />
                           )}
                           {showResult && isSelected && !isCorrect && (
-                            <Ionicons name="close-circle" size={18} color="#EF4444" />
+                            <Ionicons name="close-circle" size={18} color="#F5A623" />
                           )}
                         </TouchableOpacity>
                       );
@@ -471,12 +471,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(96,165,250,0.06)',
   },
   quizOptionCorrect: {
-    borderColor: 'rgba(16,185,129,0.4)',
-    backgroundColor: 'rgba(16,185,129,0.06)',
+    borderColor: 'rgba(0,201,167,0.4)',
+    backgroundColor: 'rgba(0,201,167,0.06)',
   },
   quizOptionWrong: {
-    borderColor: 'rgba(239,68,68,0.4)',
-    backgroundColor: 'rgba(239,68,68,0.06)',
+    borderColor: 'rgba(245,166,35,0.4)',
+    backgroundColor: 'rgba(245,166,35,0.06)',
   },
   quizOptionText: {
     color: 'rgba(255,255,255,0.7)',
@@ -486,11 +486,11 @@ const styles = StyleSheet.create({
   },
   quizResult: {
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.08)',
+    backgroundColor: 'rgba(0,201,167,0.08)',
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.15)',
+    borderColor: 'rgba(0,201,167,0.15)',
   },
   quizResultText: {
     color: '#FFFFFF',
@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   quizXP: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 16,
     fontWeight: '800',
     marginTop: 4,

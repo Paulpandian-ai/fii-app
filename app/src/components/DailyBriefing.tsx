@@ -11,6 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { DailyBriefingData } from '../types';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -78,9 +79,9 @@ export const DailyBriefing: React.FC<Props> = ({ briefing, onDismiss }) => {
           <Ionicons
             name={isPositive ? 'trending-up' : 'trending-down'}
             size={16}
-            color={isPositive ? '#10B981' : '#EF4444'}
+            color={isPositive ? '#00C9A7' : '#F5A623'}
           />
-          <Text style={[styles.statusText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+          <Text style={[styles.statusText, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
             {portfolioStatus}
           </Text>
         </View>
@@ -123,6 +124,8 @@ export const DailyBriefing: React.FC<Props> = ({ briefing, onDismiss }) => {
 
         {/* Disclaimer */}
         <Text style={styles.disclaimer}>For educational purposes only</Text>
+
+        <AIContentDisclaimer />
       </LinearGradient>
     </View>
   );

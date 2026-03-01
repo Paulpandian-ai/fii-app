@@ -29,28 +29,28 @@ const getLevelInfo = (score: number): { label: string; color: string } => {
 const SCORE_CATEGORIES = [
   { label: 'Lessons', max: 30, icon: 'school' as const, color: '#60A5FA' },
   { label: 'Streak', max: 20, icon: 'flame' as const, color: '#FBBF24' },
-  { label: 'Signal Follow', max: 25, icon: 'analytics' as const, color: '#10B981' },
+  { label: 'Signal Follow', max: 25, icon: 'analytics' as const, color: '#00C9A7' },
   { label: 'Diversification', max: 25, icon: 'pie-chart' as const, color: '#8B5CF6' },
 ];
 
 // Achievement badge definitions matching spec
 const BADGE_ICONS: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   first_step: { icon: 'footsteps', color: '#60A5FA' },
-  signal_follower: { icon: 'analytics', color: '#10B981' },
+  signal_follower: { icon: 'analytics', color: '#00C9A7' },
   diamond_hands: { icon: 'diamond', color: '#60A5FA' },
   diversified: { icon: 'pie-chart', color: '#8B5CF6' },
-  tax_smart: { icon: 'cash', color: '#10B981' },
+  tax_smart: { icon: 'cash', color: '#00C9A7' },
   data_driven: { icon: 'bar-chart', color: '#F59E0B' },
-  streak_14: { icon: 'flame', color: '#EF4444' },
+  streak_14: { icon: 'flame', color: '#F5A623' },
   knowledge_seeker: { icon: 'school', color: '#FBBF24' },
   ask_away: { icon: 'chatbubbles', color: '#60A5FA' },
   // Fallbacks for existing badge types
   diamond: { icon: 'diamond', color: '#60A5FA' },
   analytics: { icon: 'analytics', color: '#8B5CF6' },
   flame: { icon: 'flame', color: '#FBBF24' },
-  leaf: { icon: 'leaf', color: '#10B981' },
+  leaf: { icon: 'leaf', color: '#00C9A7' },
   school: { icon: 'school', color: '#F59E0B' },
-  bonfire: { icon: 'bonfire', color: '#EF4444' },
+  bonfire: { icon: 'bonfire', color: '#F5A623' },
   shield: { icon: 'shield', color: '#3B82F6' },
   globe: { icon: 'globe', color: '#34D399' },
   trophy: { icon: 'trophy', color: '#FFD700' },

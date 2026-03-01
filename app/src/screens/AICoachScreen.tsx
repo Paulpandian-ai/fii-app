@@ -23,19 +23,20 @@ import { useCoachStore, type ChatMsg } from '../store/coachStore';
 import { getCoachWeekly, getAdvice, sendChatMessage } from '../services/api';
 import { syncService } from '../services/SyncService';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
 import { Skeleton } from '../components/Skeleton';
 
 const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string; badge: string }> = {
-  high: { bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)', text: '#EF4444', badge: '#EF4444' },
+  high: { bg: 'rgba(245,166,35,0.08)', border: 'rgba(245,166,35,0.2)', text: '#F5A623', badge: '#F5A623' },
   medium: { bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.2)', text: '#FBBF24', badge: '#FBBF24' },
-  low: { bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', text: '#10B981', badge: '#10B981' },
+  low: { bg: 'rgba(0,201,167,0.08)', border: 'rgba(0,201,167,0.2)', text: '#00C9A7', badge: '#00C9A7' },
 };
 
 const ASK_FII_SUGGESTIONS = [
-  'Should I sell any of my stocks?',
-  "What's my biggest risk right now?",
+  'What factors affect my stocks?',
+  'What factor exposures does my portfolio have?',
   'How would a recession affect my portfolio?',
-  'Am I diversified enough?',
+  'How does my sector allocation compare to the S&P 500?',
 ];
 
 const CHAT_CACHE_KEY = '@fii_coach_chat_screen_cache';
@@ -174,7 +175,7 @@ export const AICoachScreen: React.FC = () => {
 
   const tabs = [
     { id: 'review' as const, label: 'Weekly Review', icon: 'newspaper' as const },
-    { id: 'prescriptions' as const, label: 'Prescriptions', icon: 'medical' as const },
+    { id: 'prescriptions' as const, label: 'Insights', icon: 'medical' as const },
     { id: 'ask' as const, label: 'Ask FII', icon: 'chatbubbles' as const },
   ];
 
@@ -246,7 +247,7 @@ export const AICoachScreen: React.FC = () => {
                         style={[
                           styles.reviewStatValue,
                           {
-                            color: (weeklyData.weeklyChangePct ?? 0) >= 0 ? '#10B981' : '#EF4444',
+                            color: (weeklyData.weeklyChangePct ?? 0) >= 0 ? '#00C9A7' : '#F5A623',
                           },
                         ]}
                       >
@@ -293,11 +294,11 @@ export const AICoachScreen: React.FC = () => {
                     <View style={styles.watchItem}>
                       <Ionicons name="eye-outline" size={16} color="#60A5FA" />
                       <Text style={styles.watchItemText}>
-                        Monitor holdings with recent signal changes
+                        Monitor holdings with recent score changes
                       </Text>
                     </View>
                     <View style={styles.watchItem}>
-                      <Ionicons name="trending-up" size={16} color="#10B981" />
+                      <Ionicons name="trending-up" size={16} color="#00C9A7" />
                       <Text style={styles.watchItemText}>
                         Check earnings calendar for your holdings
                       </Text>
@@ -334,16 +335,16 @@ export const AICoachScreen: React.FC = () => {
         </ScrollView>
       )}
 
-      {/* ═══ 4B. PRESCRIPTIONS ═══ */}
+      {/* ═══ 4B. INSIGHTS ═══ */}
       {activeTab === 'prescriptions' && (
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Prescriptions</Text>
+            <Text style={styles.sectionTitle}>Insights</Text>
             <Text style={styles.sectionSubtitle}>
-              Specific, actionable recommendations for your portfolio
+              AI-generated observations and educational insights for your portfolio
             </Text>
 
             {isAdviceLoading && !advice.length ? (
@@ -378,20 +379,20 @@ export const AICoachScreen: React.FC = () => {
 
                       {/* Diagnosis */}
                       <View style={styles.prescriptionSection}>
-                        <Text style={styles.prescriptionLabel}>DIAGNOSIS</Text>
+                        <Text style={styles.prescriptionLabel}>OBSERVATION</Text>
                         <Text style={styles.prescriptionText}>{rx.diagnosis}</Text>
                       </View>
 
                       {/* Prescription */}
                       <View style={styles.prescriptionSection}>
-                        <Text style={styles.prescriptionLabel}>PRESCRIPTION</Text>
+                        <Text style={styles.prescriptionLabel}>INSIGHT</Text>
                         <Text style={styles.prescriptionText}>{rx.prescription}</Text>
                       </View>
 
                       {/* Expected Impact */}
                       <View style={styles.prescriptionSection}>
                         <Text style={styles.prescriptionLabel}>EXPECTED IMPACT</Text>
-                        <Text style={[styles.prescriptionText, { color: '#10B981' }]}>
+                        <Text style={[styles.prescriptionText, { color: '#00C9A7' }]}>
                           {rx.impact}
                         </Text>
                       </View>
@@ -406,7 +407,7 @@ export const AICoachScreen: React.FC = () => {
                         }}
                       >
                         <Ionicons name="checkmark-circle" size={16} color="#60A5FA" />
-                        <Text style={styles.applyTreatmentText}>Apply Treatment</Text>
+                        <Text style={styles.applyTreatmentText}>Learn More</Text>
                       </TouchableOpacity>
                     </View>
                   );
@@ -414,15 +415,17 @@ export const AICoachScreen: React.FC = () => {
               </View>
             ) : (
               <View style={styles.noPrescriptions}>
-                <Ionicons name="checkmark-circle" size={40} color="#10B981" />
+                <Ionicons name="checkmark-circle" size={40} color="#00C9A7" />
                 <Text style={styles.noPrescriptionsTitle}>All Clear!</Text>
                 <Text style={styles.noPrescriptionsSubtitle}>
                   {hasPortfolio
                     ? 'No active prescriptions right now. Your portfolio looks healthy!'
-                    : 'Add holdings to get AI-powered portfolio prescriptions.'}
+                    : 'Add holdings to get AI-powered portfolio insights.'}
                 </Text>
               </View>
             )}
+
+            <AIContentDisclaimer />
 
             <Text style={styles.aiDisclaimer}>
               For educational purposes only. Not investment advice.

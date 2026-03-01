@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import type { FullAnalysis, Signal } from '../types';
+import type { FullAnalysis, ScoreLabel } from '../types';
+import { getScoreLabel } from '../utils/scoreColors';
 
 /** Lightweight signal summary — the minimum data every component needs. */
 export interface SignalSummary {
   ticker: string;
   score: number;
-  signal: Signal;
+  scoreLabel: ScoreLabel;
 }
 
 /** Cached enrichment data for FeedCard — persists across unmounts/remounts. */
@@ -39,7 +40,7 @@ export interface EnrichmentData {
 
 interface SignalStore {
   analyses: Record<string, FullAnalysis>;  // keyed by ticker
-  /** Lightweight score/signal cache populated by any API response. */
+  /** Lightweight score/scoreLabel cache populated by any API response. */
   signals: Record<string, SignalSummary>;
   /** FeedCard enrichment cache — keyed by ticker, survives component unmounts. */
   enrichmentCache: Record<string, EnrichmentData>;
@@ -80,7 +81,7 @@ export const useSignalStore = create<SignalStore>((set, get) => ({
     set((state) => {
       const updated = { ...state.signals };
       for (const item of items ?? []) {
-        if (item?.ticker && item.score != null && item.signal) {
+        if (item?.ticker && item.score != null && item.scoreLabel) {
           updated[item.ticker] = item;
         }
       }

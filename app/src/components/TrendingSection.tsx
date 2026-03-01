@@ -15,22 +15,19 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getTrending } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
-import type { TrendingItem, RootStackParamList, Signal } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { TrendingItem, RootStackParamList, ScoreLabel } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 40;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
-
-const SIGNAL_ICONS: Record<Signal, string> = {
-  BUY: 'arrow-up-circle',
-  HOLD: 'pause-circle',
-  SELL: 'arrow-down-circle',
+const SCORE_LABEL_ICONS: Record<ScoreLabel, string> = {
+  Strong: 'arrow-up-circle',
+  Favorable: 'arrow-up-circle',
+  Neutral: 'pause-circle',
+  Weak: 'arrow-down-circle',
+  Caution: 'arrow-down-circle',
 };
 
 function formatMarketCap(cap: string): string {
@@ -173,7 +170,7 @@ export const TrendingSection: React.FC = () => {
   const item = items[currentIndex];
   const nextItem = currentIndex + 1 < items.length ? items[currentIndex + 1] : null;
   const inWatchlist = isInAnyWatchlist(item.ticker);
-  const signalColor = SIGNAL_COLORS[item.signal];
+  const signalColor = getScoreColor(item.score);
   const rangePercent = format52WRange(item.weekLow52, item.weekHigh52, item.price);
   const rangeFraction = rangePercent / 100;
 
@@ -243,11 +240,11 @@ export const TrendingSection: React.FC = () => {
             >
               {/* Swipe overlays */}
               <Animated.View style={[styles.swipeOverlay, styles.swipeRight, { opacity: rightOpacity }]}>
-                <Ionicons name="bookmark" size={28} color="#10B981" />
+                <Ionicons name="bookmark" size={28} color="#00C9A7" />
                 <Text style={styles.swipeLabelRight}>Added to Watchlist</Text>
               </Animated.View>
               <Animated.View style={[styles.swipeOverlay, styles.swipeLeft, { opacity: leftOpacity }]}>
-                <Ionicons name="close" size={28} color="#EF4444" />
+                <Ionicons name="close" size={28} color="#F5A623" />
                 <Text style={styles.swipeLabelLeft}>Skip</Text>
               </Animated.View>
               <Animated.View style={[styles.swipeOverlay, styles.swipeUp, { opacity: upOpacity }]}>
@@ -273,9 +270,9 @@ export const TrendingSection: React.FC = () => {
                 <View style={styles.cardTopRight}>
                   <Text style={styles.cardScoreNum}>{(item.score ?? 0).toFixed(1)}</Text>
                   <View style={[styles.signalPill, { backgroundColor: signalColor + '20' }]}>
-                    <Ionicons name={SIGNAL_ICONS[item.signal] as any} size={12} color={signalColor} />
+                    <Ionicons name={SCORE_LABEL_ICONS[getScoreLabel(item.score)] as any} size={12} color={signalColor} />
                     <Text style={[styles.signalText, { color: signalColor }]}>
-                      {item.signal}
+                      {getScoreLabel(item.score)}
                     </Text>
                   </View>
                 </View>
@@ -302,7 +299,7 @@ export const TrendingSection: React.FC = () => {
                 </View>
                 <View style={styles.statBox}>
                   <Text style={styles.statLabel}>Change</Text>
-                  <Text style={[styles.statValueLarge, { color: (item.changePercent ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+                  <Text style={[styles.statValueLarge, { color: (item.changePercent ?? 0) >= 0 ? '#00C9A7' : '#F5A623' }]}>
                     {(item.changePercent ?? 0) >= 0 ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
                   </Text>
                 </View>
@@ -350,11 +347,11 @@ export const TrendingSection: React.FC = () => {
                   {item.topFactors.map((f) => (
                     <View key={f.name} style={[
                       styles.factorPill,
-                      { backgroundColor: (f.score ?? 0) >= 0 ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)' },
+                      { backgroundColor: (f.score ?? 0) >= 0 ? 'rgba(0,201,167,0.12)' : 'rgba(245,166,35,0.12)' },
                     ]}>
                       <Text style={[
                         styles.factorText,
-                        { color: (f.score ?? 0) >= 0 ? '#10B981' : '#EF4444' },
+                        { color: (f.score ?? 0) >= 0 ? '#00C9A7' : '#F5A623' },
                       ]}>
                         {f.name} {(f.score ?? 0) >= 0 ? '+' : ''}{(f.score ?? 0).toFixed(1)}
                       </Text>
@@ -377,7 +374,7 @@ export const TrendingSection: React.FC = () => {
       {/* Action buttons */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionBtn} onPress={() => swipeCard('left')}>
-          <Ionicons name="close" size={24} color="#EF4444" />
+          <Ionicons name="close" size={24} color="#F5A623" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionBtnInfo}
@@ -451,8 +448,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 2,
   },
-  swipeRight: { right: 16, borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)' },
-  swipeLeft: { left: 16, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)' },
+  swipeRight: { right: 16, borderColor: '#00C9A7', backgroundColor: 'rgba(0,201,167,0.1)' },
+  swipeLeft: { left: 16, borderColor: '#F5A623', backgroundColor: 'rgba(245,166,35,0.1)' },
   swipeUp: {
     top: undefined,
     bottom: 16,
@@ -463,8 +460,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(96,165,250,0.1)',
   },
   swipeLabelUp: { color: '#60A5FA', fontSize: 14, fontWeight: '800' },
-  swipeLabelRight: { color: '#10B981', fontSize: 14, fontWeight: '800' },
-  swipeLabelLeft: { color: '#EF4444', fontSize: 14, fontWeight: '800' },
+  swipeLabelRight: { color: '#00C9A7', fontSize: 14, fontWeight: '800' },
+  swipeLabelLeft: { color: '#F5A623', fontSize: 14, fontWeight: '800' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardTopLeft: { flex: 1 },
   cardTopRight: { alignItems: 'flex-end' },
@@ -626,11 +623,11 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: 'rgba(239,68,68,0.2)',
+    backgroundColor: 'rgba(245,166,35,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
+    borderColor: 'rgba(245,166,35,0.3)',
   },
   actionBtnInfo: {
     width: 44,
@@ -643,7 +640,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(96,165,250,0.25)',
   },
   actionPrimary: {
-    backgroundColor: 'rgba(74,222,128,0.2)',
-    borderColor: 'rgba(74,222,128,0.3)',
+    backgroundColor: 'rgba(0,201,167,0.2)',
+    borderColor: 'rgba(0,201,167,0.3)',
   },
 });

@@ -9,7 +9,8 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { RebalanceMove } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { RebalanceMove, ScoreLabel } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -61,7 +62,7 @@ export const RebalancingMoves: React.FC<Props> = ({
                 <Ionicons
                   name={move.direction === 'increase' ? 'arrow-up' : 'arrow-down'}
                   size={16}
-                  color={move.direction === 'increase' ? '#10B981' : '#EF4444'}
+                  color={move.direction === 'increase' ? '#00C9A7' : '#F5A623'}
                 />
               </View>
               <View style={styles.tickerInfo}>
@@ -75,16 +76,11 @@ export const RebalancingMoves: React.FC<Props> = ({
                   style={[
                     styles.signalText,
                     {
-                      color:
-                        move.signal === 'BUY'
-                          ? '#10B981'
-                          : move.signal === 'SELL'
-                          ? '#EF4444'
-                          : '#FBBF24',
+                      color: getScoreColor(move.score),
                     },
                   ]}
                 >
-                  {move.signal}
+                  {move.scoreLabel}
                 </Text>
               </View>
             </View>
@@ -109,7 +105,7 @@ export const RebalancingMoves: React.FC<Props> = ({
                     styles.weightValue,
                     {
                       color:
-                        move.direction === 'increase' ? '#10B981' : '#EF4444',
+                        move.direction === 'increase' ? '#00C9A7' : '#F5A623',
                     },
                   ]}
                 >
@@ -208,10 +204,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   directionIncrease: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
   },
   directionDecrease: {
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    backgroundColor: 'rgba(245,166,35,0.15)',
   },
   tickerInfo: {
     flex: 1,
@@ -283,7 +279,7 @@ const styles = StyleSheet.create({
   applyAllButton: {
     marginHorizontal: 16,
     marginTop: 16,
-    backgroundColor: '#10B981',
+    backgroundColor: '#4A90D9',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import Svg, { Polygon, Line, Circle, G } from 'react-native-svg';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { ScoreLabel } from '../types';
 
 /**
  * 5-axis radar/spider chart for dimension scores.
@@ -20,7 +22,7 @@ export interface DimensionScores {
 interface RadarScoreProps {
   scores: DimensionScores;
   size?: number;
-  signal?: 'BUY' | 'HOLD' | 'SELL';
+  scoreLabel?: ScoreLabel;
   onAxisPress?: (dimension: string) => void;
   mini?: boolean;
 }
@@ -38,10 +40,12 @@ const AXES_6 = [
   { key: 'altData', label: 'Alt\nData', short: 'AD' },
 ];
 
-const SIGNAL_COLORS: Record<string, { fill: string; stroke: string }> = {
-  BUY: { fill: 'rgba(16, 185, 129, 0.25)', stroke: '#10B981' },
-  HOLD: { fill: 'rgba(245, 158, 11, 0.25)', stroke: '#F59E0B' },
-  SELL: { fill: 'rgba(239, 68, 68, 0.25)', stroke: '#EF4444' },
+const SCORE_LABEL_COLORS: Record<ScoreLabel, { fill: string; stroke: string }> = {
+  Strong:    { fill: 'rgba(0, 201, 167, 0.25)', stroke: '#00C9A7' },
+  Favorable: { fill: 'rgba(74, 144, 217, 0.25)', stroke: '#4A90D9' },
+  Neutral:   { fill: 'rgba(142, 142, 147, 0.25)', stroke: '#8E8E93' },
+  Weak:      { fill: 'rgba(245, 166, 35, 0.25)', stroke: '#F5A623' },
+  Caution:   { fill: 'rgba(88, 86, 214, 0.25)', stroke: '#5856D6' },
 };
 
 const safeNum = (v: unknown): number => {
@@ -67,7 +71,7 @@ const getPolygonPoint = (
 export const RadarScore: React.FC<RadarScoreProps> = ({
   scores,
   size = 200,
-  signal = 'HOLD',
+  scoreLabel = 'Neutral',
   onAxisPress,
   mini = false,
 }) => {
@@ -84,7 +88,7 @@ export const RadarScore: React.FC<RadarScoreProps> = ({
 
   const center = size / 2;
   const radius = mini ? center * 0.85 : center * 0.65;
-  const colors = SIGNAL_COLORS[signal] || SIGNAL_COLORS.HOLD;
+  const colors = SCORE_LABEL_COLORS[scoreLabel] || SCORE_LABEL_COLORS.Neutral;
 
   // Dynamically choose 5 or 6 axes based on altData availability
   const hasAltData = scores.altData != null && scores.altData > 0;

@@ -18,17 +18,17 @@ interface Props {
 }
 
 const GRADE_COLORS: Record<string, string> = {
-  'A+': '#10B981',
-  A: '#10B981',
-  'A-': '#34D399',
-  'B+': '#34D399',
-  B: '#FBBF24',
-  'B-': '#FBBF24',
-  'C+': '#F59E0B',
-  C: '#F59E0B',
-  'C-': '#F97316',
-  D: '#EF4444',
-  F: '#EF4444',
+  'A+': '#00C9A7',
+  A: '#00C9A7',
+  'A-': '#4A90D9',
+  'B+': '#4A90D9',
+  B: '#8E8E93',
+  'B-': '#8E8E93',
+  'C+': '#F5A623',
+  C: '#F5A623',
+  'C-': '#F5A623',
+  D: '#5856D6',
+  F: '#5856D6',
 };
 
 export const StrategyDashboard: React.FC<Props> = ({

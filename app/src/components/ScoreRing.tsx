@@ -1,17 +1,12 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { getScoreColor } from '../utils/scoreColors';
 
 interface ScoreRingProps {
   score: number; // 1–10
   size?: number;
 }
-
-const getScoreColor = (score: number): string => {
-  if (score <= 3) return '#EF4444';  // red
-  if (score <= 6) return '#F59E0B';  // amber
-  return '#10B981';                  // green
-};
 
 export const ScoreRing: React.FC<ScoreRingProps> = React.memo(({ score: rawScore, size = 120 }) => {
   const score = typeof rawScore === 'number' && !Number.isNaN(rawScore) ? rawScore : 0;

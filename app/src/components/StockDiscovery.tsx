@@ -15,17 +15,12 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getDiscoveryCards } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
-import type { DiscoveryCard, RootStackParamList, Signal } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { DiscoveryCard, RootStackParamList, ScoreLabel } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 40;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
-
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
 
 interface StockDiscoveryProps {
   onBookmark?: (ticker: string, companyName: string) => void;
@@ -194,12 +189,12 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
             >
               {/* Swipe overlays */}
               <Animated.View style={[styles.swipeOverlay, styles.swipeRight, { opacity: rightOpacity }]}>
-                <Ionicons name="bookmark" size={28} color="#10B981" />
+                <Ionicons name="bookmark" size={28} color="#00C9A7" />
                 <Text style={styles.swipeLabel}>WATCHLIST</Text>
               </Animated.View>
               <Animated.View style={[styles.swipeOverlay, styles.swipeLeft, { opacity: leftOpacity }]}>
-                <Ionicons name="close" size={28} color="#EF4444" />
-                <Text style={[styles.swipeLabel, { color: '#EF4444' }]}>SKIP</Text>
+                <Ionicons name="close" size={28} color="#F5A623" />
+                <Text style={[styles.swipeLabel, { color: '#F5A623' }]}>SKIP</Text>
               </Animated.View>
 
               {/* Card content */}
@@ -211,9 +206,9 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
                 </View>
                 <View style={styles.cardScoreWrap}>
                   <Text style={styles.cardScoreNum}>{(card.score ?? 0).toFixed(1)}</Text>
-                  <View style={[styles.signalPill, { backgroundColor: SIGNAL_COLORS[card.signal] + '20' }]}>
-                    <Text style={[styles.signalText, { color: SIGNAL_COLORS[card.signal] }]}>
-                      {card.signal}
+                  <View style={[styles.signalPill, { backgroundColor: getScoreColor(card.score) + '20' }]}>
+                    <Text style={[styles.signalText, { color: getScoreColor(card.score) }]}>
+                      {card.scoreLabel}
                     </Text>
                   </View>
                 </View>
@@ -228,7 +223,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
                 </View>
                 <View style={styles.stat}>
                   <Text style={styles.statLabel}>Change</Text>
-                  <Text style={[styles.statValue, { color: card.changePercent >= 0 ? '#10B981' : '#EF4444' }]}>
+                  <Text style={[styles.statValue, { color: card.changePercent >= 0 ? '#00C9A7' : '#F5A623' }]}>
                     {(card.changePercent ?? 0) >= 0 ? '+' : ''}{(card.changePercent ?? 0).toFixed(1)}%
                   </Text>
                 </View>
@@ -260,7 +255,7 @@ export const StockDiscovery: React.FC<StockDiscoveryProps> = ({ onBookmark }) =>
       {/* Action buttons */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.actionBtn} onPress={() => swipeCard('left')}>
-          <Ionicons name="close" size={24} color="#EF4444" />
+          <Ionicons name="close" size={24} color="#F5A623" />
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, styles.actionPrimary]}
@@ -318,9 +313,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 2,
   },
-  swipeRight: { right: 16, borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)' },
-  swipeLeft: { left: 16, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)' },
-  swipeLabel: { color: '#10B981', fontSize: 14, fontWeight: '800' },
+  swipeRight: { right: 16, borderColor: '#00C9A7', backgroundColor: 'rgba(0,201,167,0.1)' },
+  swipeLeft: { left: 16, borderColor: '#F5A623', backgroundColor: 'rgba(245,166,35,0.1)' },
+  swipeLabel: { color: '#00C9A7', fontSize: 14, fontWeight: '800' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardTicker: { color: '#FFF', fontSize: 32, fontWeight: '800', letterSpacing: 1 },
   cardCompany: { color: 'rgba(255,255,255,0.7)', fontSize: 16, marginTop: 2 },
@@ -360,11 +355,11 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: 'rgba(239,68,68,0.2)',
+    backgroundColor: 'rgba(245,166,35,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
+    borderColor: 'rgba(245,166,35,0.3)',
   },
-  actionPrimary: { backgroundColor: 'rgba(74,222,128,0.2)', borderColor: 'rgba(74,222,128,0.3)' },
+  actionPrimary: { backgroundColor: 'rgba(0,201,167,0.2)', borderColor: 'rgba(0,201,167,0.3)' },
 });

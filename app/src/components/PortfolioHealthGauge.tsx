@@ -17,11 +17,11 @@ const RADIUS = (GAUGE_SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 const GRADE_COLORS: Record<string, string> = {
-  A: '#10B981',
+  A: '#00C9A7',
   B: '#34D399',
   C: '#F59E0B',
   D: '#F97316',
-  F: '#EF4444',
+  F: '#F5A623',
 };
 
 interface PortfolioHealthGaugeProps {
@@ -100,7 +100,7 @@ export const PortfolioHealthGauge: React.FC<PortfolioHealthGaugeProps> = ({ hasH
               styles.subBarFill,
               {
                 width: `${barWidth}%`,
-                backgroundColor: barWidth >= 70 ? '#10B981' : barWidth >= 45 ? '#F59E0B' : '#EF4444',
+                backgroundColor: barWidth >= 70 ? '#00C9A7' : barWidth >= 45 ? '#F59E0B' : '#F5A623',
               },
             ]}
           />

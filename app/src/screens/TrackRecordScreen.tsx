@@ -25,16 +25,20 @@ import type {
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const SIGNAL_COLORS: Record<string, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
+const SCORE_LABEL_COLORS: Record<string, string> = {
+  Strong: '#00C9A7',
+  Favorable: '#4A90D9',
+  Neutral: '#8E8E93',
+  Weak: '#F5A623',
+  Caution: '#5856D6',
 };
 
-const SIGNAL_LABELS: Record<string, string> = {
-  BUY: 'Buy',
-  HOLD: 'Hold',
-  SELL: 'Sell',
+const SCORE_LABEL_NAMES: Record<string, string> = {
+  Strong: 'Strong',
+  Favorable: 'Favorable',
+  Neutral: 'Neutral',
+  Weak: 'Weak',
+  Caution: 'Caution',
 };
 
 const SCORE_BAND_LABELS: Record<string, string> = {
@@ -45,10 +49,10 @@ const SCORE_BAND_LABELS: Record<string, string> = {
 };
 
 const SCORE_BAND_COLORS: Record<string, string> = {
-  '1-3': '#EF4444',
-  '3-5': '#F59E0B',
-  '5-7': '#60A5FA',
-  '7-10': '#10B981',
+  '1-3': '#5856D6',
+  '3-5': '#F5A623',
+  '5-7': '#4A90D9',
+  '7-10': '#00C9A7',
 };
 
 export const TrackRecordScreen: React.FC = () => {
@@ -132,7 +136,7 @@ export const TrackRecordScreen: React.FC = () => {
   // ─── Helpers ───
   const hitRate = (data?.overallHitRate ?? 0);
   const hitRateColor =
-    hitRate >= 60 ? '#10B981' : hitRate >= 45 ? '#F59E0B' : '#EF4444';
+    hitRate >= 60 ? '#00C9A7' : hitRate >= 45 ? '#F5A623' : '#5856D6';
 
   const signalKeys = Object.keys(data?.signalPerformance ?? {});
   const scoreBandKeys = Object.keys(data?.scoreBands ?? {});
@@ -165,22 +169,22 @@ export const TrackRecordScreen: React.FC = () => {
                 </Text>
               </View>
               <Text style={styles.gaugeLabel}>
-                of Buy signals profitable at 3 months
+                of high scores (7+) profitable at 3 months
               </Text>
               <Text style={styles.gaugeSub}>
-                Based on {data?.totalSignals ?? 0} total signals
+                Based on {data?.totalSignals ?? 0} total scores
               </Text>
             </View>
           </View>
 
-          {/* ── Section 2: Signal Performance Bars ── */}
+          {/* ── Section 2: Score Performance Bars ── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Signal Performance</Text>
+            <Text style={styles.sectionTitle}>Score Performance</Text>
             <View style={styles.card}>
               {signalKeys.map((key) => {
                 const perf = data!.signalPerformance[key];
                 if (!perf) return null;
-                const color = SIGNAL_COLORS[key] ?? '#60A5FA';
+                const color = SCORE_LABEL_COLORS[key] ?? '#60A5FA';
                 const barWidth = Math.max(
                   Math.min(Math.abs((perf.hitRate ?? 0)), 100),
                   4
@@ -190,10 +194,10 @@ export const TrackRecordScreen: React.FC = () => {
                     <View style={styles.signalLabelRow}>
                       <View style={[styles.signalDot, { backgroundColor: color }]} />
                       <Text style={[styles.signalLabel, { color }]}>
-                        {SIGNAL_LABELS[key] ?? key}
+                        {SCORE_LABEL_NAMES[key] ?? key}
                       </Text>
                       <Text style={styles.signalCount}>
-                        {perf.count ?? 0} signals
+                        {perf.count ?? 0} scores
                       </Text>
                     </View>
                     <View style={styles.barTrack}>
@@ -210,7 +214,7 @@ export const TrackRecordScreen: React.FC = () => {
                         <Text
                           style={{
                             color:
-                              (perf.avgReturn3M ?? 0) >= 0 ? '#10B981' : '#EF4444',
+                              (perf.avgReturn3M ?? 0) >= 0 ? '#00C9A7' : '#F5A623',
                             fontWeight: '700',
                           }}
                         >
@@ -248,7 +252,7 @@ export const TrackRecordScreen: React.FC = () => {
                     <Text
                       style={[
                         styles.bandReturn,
-                        { color: avgReturn >= 0 ? '#10B981' : '#EF4444' },
+                        { color: avgReturn >= 0 ? '#00C9A7' : '#F5A623' },
                       ]}
                     >
                       {avgReturn >= 0 ? '+' : ''}
@@ -256,7 +260,7 @@ export const TrackRecordScreen: React.FC = () => {
                     </Text>
                     <Text style={styles.bandReturnLabel}>avg 3M return</Text>
                     <Text style={styles.bandCount}>
-                      {band.count ?? 0} signals
+                      {band.count ?? 0} scores
                     </Text>
                   </View>
                 );
@@ -271,7 +275,7 @@ export const TrackRecordScreen: React.FC = () => {
               {/* Table header */}
               <View style={styles.tableHeader}>
                 <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>Ticker</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Signals</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Scores</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Hit Rate</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>Avg 3M</Text>
               </View>
@@ -279,7 +283,7 @@ export const TrackRecordScreen: React.FC = () => {
               {/* Table rows */}
               {tickers.map((item: TickerPerformance) => {
                 const returnColor =
-                  (item.avgReturn3M ?? 0) >= 0 ? '#10B981' : '#EF4444';
+                  (item.avgReturn3M ?? 0) >= 0 ? '#00C9A7' : '#F5A623';
                 return (
                   <TouchableOpacity
                     key={item.ticker}
@@ -375,9 +379,9 @@ export const TrackRecordScreen: React.FC = () => {
                     </Text>
                   </View>
 
-                  {/* Signal Thresholds */}
+                  {/* Score Thresholds */}
                   <View style={styles.methodRow}>
-                    <Text style={styles.methodLabel}>Signal Thresholds</Text>
+                    <Text style={styles.methodLabel}>Score Thresholds</Text>
                     <View style={styles.thresholds}>
                       {Object.entries(methodology.signalThresholds ?? {}).map(
                         ([signal, threshold]) => (
@@ -387,7 +391,7 @@ export const TrackRecordScreen: React.FC = () => {
                                 styles.thresholdDot,
                                 {
                                   backgroundColor:
-                                    SIGNAL_COLORS[signal] ?? '#60A5FA',
+                                    SCORE_LABEL_COLORS[signal] ?? '#60A5FA',
                                 },
                               ]}
                             />

@@ -19,8 +19,8 @@ import { ErrorState } from '../components/ErrorState';
 import type { BacktestResult, BacktestStats, PortfolioBacktest } from '../types';
 
 const STATUS_COLORS: Record<string, string> = {
-  correct: '#10B981',
-  incorrect: '#EF4444',
+  correct: '#00C9A7',
+  incorrect: '#F5A623',
   borderline: '#F59E0B',
 };
 
@@ -45,7 +45,7 @@ const AccuracyGauge: React.FC<AccuracyGaugeProps> = ({ value, size = 140, label 
   const center = size / 2;
 
   const color =
-    safeValue >= 65 ? '#10B981' : safeValue >= 50 ? '#F59E0B' : '#EF4444';
+    safeValue >= 65 ? '#00C9A7' : safeValue >= 50 ? '#F59E0B' : '#F5A623';
 
   return (
     <View style={{ alignItems: 'center' }}>
@@ -94,12 +94,12 @@ const safePct = (v: unknown): string => {
 
 const getBenchmarkContext = (hitRate: number) => {
   if (hitRate >= 50) {
-    return { text: 'FII outperforms random selection', color: '#10B981' };
+    return { text: 'FII outperforms random selection', color: '#00C9A7' };
   }
   if (hitRate >= 40) {
     return { text: 'FII performing near baseline \u2014 more data needed', color: '#F59E0B' };
   }
-  return { text: 'Limited data \u2014 accuracy improves with more signals', color: '#EF4444' };
+  return { text: 'Limited data \u2014 accuracy improves with more signals', color: '#F5A623' };
 };
 
 export const BacktestScreen: React.FC = () => {
@@ -131,18 +131,18 @@ export const BacktestScreen: React.FC = () => {
   }, [loadBacktest]);
 
   const getRowBg = (status: string) => {
-    if (status === 'correct') return 'rgba(16,185,129,0.08)';
-    if (status === 'incorrect') return 'rgba(239,68,68,0.08)';
+    if (status === 'correct') return 'rgba(0,201,167,0.08)';
+    if (status === 'incorrect') return 'rgba(245,166,35,0.08)';
     return 'rgba(245,158,11,0.08)';
   };
 
   const getSignalStrengthColor = (strength: string) => {
-    if (strength === 'Strong Buy') return '#10B981';
-    if (strength === 'Buy') return '#34D399';
-    if (strength === 'Hold') return '#F59E0B';
-    if (strength === 'Weak Hold') return '#FBBF24';
-    if (strength === 'Sell') return '#F87171';
-    return '#EF4444'; // Strong Sell
+    if (strength === 'Strong' || strength === 'Strong Buy') return '#00C9A7';
+    if (strength === 'Favorable' || strength === 'Buy') return '#4A90D9';
+    if (strength === 'Neutral' || strength === 'Hold') return '#8E8E93';
+    if (strength === 'Weak' || strength === 'Weak Hold') return '#F5A623';
+    if (strength === 'Caution' || strength === 'Sell') return '#5856D6';
+    return '#5856D6'; // default
   };
 
   return (
@@ -152,7 +152,7 @@ export const BacktestScreen: React.FC = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Signal Backtester</Text>
+        <Text style={styles.headerTitle}>Score Backtester</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -165,9 +165,9 @@ export const BacktestScreen: React.FC = () => {
             <Skeleton width="100%" height={80} borderRadius={12} />
             <Skeleton width="100%" height={80} borderRadius={12} />
           </View>
-          <Text style={styles.loadingText}>Backtesting signals...</Text>
+          <Text style={styles.loadingText}>Backtesting scores...</Text>
           <Text style={styles.loadingSubtext}>
-            Comparing FII signals against actual stock performance
+            Comparing FII scores against actual stock performance
           </Text>
         </View>
       ) : error ? (
@@ -180,18 +180,18 @@ export const BacktestScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Section 1: How Accurate Are FII Signals? */}
+          {/* Section 1: How Accurate Are FII Scores? */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>How Accurate Are FII Signals?</Text>
+            <Text style={styles.sectionTitle}>How Accurate Are FII Scores?</Text>
             <View style={styles.summaryCard}>
               <Text style={styles.summaryText}>
-                We tested FII&apos;s signals against actual stock performance over the past 12 months
+                We tested FII&apos;s scores against actual stock performance over the past 12 months
               </Text>
             </View>
 
             {stats && (
               <>
-                <AccuracyGauge value={safeNum(stats.hitRate)} label="Signal Accuracy" />
+                <AccuracyGauge value={safeNum(stats.hitRate)} label="Score Accuracy" />
 
                 {/* Benchmark context */}
                 <View style={styles.benchmarkContainer}>
@@ -215,22 +215,22 @@ export const BacktestScreen: React.FC = () => {
 
                 <View style={styles.breakdownContainer}>
                   <View style={styles.breakdownRow}>
-                    <View style={[styles.breakdownDot, { backgroundColor: '#10B981' }]} />
-                    <Text style={styles.breakdownLabel}>BUY signals:</Text>
+                    <View style={[styles.breakdownDot, { backgroundColor: '#00C9A7' }]} />
+                    <Text style={styles.breakdownLabel}>High scores (7+):</Text>
                     <Text style={styles.breakdownValue}>
                       {safeNum(stats.buyAccuracy).toFixed(0)}% resulted in positive returns over 3 months
                     </Text>
                   </View>
                   <View style={styles.breakdownRow}>
-                    <View style={[styles.breakdownDot, { backgroundColor: '#F59E0B' }]} />
-                    <Text style={styles.breakdownLabel}>HOLD signals:</Text>
+                    <View style={[styles.breakdownDot, { backgroundColor: '#8E8E93' }]} />
+                    <Text style={styles.breakdownLabel}>Mid scores (4-6):</Text>
                     <Text style={styles.breakdownValue}>
                       {safeNum(stats.holdAccuracy).toFixed(0)}% stayed within expected range over 3 months
                     </Text>
                   </View>
                   <View style={styles.breakdownRow}>
-                    <View style={[styles.breakdownDot, { backgroundColor: '#EF4444' }]} />
-                    <Text style={styles.breakdownLabel}>SELL signals:</Text>
+                    <View style={[styles.breakdownDot, { backgroundColor: '#5856D6' }]} />
+                    <Text style={styles.breakdownLabel}>Low scores (1-3):</Text>
                     <Text style={styles.breakdownValue}>
                       {safeNum(stats.sellAccuracy).toFixed(0)}% avoided significant rallies over 3 months
                     </Text>
@@ -240,9 +240,9 @@ export const BacktestScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Section 2: Signal Track Record */}
+          {/* Section 2: Score Track Record */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Signal Track Record</Text>
+            <Text style={styles.sectionTitle}>Score Track Record</Text>
 
             {/* Table header */}
             <View style={styles.tableHeader}>
@@ -282,7 +282,7 @@ export const BacktestScreen: React.FC = () => {
                       styles.tableCell,
                       {
                         flex: 1,
-                        color: safeNum(r.actualReturn) >= 0 ? '#10B981' : '#EF4444',
+                        color: safeNum(r.actualReturn) >= 0 ? '#00C9A7' : '#F5A623',
                         fontWeight: '600',
                       },
                     ]}
@@ -311,25 +311,25 @@ export const BacktestScreen: React.FC = () => {
                 <View style={styles.simulatedBadge}>
                   <Ionicons name="flask" size={12} color="#F59E0B" />
                   <Text style={styles.simulatedText}>
-                    Estimated based on signal dates
+                    Estimated based on score dates
                   </Text>
                 </View>
               )}
 
               <View style={styles.portfolioBacktestCard}>
                 <Text style={styles.portfolioBacktestLabel}>
-                  If you followed FII signals for your portfolio:
+                  If you followed FII scores for your portfolio:
                 </Text>
 
                 <View style={styles.comparisonRow}>
                   <View style={styles.comparisonBlock}>
-                    <Text style={styles.comparisonLabel}>FII Signals Return</Text>
+                    <Text style={styles.comparisonLabel}>FII Scores Return</Text>
                     <Text
                       style={[
                         styles.comparisonValue,
                         {
                           color:
-                            safeNum(portfolioBacktest.estimatedReturn) >= 0 ? '#10B981' : '#EF4444',
+                            safeNum(portfolioBacktest.estimatedReturn) >= 0 ? '#00C9A7' : '#F5A623',
                         },
                       ]}
                     >
@@ -346,7 +346,7 @@ export const BacktestScreen: React.FC = () => {
                         styles.comparisonValue,
                         {
                           color:
-                            safeNum(portfolioBacktest.sp500Return) >= 0 ? '#10B981' : '#EF4444',
+                            safeNum(portfolioBacktest.sp500Return) >= 0 ? '#00C9A7' : '#F5A623',
                         },
                       ]}
                     >
@@ -361,8 +361,8 @@ export const BacktestScreen: React.FC = () => {
                     {
                       backgroundColor:
                         safeNum(portfolioBacktest.fiiAdvantage) >= 0
-                          ? 'rgba(16,185,129,0.15)'
-                          : 'rgba(239,68,68,0.15)',
+                          ? 'rgba(0,201,167,0.15)'
+                          : 'rgba(245,166,35,0.15)',
                     },
                   ]}
                 >
@@ -371,19 +371,19 @@ export const BacktestScreen: React.FC = () => {
                       styles.advantageText,
                       {
                         color:
-                          safeNum(portfolioBacktest.fiiAdvantage) >= 0 ? '#10B981' : '#EF4444',
+                          safeNum(portfolioBacktest.fiiAdvantage) >= 0 ? '#00C9A7' : '#F5A623',
                       },
                     ]}
                   >
                     {safeNum(portfolioBacktest.fiiAdvantage) >= 0
                       ? `FII advantage: ${safePct(portfolioBacktest.fiiAdvantage)}`
-                      : `FII signals underperformed S&P 500 by ${Math.abs(safeNum(portfolioBacktest.fiiAdvantage)).toFixed(1)}%`}
+                      : `FII scores underperformed S&P 500 by ${Math.abs(safeNum(portfolioBacktest.fiiAdvantage)).toFixed(1)}%`}
                   </Text>
                 </View>
 
                 {safeNum(portfolioBacktest.fiiAdvantage) < 0 && (
                   <Text style={styles.disadvantageNote}>
-                    Note: This is a simulated backtest over a single 3-month period. Signal accuracy
+                    Note: This is a simulated backtest over a single 3-month period. Score accuracy
                     improves with longer time horizons and more data points.
                   </Text>
                 )}
@@ -402,7 +402,7 @@ export const BacktestScreen: React.FC = () => {
                 <View style={styles.improvingContent}>
                   <Text style={styles.improvingTitle}>Multi-source analysis</Text>
                   <Text style={styles.improvingDesc}>
-                    FII signals are generated from SEC filings, Federal Reserve data, and AI analysis
+                    FII scores are generated from SEC filings, Federal Reserve data, and AI analysis
                   </Text>
                 </View>
               </View>
@@ -414,7 +414,7 @@ export const BacktestScreen: React.FC = () => {
                 <View style={styles.improvingContent}>
                   <Text style={styles.improvingTitle}>Continuous calibration</Text>
                   <Text style={styles.improvingDesc}>
-                    Signal accuracy improves as we add more data sources, calibrate factor weights,
+                    Score accuracy improves as we add more data sources, calibrate factor weights,
                     and accumulate longer track records
                   </Text>
                 </View>
@@ -440,8 +440,8 @@ export const BacktestScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>Methodology</Text>
             <View style={styles.methodologyCard}>
               <Text style={styles.methodologyText}>
-                FII generates signals by analyzing 18 factors from SEC filings, Federal Reserve
-                data, and AI assessment. Signals are backtested against actual stock performance
+                FII generates scores by analyzing 18 factors from SEC filings, Federal Reserve
+                data, and AI assessment. Scores are backtested against actual stock performance
                 to measure accuracy.
               </Text>
               <Text style={[styles.methodologyText, { marginTop: 12 }]}>

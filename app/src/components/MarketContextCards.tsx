@@ -153,15 +153,15 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
           </Text>
           <View style={styles.miniStats}>
             <View style={styles.miniStat}>
-              <Text style={[styles.miniStatValue, { color: '#10B981' }]}>+0.3%</Text>
+              <Text style={[styles.miniStatValue, { color: '#00C9A7' }]}>+0.3%</Text>
               <Text style={styles.miniStatLabel}>S&P 500</Text>
             </View>
             <View style={styles.miniStat}>
-              <Text style={[styles.miniStatValue, { color: '#10B981' }]}>+0.8%</Text>
+              <Text style={[styles.miniStatValue, { color: '#00C9A7' }]}>+0.8%</Text>
               <Text style={styles.miniStatLabel}>NASDAQ</Text>
             </View>
             <View style={styles.miniStat}>
-              <Text style={[styles.miniStatValue, { color: '#EF4444' }]}>-0.1%</Text>
+              <Text style={[styles.miniStatValue, { color: '#F5A623' }]}>-0.1%</Text>
               <Text style={styles.miniStatLabel}>DOW</Text>
             </View>
           </View>
@@ -175,10 +175,10 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
       element: (
         <View key="panic" style={styles.card}>
           <View style={styles.cardHeader}>
-            <View style={[styles.cardTag, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
-              <Text style={[styles.cardTagText, { color: '#EF4444' }]}>LESSON</Text>
+            <View style={[styles.cardTag, { backgroundColor: 'rgba(245,166,35,0.1)' }]}>
+              <Text style={[styles.cardTagText, { color: '#F5A623' }]}>LESSON</Text>
             </View>
-            <Ionicons name="warning" size={18} color="#EF4444" />
+            <Ionicons name="warning" size={18} color="#F5A623" />
             <Text style={styles.cardTitle}>The Panic Tax</Text>
           </View>
           <Text style={styles.cardBody}>
@@ -223,22 +223,22 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
               <Text style={[styles.cardTagText, { color: '#60A5FA' }]}>SPOTLIGHT</Text>
             </View>
             <Ionicons name="flashlight" size={18} color="#60A5FA" />
-            <Text style={styles.cardTitle}>FII Signal Spotlight</Text>
+            <Text style={styles.cardTitle}>FII Score Spotlight</Text>
           </View>
           <Text style={styles.cardBody}>
-            Why did NVDA get a BUY signal this week?
+            Why did NVDA score "Strong" this week?
           </Text>
           <View style={styles.spotlightDetails}>
             <View style={styles.spotlightRow}>
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
               <Text style={styles.spotlightText}>Strong supply chain resilience (8.2/10)</Text>
             </View>
             <View style={styles.spotlightRow}>
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
               <Text style={styles.spotlightText}>Technical momentum above 50-day SMA</Text>
             </View>
             <View style={styles.spotlightRow}>
-              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
               <Text style={styles.spotlightText}>Earnings beat 4 consecutive quarters</Text>
             </View>
             <View style={styles.spotlightRow}>
@@ -246,7 +246,7 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
               <Text style={styles.spotlightText}>High valuation (P/E: 65x) — use caution</Text>
             </View>
           </View>
-          {renderCardActions('spotlight', 'FII Signal Spotlight: NVDA', 'NVDA got a BUY signal due to strong supply chain resilience and technical momentum.')}
+          {renderCardActions('spotlight', 'FII Score Spotlight: NVDA', 'NVDA scored "Strong" due to supply chain resilience and technical momentum.')}
         </View>
       ),
     },
@@ -265,7 +265,7 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
           <View style={styles.mythContainer}>
             <View style={styles.mythSection}>
               <View style={styles.mythLabel}>
-                <Ionicons name="close" size={14} color="#EF4444" />
+                <Ionicons name="close" size={14} color="#F5A623" />
                 <Text style={styles.mythLabelText}>MYTH</Text>
               </View>
               <Text style={styles.mythText}>
@@ -275,8 +275,8 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
             <View style={styles.mythDivider} />
             <View style={styles.mythSection}>
               <View style={styles.mythLabel}>
-                <Ionicons name="checkmark" size={14} color="#10B981" />
-                <Text style={[styles.mythLabelText, { color: '#10B981' }]}>FACT</Text>
+                <Ionicons name="checkmark" size={14} color="#00C9A7" />
+                <Text style={[styles.mythLabelText, { color: '#00C9A7' }]}>FACT</Text>
               </View>
               <Text style={styles.mythText}>
                 Time IN the market beats timing the market. A $10K investment in S&P 500 in 2000 is worth ~$64K today — despite 3 major crashes.
@@ -336,10 +336,10 @@ export const MarketContextCards: React.FC<Props> = ({ onCardsRead }) => {
       element: (
         <View key="factor" style={styles.card}>
           <View style={styles.cardHeader}>
-            <View style={[styles.cardTag, { backgroundColor: 'rgba(16,185,129,0.1)' }]}>
-              <Text style={[styles.cardTagText, { color: '#10B981' }]}>LEARN</Text>
+            <View style={[styles.cardTag, { backgroundColor: 'rgba(0,201,167,0.1)' }]}>
+              <Text style={[styles.cardTagText, { color: '#00C9A7' }]}>LEARN</Text>
             </View>
-            <Ionicons name="layers" size={18} color="#10B981" />
+            <Ionicons name="layers" size={18} color="#00C9A7" />
             <Text style={styles.cardTitle}>Factor: Supply Chain</Text>
           </View>
           <Text style={styles.cardBody}>
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   mythLabelText: {
-    color: '#EF4444',
+    color: '#F5A623',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -604,14 +604,14 @@ const styles = StyleSheet.create({
   },
   // Factor deep dive
   factorExample: {
-    backgroundColor: 'rgba(16,185,129,0.06)',
+    backgroundColor: 'rgba(0,201,167,0.06)',
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.1)',
+    borderColor: 'rgba(0,201,167,0.1)',
   },
   factorExampleTitle: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 4,

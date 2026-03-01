@@ -47,9 +47,9 @@ export const TaxDoctor: React.FC<Props> = ({
   const handleFillPrescription = useCallback(
     (ticker: string) => {
       Alert.alert(
-        'Fill Prescription',
-        `Harvest tax losses from ${ticker}?\nThis would realize the loss for tax purposes and swap into a similar position.`,
-        [{ text: 'Cancel' }, { text: 'Harvest', style: 'destructive' }]
+        'View Opportunity',
+        `Potential tax-loss harvesting opportunity for ${ticker}.\nThis would realize the loss for tax purposes and swap into a similar position.`,
+        [{ text: 'Cancel' }, { text: 'View', style: 'default' }]
       );
     },
     []
@@ -62,7 +62,7 @@ export const TaxDoctor: React.FC<Props> = ({
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Ionicons name="medkit" size={22} color="#10B981" />
+        <Ionicons name="medkit" size={22} color="#00C9A7" />
         <Text style={styles.sectionTitle}>Tax Doctor</Text>
       </View>
       <Text style={styles.sectionSubtitle}>
@@ -96,7 +96,7 @@ export const TaxDoctor: React.FC<Props> = ({
 
       {isLoading ? (
         <ActivityIndicator
-          color="#10B981"
+          color="#00C9A7"
           style={{ marginVertical: 30 }}
         />
       ) : (
@@ -106,14 +106,14 @@ export const TaxDoctor: React.FC<Props> = ({
             <View style={styles.summaryCard}>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Total Unrealized Loss</Text>
-                <Text style={[styles.summaryValue, { color: '#EF4444' }]}>
+                <Text style={[styles.summaryValue, { color: '#5856D6' }]}>
                   {formatMoney(totalLoss)}
                 </Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Estimated Tax Savings</Text>
-                <Text style={[styles.summaryValue, { color: '#10B981' }]}>
+                <Text style={[styles.summaryValue, { color: '#00C9A7' }]}>
                   {formatMoney(totalSavings)}
                 </Text>
               </View>
@@ -123,7 +123,7 @@ export const TaxDoctor: React.FC<Props> = ({
           {/* Loss prescription cards */}
           {losses.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Ionicons name="checkmark-circle" size={32} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={32} color="#00C9A7" />
               <Text style={styles.emptyTitle}>Clean Bill of Health</Text>
               <Text style={styles.emptyText}>
                 No tax-loss harvesting opportunities found. Your portfolio
@@ -193,9 +193,9 @@ export const TaxDoctor: React.FC<Props> = ({
                     onPress={() => handleFillPrescription(loss.ticker)}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="bandage" size={16} color="#10B981" />
+                    <Ionicons name="bandage" size={16} color="#00C9A7" />
                     <Text style={styles.fillButtonText}>
-                      Fill Prescription
+                      View Opportunity
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -250,8 +250,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   bracketPillActive: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
-    borderColor: 'rgba(16,185,129,0.4)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
+    borderColor: 'rgba(0,201,167,0.4)',
   },
   bracketPillText: {
     color: 'rgba(255,255,255,0.5)',
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bracketPillTextActive: {
-    color: '#10B981',
+    color: '#00C9A7',
   },
   summaryCard: {
     flexDirection: 'row',
@@ -291,14 +291,14 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.06)',
+    backgroundColor: 'rgba(0,201,167,0.06)',
     borderRadius: 14,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.2)',
+    borderColor: 'rgba(0,201,167,0.2)',
   },
   emptyTitle: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 16,
     fontWeight: '700',
     marginTop: 8,
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.15)',
+    borderColor: 'rgba(88,86,214,0.15)',
   },
   lossHeader: {
     flexDirection: 'row',
@@ -330,12 +330,12 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    backgroundColor: 'rgba(88,86,214,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   rxText: {
-    color: '#EF4444',
+    color: '#5856D6',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -356,12 +356,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   lossAmount: {
-    color: '#EF4444',
+    color: '#5856D6',
     fontSize: 16,
     fontWeight: '800',
   },
   savingsAmount: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     fontWeight: '600',
     marginTop: 1,
@@ -411,14 +411,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: 'rgba(16,185,129,0.1)',
+    backgroundColor: 'rgba(0,201,167,0.1)',
     borderRadius: 10,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.3)',
+    borderColor: 'rgba(0,201,167,0.3)',
   },
   fillButtonText: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 14,
     fontWeight: '600',
   },

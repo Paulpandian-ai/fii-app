@@ -71,7 +71,7 @@ const AGENT_ICONS: Record<string, string> = {
 };
 
 const AGENT_COLORS: Record<string, string> = {
-  price_refresh: '#10B981',
+  price_refresh: '#00C9A7',
   technicals_refresh: '#60A5FA',
   signal_generation: '#FBBF24',
   fundamentals_refresh: '#F97316',
@@ -96,7 +96,7 @@ interface AgentInfo {
 const RISK_PROFILES = [
   { id: 'conservative', label: 'Conservative', color: '#60A5FA' },
   { id: 'moderate', label: 'Moderate', color: '#FBBF24' },
-  { id: 'aggressive', label: 'Aggressive', color: '#EF4444' },
+  { id: 'aggressive', label: 'Aggressive', color: '#F5A623' },
 ];
 
 export const SettingsScreen: React.FC = () => {
@@ -522,8 +522,8 @@ export const SettingsScreen: React.FC = () => {
           <Switch
             value={preferences.p0Critical}
             onValueChange={(v) => updatePreferences({ p0Critical: v })}
-            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(239,68,68,0.3)' }}
-            thumbColor={preferences.p0Critical ? '#EF4444' : '#888'}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(245,166,35,0.3)' }}
+            thumbColor={preferences.p0Critical ? '#F5A623' : '#888'}
           />
         </View>
         <View style={styles.toggleRow}>
@@ -646,7 +646,7 @@ export const SettingsScreen: React.FC = () => {
                       <Ionicons
                         name={agent.lastRun?.status === 'error' ? 'alert-circle' : 'checkmark-circle'}
                         size={14}
-                        color={agent.lastRun?.status === 'error' ? '#EF4444' : 'rgba(255,255,255,0.3)'}
+                        color={agent.lastRun?.status === 'error' ? '#F5A623' : 'rgba(255,255,255,0.3)'}
                       />
                       <Text style={styles.agentStatusText}>{lastRunLabel}</Text>
                       {agent.lastRun?.trigger && (
@@ -753,7 +753,7 @@ export const SettingsScreen: React.FC = () => {
             <Ionicons
               name={!syncAuth ? 'cloud-offline-outline' : syncPending > 0 ? 'cloud-upload-outline' : 'cloud-done-outline'}
               size={22}
-              color={!syncAuth ? '#888' : syncPending > 0 ? '#FBBF24' : '#10B981'}
+              color={!syncAuth ? '#888' : syncPending > 0 ? '#FBBF24' : '#00C9A7'}
             />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.syncStatusText}>
@@ -773,7 +773,7 @@ export const SettingsScreen: React.FC = () => {
             </View>
             <View style={[
               styles.syncDot,
-              { backgroundColor: !syncAuth || !syncOnline ? '#888' : syncPending > 0 ? '#FBBF24' : '#10B981' },
+              { backgroundColor: !syncAuth || !syncOnline ? '#888' : syncPending > 0 ? '#FBBF24' : '#00C9A7' },
             ]} />
           </View>
         </View>
@@ -791,8 +791,8 @@ export const SettingsScreen: React.FC = () => {
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionRow} onPress={handleResetApp} activeOpacity={0.7}>
-          <Ionicons name="refresh-outline" size={20} color="#EF4444" />
-          <Text style={[styles.actionText, { color: '#EF4444' }]}>Reset App</Text>
+          <Ionicons name="refresh-outline" size={20} color="#F5A623" />
+          <Text style={[styles.actionText, { color: '#F5A623' }]}>Reset App</Text>
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
         </TouchableOpacity>
 

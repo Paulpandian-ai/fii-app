@@ -17,15 +17,10 @@ import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getMarketMovers, getEarningsCalendar } from '../services/api';
-import type { MarketMoversData, MarketMover, EarningsEntry, RootStackParamList, Signal } from '../types';
+import type { MarketMoversData, MarketMover, EarningsEntry, RootStackParamList, ScoreLabel } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
 
 export const MarketDashboardScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -73,13 +68,13 @@ export const MarketDashboardScreen: React.FC = () => {
               styles.indexBarFill,
               {
                 width: `${barWidth}%`,
-                backgroundColor: isPositive ? '#10B981' : '#EF4444',
+                backgroundColor: isPositive ? '#00C9A7' : '#F5A623',
                 alignSelf: isPositive ? 'flex-start' : 'flex-end',
               },
             ]}
           />
         </View>
-        <Text style={[styles.indexPct, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+        <Text style={[styles.indexPct, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
           {isPositive ? '+' : ''}{(pct ?? 0).toFixed(2)}%
         </Text>
       </View>
@@ -97,14 +92,14 @@ export const MarketDashboardScreen: React.FC = () => {
       >
         <Text style={styles.moverTicker}>{item.ticker}</Text>
         <Text style={styles.moverPrice}>${(item.price ?? 0).toFixed(2)}</Text>
-        <View style={[styles.moverPctBadge, { backgroundColor: isPositive ? '#10B98120' : '#EF444420' }]}>
-          <Text style={[styles.moverPctText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+        <View style={[styles.moverPctBadge, { backgroundColor: isPositive ? '#00C9A720' : '#F5A62320' }]}>
+          <Text style={[styles.moverPctText, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
             {isPositive ? '+' : ''}{(item.changePercent ?? 0).toFixed(2)}%
           </Text>
         </View>
-        {item.signal && (
-          <View style={[styles.moverSignal, { backgroundColor: SIGNAL_COLORS[item.signal] + '20' }]}>
-            <Text style={[styles.moverSignalText, { color: SIGNAL_COLORS[item.signal] }]}>{item.signal}</Text>
+        {item.aiScore != null && (
+          <View style={[styles.moverSignal, { backgroundColor: getScoreColor(item.aiScore) + '20' }]}>
+            <Text style={[styles.moverSignalText, { color: getScoreColor(item.aiScore) }]}>{getScoreLabel(item.aiScore)}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -123,9 +118,9 @@ export const MarketDashboardScreen: React.FC = () => {
           <Ionicons
             name={isUpgrade ? 'arrow-up-circle' : 'arrow-down-circle'}
             size={18}
-            color={isUpgrade ? '#10B981' : '#EF4444'}
+            color={isUpgrade ? '#00C9A7' : '#F5A623'}
           />
-          <Text style={[styles.aiChangeScore, { color: isUpgrade ? '#10B981' : '#EF4444' }]}>
+          <Text style={[styles.aiChangeScore, { color: isUpgrade ? '#00C9A7' : '#F5A623' }]}>
             {isUpgrade ? '+' : ''}{(item.scoreChange ?? 0).toFixed(1)}
           </Text>
           <Text style={styles.aiChangeNow}>{(item.aiScore ?? 0).toFixed(1)}</Text>
@@ -174,10 +169,10 @@ export const MarketDashboardScreen: React.FC = () => {
           return (
             <View
               key={s.name}
-              style={[styles.sectorCell, { backgroundColor: isPos ? '#10B98120' : '#EF444420' }]}
+              style={[styles.sectorCell, { backgroundColor: isPos ? '#00C9A720' : '#F5A62320' }]}
             >
               <Text style={styles.sectorName} numberOfLines={1}>{s.name}</Text>
-              <Text style={[styles.sectorPct, { color: isPos ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.sectorPct, { color: isPos ? '#00C9A7' : '#F5A623' }]}>
                 {isPos ? '+' : ''}{(s.avg ?? 0).toFixed(1)}%
               </Text>
             </View>
@@ -267,7 +262,7 @@ export const MarketDashboardScreen: React.FC = () => {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Top Gainers</Text>
-              <Ionicons name="trending-up" size={18} color="#10B981" />
+              <Ionicons name="trending-up" size={18} color="#00C9A7" />
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moverScroll}>
               {(movers?.gainers || []).slice(0, 5).map((m, i) => renderMoverCard(m, i))}
@@ -278,7 +273,7 @@ export const MarketDashboardScreen: React.FC = () => {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Top Losers</Text>
-              <Ionicons name="trending-down" size={18} color="#EF4444" />
+              <Ionicons name="trending-down" size={18} color="#F5A623" />
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moverScroll}>
               {(movers?.losers || []).slice(0, 5).map((m, i) => renderMoverCard(m, i))}
@@ -288,7 +283,7 @@ export const MarketDashboardScreen: React.FC = () => {
           {/* AI Signal Changes */}
           {((movers?.aiUpgrades || []).length > 0 || (movers?.aiDowngrades || []).length > 0) && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>AI Signal Changes</Text>
+              <Text style={styles.sectionTitle}>AI Score Changes</Text>
               <View style={styles.aiChangeContainer}>
                 {(movers?.aiUpgrades || []).map((m, i) => renderAIChangeCard(m, i))}
                 {(movers?.aiDowngrades || []).map((m, i) => renderAIChangeCard(m, i))}

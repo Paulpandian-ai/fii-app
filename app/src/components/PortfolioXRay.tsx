@@ -26,11 +26,11 @@ interface Props {
 }
 
 const GRADE_COLORS: Record<string, string> = {
-  A: '#10B981',
+  A: '#00C9A7',
   B: '#34D399',
   C: '#FBBF24',
   D: '#F59E0B',
-  F: '#EF4444',
+  F: '#F5A623',
 };
 
 export const PortfolioXRay: React.FC<Props> = ({
@@ -172,7 +172,7 @@ export const PortfolioXRay: React.FC<Props> = ({
                         {
                           width: `${Math.min(100, w)}%`,
                           backgroundColor: s.warning
-                            ? '#EF4444'
+                            ? '#F5A623'
                             : s.color || '#60A5FA',
                         },
                       ]}
@@ -181,7 +181,7 @@ export const PortfolioXRay: React.FC<Props> = ({
                   <Text
                     style={[
                       styles.barValue,
-                      s.warning && { color: '#EF4444' },
+                      s.warning && { color: '#F5A623' },
                     ]}
                   >
                     {w.toFixed(0)}%
@@ -190,7 +190,7 @@ export const PortfolioXRay: React.FC<Props> = ({
                     <Ionicons
                       name="warning"
                       size={14}
-                      color="#EF4444"
+                      color="#F5A623"
                     />
                   )}
                 </View>
@@ -233,10 +233,10 @@ export const PortfolioXRay: React.FC<Props> = ({
                     const corr = c.correlation ?? 0;
                     const color =
                       corr > 0.7
-                        ? '#EF4444'
+                        ? '#F5A623'
                         : corr > 0.3
                         ? '#FBBF24'
-                        : '#10B981';
+                        : '#00C9A7';
                     return (
                       <View key={`${c.ticker1}-${c.ticker2}-${i}`} style={styles.corrPair}>
                         <Text style={styles.corrTickers}>

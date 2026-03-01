@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { FeedItem } from '../types';
 import { ScoreRing } from './ScoreRing';
 import { SignalBadge } from './SignalBadge';
+import { ScoreInfoTooltip } from './ScoreInfoTooltip';
 import { SwipeHint } from './SwipeHint';
 import { Skeleton } from './Skeleton';
 import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker } from '../services/api';
@@ -12,6 +13,7 @@ import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
 import type { EnrichmentData } from '../store/signalStore';
+import { getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -21,15 +23,9 @@ interface FeedCardProps {
 }
 
 const CONFIDENCE_COLORS: Record<string, string> = {
-  HIGH: '#10B981',
-  MEDIUM: '#F59E0B',
-  LOW: '#EF4444',
-};
-
-const SIGNAL_COLORS: Record<string, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
+  HIGH: '#4A90D9',
+  MEDIUM: '#8E8E93',
+  LOW: '#F5A623',
 };
 
 const safeNum = (v: unknown): number => {
@@ -311,14 +307,14 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   // Whether to show skeleton (first load, no cache)
   const showSkeleton = !dataLoaded && !hasCache;
 
-  // Derived colors
+  // Derived colors (blue-spectrum)
   const gradeColor = healthGrade
     ? (healthGrade.startsWith('A') || healthGrade.startsWith('B')
-      ? '#10B981' : healthGrade.startsWith('C') ? '#F59E0B' : '#EF4444')
+      ? '#00C9A7' : healthGrade.startsWith('C') ? '#8E8E93' : '#F5A623')
     : 'rgba(255,255,255,0.3)';
 
   const trendColor = techTrend
-    ? (techTrend.includes('bullish') ? '#10B981' : techTrend.includes('bearish') ? '#EF4444' : '#94A3B8')
+    ? (techTrend.includes('bullish') ? '#4A90D9' : techTrend.includes('bearish') ? '#F5A623' : '#8E8E93')
     : 'rgba(255,255,255,0.3)';
 
   // 52-week range position (0-1)
@@ -326,21 +322,21 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
     ? Math.max(0, Math.min(1, (price - w52Low) / (w52High - w52Low)))
     : null;
 
-  // RSI color
+  // RSI color (blue-spectrum)
   const rsiColor = rsi != null
-    ? (rsi >= 70 ? '#EF4444' : rsi <= 30 ? '#10B981' : '#94A3B8')
+    ? (rsi >= 70 ? '#F5A623' : rsi <= 30 ? '#4A90D9' : '#8E8E93')
     : 'rgba(255,255,255,0.3)';
 
-  // Fair value / fair price color
+  // Fair value / fair price color (blue-spectrum)
   const fvColor = fairPriceLabel
-    ? (fairPriceLabel === 'undervalued' ? '#10B981' : fairPriceLabel === 'overvalued' ? '#EF4444' : '#F59E0B')
+    ? (fairPriceLabel === 'undervalued' ? '#00C9A7' : fairPriceLabel === 'overvalued' ? '#F5A623' : '#8E8E93')
     : fairValueUpside != null
-      ? (fairValueUpside > 10 ? '#10B981' : fairValueUpside < -10 ? '#EF4444' : '#F59E0B')
+      ? (fairValueUpside > 10 ? '#00C9A7' : fairValueUpside < -10 ? '#F5A623' : '#8E8E93')
       : 'rgba(255,255,255,0.3)';
 
-  // Z-Score color
+  // Z-Score color (blue-spectrum)
   const zColor = zScore != null
-    ? (zScore > 2.99 ? '#10B981' : zScore < 1.81 ? '#EF4444' : '#F59E0B')
+    ? (zScore > 2.99 ? '#00C9A7' : zScore < 1.81 ? '#F5A623' : '#8E8E93')
     : 'rgba(255,255,255,0.3)';
 
   // Best factors to display
@@ -357,7 +353,7 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       onPress={onPress}
       style={styles.cardWrapper}
       accessibilityRole="button"
-      accessibilityLabel={`View ${item.signal} signal for ${item.ticker}`}
+      accessibilityLabel={`View FII Score for ${item.ticker}`}
     >
       <LinearGradient
         colors={['#0D1B3E', '#1F3864']}
@@ -410,12 +406,12 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
               {price != null ? `$${price.toFixed(2)}` : '--'}
             </Text>
           )}
-          <View style={[styles.changePill, { backgroundColor: isPositive ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)' }]}>
-            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={isPositive ? '#10B981' : '#EF4444'} />
+          <View style={[styles.changePill, { backgroundColor: isPositive ? 'rgba(0,201,167,0.15)' : 'rgba(245,166,35,0.15)' }]}>
+            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={isPositive ? '#00C9A7' : '#F5A623'} />
             {showSkeleton ? (
               <Skeleton width={50} height={14} borderRadius={4} />
             ) : (
-              <Text style={[styles.changeText, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.changeText, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
                 {dataLoaded ? `${isPositive ? '+' : ''}${changePercent.toFixed(2)}%` : '--'}
               </Text>
             )}
@@ -438,12 +434,13 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         )}
 
-        {/* ── Signal Badge + Confidence ── */}
+        {/* ── Score Label Badge + Confidence ── */}
         <View style={styles.signalRow}>
-          <SignalBadge signal={item.signal || 'HOLD'} />
+          <SignalBadge scoreLabel={item.scoreLabel} score={score} />
+          <ScoreInfoTooltip />
           {confidence && (
-            <View style={[styles.confidencePill, { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#F59E0B') + '30' }]}>
-              <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] || '#F59E0B' }]}>
+            <View style={[styles.confidencePill, { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#8E8E93') + '30' }]}>
+              <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] || '#8E8E93' }]}>
                 {confidence}
               </Text>
             </View>
@@ -473,15 +470,15 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricItem}>
-              <Ionicons name="bar-chart-outline" size={13} color={negativeEarnings ? '#EF4444' : peRatio != null && peRatio > 100 ? '#F59E0B' : 'rgba(255,255,255,0.5)'} />
+              <Ionicons name="bar-chart-outline" size={13} color={negativeEarnings ? '#F5A623' : peRatio != null && peRatio > 100 ? '#8E8E93' : 'rgba(255,255,255,0.5)'} />
               {showSkeleton && peRatio == null ? <MetricSkeleton /> : (
-                <Text style={[styles.metricValue, negativeEarnings ? { color: '#EF4444' } : peRatio != null && peRatio > 100 ? { color: '#F59E0B' } : {}]}>
+                <Text style={[styles.metricValue, negativeEarnings ? { color: '#F5A623' } : peRatio != null && peRatio > 100 ? { color: '#8E8E93' } : {}]}>
                   {negativeEarnings ? 'N/A' : peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '--'}
                 </Text>
               )}
               <Text style={styles.metricLabel}>P/E</Text>
               {negativeEarnings ? (
-                <Text style={[styles.metricSub, { color: '#EF4444' }]}>Loss</Text>
+                <Text style={[styles.metricSub, { color: '#F5A623' }]}>Loss</Text>
               ) : forwardPE != null && forwardPE > 0 ? (
                 <Text style={styles.metricSub}>Fwd {forwardPE.toFixed(1)}</Text>
               ) : null}
@@ -567,8 +564,8 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
               <Ionicons name="sparkles" size={12} color="#A78BFA" />
               <Text style={styles.aiInsightLabel}>AI AGENT</Text>
               {aiAction && (
-                <View style={[styles.aiActionPill, { backgroundColor: (SIGNAL_COLORS[aiAction] || '#F59E0B') + '20' }]}>
-                  <Text style={[styles.aiActionText, { color: SIGNAL_COLORS[aiAction] || '#F59E0B' }]}>{aiAction}</Text>
+                <View style={[styles.aiActionPill, { backgroundColor: '#4A90D920' }]}>
+                  <Text style={[styles.aiActionText, { color: '#4A90D9' }]}>{aiAction}</Text>
                 </View>
               )}
             </View>
@@ -583,7 +580,7 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
           <View style={styles.factorsRow}>
             {displayFactors.map((f, i) => {
               const fScore = f.score ?? 0;
-              const fColor = fScore >= 0.5 ? '#10B981' : fScore <= -0.5 ? '#EF4444' : '#F59E0B';
+              const fColor = fScore >= 0.5 ? '#00C9A7' : fScore <= -0.5 ? '#F5A623' : '#8E8E93';
               return (
                 <View key={f.name || `f-${i}`} style={[styles.factorPill, { borderColor: fColor + '50' }]}>
                   <Text style={[styles.factorName, { color: fColor }]}>{f.name}</Text>

@@ -28,13 +28,14 @@ import { getScreener, getScreenerTemplates } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { useShallow } from 'zustand/react/shallow';
-import type { Signal, RootStackParamList } from '../types';
+import type { ScoreLabel, RootStackParamList } from '../types';
+import { SCORE_COLORS } from '../utils/scoreColors';
 
 // ─── Constants ───
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-const SIGNAL_OPTIONS: Signal[] = ['BUY', 'HOLD', 'SELL'];
+const SCORE_LABEL_OPTIONS: ScoreLabel[] = ['Strong', 'Favorable', 'Neutral', 'Weak', 'Caution'];
 
 const SECTORS = [
   'Technology',
@@ -61,11 +62,7 @@ type MarketCap = (typeof MARKET_CAPS)[number];
 const SORT_OPTIONS = ['FII Score', 'Price', 'Price Change', 'Market Cap', 'P/E', 'Ticker', 'Tech Score'] as const;
 type SortOption = (typeof SORT_OPTIONS)[number];
 
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#26a69a',
-  HOLD: '#ffa726',
-  SELL: '#ef5350',
-};
+const SIGNAL_COLORS = SCORE_COLORS;
 
 const GRADE_COLORS: Record<Grade, string> = {
   A: '#26a69a',
@@ -89,19 +86,19 @@ const TEMPLATES: Template[] = [
     id: 'ai-top-picks',
     label: 'AI Top Picks',
     icon: 'sparkles',
-    filters: { aiScoreMin: 6, aiScoreMax: 10, signals: ['BUY'], sortBy: 'FII Score' },
+    filters: { aiScoreMin: 6, aiScoreMax: 10, scoreLabels: ['Strong', 'Favorable'], sortBy: 'FII Score' },
   },
   {
     id: 'value-plays',
     label: 'Value Plays',
     icon: 'diamond-outline',
-    filters: { signals: ['BUY'], marketCaps: ['Large', 'Mega'], sortBy: 'FII Score' },
+    filters: { scoreLabels: ['Strong', 'Favorable'], marketCaps: ['Large', 'Mega'], sortBy: 'FII Score' },
   },
   {
     id: 'momentum-leaders',
     label: 'Momentum Leaders',
     icon: 'rocket-outline',
-    filters: { signals: ['BUY'], sortBy: 'Price Change' },
+    filters: { scoreLabels: ['Strong', 'Favorable'], sortBy: 'Price Change' },
   },
   {
     id: 'dividend-stars',
@@ -119,7 +116,7 @@ const TEMPLATES: Template[] = [
     id: 'risk-alerts',
     label: 'Risk Alerts',
     icon: 'warning-outline',
-    filters: { aiScoreMin: 1, aiScoreMax: 5, signals: ['SELL'], sortBy: 'FII Score' },
+    filters: { aiScoreMin: 1, aiScoreMax: 5, scoreLabels: ['Caution', 'Weak'], sortBy: 'FII Score' },
   },
 ];
 
@@ -130,7 +127,7 @@ interface ScreenerFilters {
   aiScoreMax: number;
   techScoreMin: number;
   techScoreMax: number;
-  signals: Signal[];
+  scoreLabels: ScoreLabel[];
   sectors: Sector[];
   grades: Grade[];
   marketCaps: MarketCap[];
@@ -146,7 +143,7 @@ interface ScreenerResult {
   aiScore: number | null;
   technicalScore: number | null;
   fundamentalGrade: string | null;
-  signal: Signal | null;
+  scoreLabel: ScoreLabel | null;
   confidence: string | null;
   sector: string;
   marketCap: number | null;
@@ -160,7 +157,7 @@ const DEFAULT_FILTERS: ScreenerFilters = {
   aiScoreMax: 10,
   techScoreMin: 1,
   techScoreMax: 10,
-  signals: [],
+  scoreLabels: [],
   sectors: [],
   grades: [],
   marketCaps: [],
@@ -239,7 +236,7 @@ export const ScreenerScreen: React.FC = () => {
     if (appliedFilters.techScoreMin > 1 || appliedFilters.techScoreMax < 10) {
       params.technicalScore = `${appliedFilters.techScoreMin},${appliedFilters.techScoreMax}`;
     }
-    if (appliedFilters.signals.length > 0) params.signal = appliedFilters.signals.join(',');
+    if (appliedFilters.scoreLabels.length > 0) params.scoreLabel = appliedFilters.scoreLabels.join(',');
     if (appliedFilters.sectors.length > 0) params.sector = appliedFilters.sectors.join(',');
     if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
     if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
@@ -263,7 +260,7 @@ export const ScreenerScreen: React.FC = () => {
       aiScore: item.aiScore ?? null,
       technicalScore: item.technicalScore ?? null,
       fundamentalGrade: item.fundamentalGrade ?? null,
-      signal: item.signal || null,
+      scoreLabel: item.scoreLabel || null,
       confidence: item.confidence || null,
       sector: item.sector || '',
       marketCap: item.marketCap ?? null,
@@ -372,14 +369,14 @@ export const ScreenerScreen: React.FC = () => {
 
   // ─── Pending Filter Toggles ───
 
-  const toggleSignal = useCallback((signal: Signal) => {
+  const toggleScoreLabel = useCallback((label: ScoreLabel) => {
     setPendingFilters((prev) => {
-      const exists = prev.signals.includes(signal);
+      const exists = prev.scoreLabels.includes(label);
       return {
         ...prev,
-        signals: exists
-          ? prev.signals.filter((s) => s !== signal)
-          : [...prev.signals, signal],
+        scoreLabels: exists
+          ? prev.scoreLabels.filter((s) => s !== label)
+          : [...prev.scoreLabels, label],
       };
     });
   }, []);
@@ -453,7 +450,7 @@ export const ScreenerScreen: React.FC = () => {
     let count = 0;
     if (filters.aiScoreMin > 1 || filters.aiScoreMax < 10) count++;
     if (filters.techScoreMin > 1 || filters.techScoreMax < 10) count++;
-    if (filters.signals.length > 0) count++;
+    if (filters.scoreLabels.length > 0) count++;
     if (filters.sectors.length > 0) count++;
     if (filters.grades.length > 0) count++;
     if (filters.marketCaps.length > 0) count++;
@@ -516,8 +513,8 @@ export const ScreenerScreen: React.FC = () => {
     ({ item }: { item: ScreenerResult }) => {
       const changeColor = (item.changePercent ?? 0) >= 0 ? '#26a69a' : '#ef5350';
       const changeSign = (item.changePercent ?? 0) >= 0 ? '+' : '';
-      const hasSignal = item.signal != null;
-      const signalColor = hasSignal ? SIGNAL_COLORS[item.signal!] : '#8b949e';
+      const hasScoreLabel = item.scoreLabel != null;
+      const signalColor = hasScoreLabel ? SIGNAL_COLORS[item.scoreLabel!] : '#8b949e';
       const hasAiScore = item.aiScore != null;
       const aiColor = hasAiScore ? getAiScoreColor(item.aiScore!) : '#8b949e';
       const gradeColor =
@@ -530,7 +527,7 @@ export const ScreenerScreen: React.FC = () => {
           onPress={() => handleResultPress(item)}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasSignal ? item.signal + ' signal' : 'no signal'}`}
+          accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasScoreLabel ? item.scoreLabel + ' score' : 'no score'}`}
         >
           {/* Star / Watchlist toggle */}
           <TouchableOpacity
@@ -551,7 +548,7 @@ export const ScreenerScreen: React.FC = () => {
               <Text style={styles.resultTicker}>{item.ticker}</Text>
               <View style={[styles.signalBadge, { backgroundColor: signalColor + '20' }]}>
                 <Text style={[styles.signalBadgeText, { color: signalColor }]}>
-                  {hasSignal ? item.signal : '—'}
+                  {hasScoreLabel ? item.scoreLabel : '—'}
                 </Text>
               </View>
             </View>
@@ -922,16 +919,16 @@ export const ScreenerScreen: React.FC = () => {
                 </View>
               </View>
 
-              {/* Signal Toggles */}
+              {/* Score Label Toggles */}
               <View style={styles.filterSection}>
-                <Text style={styles.filterLabel}>Signal</Text>
+                <Text style={styles.filterLabel}>Score Label</Text>
                 <View style={styles.chipRow}>
-                  {SIGNAL_OPTIONS.map((signal) =>
+                  {SCORE_LABEL_OPTIONS.map((label) =>
                     renderFilterChip(
-                      signal,
-                      pendingFilters.signals.includes(signal),
-                      () => toggleSignal(signal),
-                      SIGNAL_COLORS[signal],
+                      label,
+                      pendingFilters.scoreLabels.includes(label),
+                      () => toggleScoreLabel(label),
+                      SIGNAL_COLORS[label],
                     ),
                   )}
                 </View>

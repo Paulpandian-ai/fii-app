@@ -29,7 +29,8 @@ import { useSignalStore } from '../store/signalStore';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { dataRefreshManager } from '../services/DataRefreshManager';
 import { getFeed, getScreener, getInsightsAlerts, getBatchPrices } from '../services/api';
-import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, Signal } from '../types';
+import { DisclaimerFooter } from '../components/DisclaimerFooter';
+import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, ScoreLabel } from '../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -41,49 +42,49 @@ const isEducationalCard = (entry: FeedEntry): entry is EducationalCard => {
 const PLACEHOLDER_FEED: FeedItem[] = [
   {
     id: 'p-NVDA', type: 'signal', ticker: 'NVDA', companyName: 'NVIDIA Corporation',
-    compositeScore: 8.4, signal: 'BUY' as Signal, confidence: 'HIGH',
+    compositeScore: 8.4, scoreLabel: 'Strong' as ScoreLabel, confidence: 'HIGH',
     insight: 'Strong AI/datacenter demand and supply-chain dominance drive bullish outlook.',
     topFactors: [{ name: 'Supply Chain', score: 1.8 }, { name: 'Performance', score: 1.6 }, { name: 'Macro', score: 0.9 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-AAPL', type: 'signal', ticker: 'AAPL', companyName: 'Apple Inc.',
-    compositeScore: 7.1, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    compositeScore: 7.1, scoreLabel: 'Favorable' as ScoreLabel, confidence: 'MEDIUM',
     insight: 'Services revenue growth and iPhone cycle support moderate bullish stance.',
     topFactors: [{ name: 'Customers', score: 1.4 }, { name: 'Performance', score: 1.1 }, { name: 'Correlations', score: 0.8 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-TSLA', type: 'signal', ticker: 'TSLA', companyName: 'Tesla, Inc.',
-    compositeScore: 5.2, signal: 'HOLD' as Signal, confidence: 'LOW',
+    compositeScore: 5.2, scoreLabel: 'Neutral' as ScoreLabel, confidence: 'LOW',
     insight: 'Margin compression offsets delivery growth; geopolitical risk adds uncertainty.',
     topFactors: [{ name: 'Geopolitics', score: -0.9 }, { name: 'Performance', score: 0.7 }, { name: 'Macro', score: -0.4 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-MSFT', type: 'signal', ticker: 'MSFT', companyName: 'Microsoft Corporation',
-    compositeScore: 7.8, signal: 'BUY' as Signal, confidence: 'HIGH',
+    compositeScore: 7.8, scoreLabel: 'Strong' as ScoreLabel, confidence: 'HIGH',
     insight: 'Azure cloud growth and AI integration across Office suite lift outlook.',
     topFactors: [{ name: 'Performance', score: 1.5 }, { name: 'Customers', score: 1.3 }, { name: 'Supply Chain', score: 0.6 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-AMZN', type: 'signal', ticker: 'AMZN', companyName: 'Amazon.com, Inc.',
-    compositeScore: 7.3, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    compositeScore: 7.3, scoreLabel: 'Favorable' as ScoreLabel, confidence: 'MEDIUM',
     insight: 'AWS momentum and advertising growth underpin positive signal.',
     topFactors: [{ name: 'Customers', score: 1.3 }, { name: 'Performance', score: 1.2 }, { name: 'Macro', score: 0.5 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-META', type: 'signal', ticker: 'META', companyName: 'Meta Platforms, Inc.',
-    compositeScore: 6.5, signal: 'HOLD' as Signal, confidence: 'MEDIUM',
+    compositeScore: 6.5, scoreLabel: 'Neutral' as ScoreLabel, confidence: 'MEDIUM',
     insight: 'Ad revenue rebound tempered by heavy Reality Labs spending.',
     topFactors: [{ name: 'Performance', score: 1.0 }, { name: 'Risk', score: -0.5 }, { name: 'Correlations', score: 0.7 }],
     updatedAt: new Date().toISOString(),
   },
   {
     id: 'p-GOOGL', type: 'signal', ticker: 'GOOGL', companyName: 'Alphabet Inc.',
-    compositeScore: 7.0, signal: 'BUY' as Signal, confidence: 'MEDIUM',
+    compositeScore: 7.0, scoreLabel: 'Favorable' as ScoreLabel, confidence: 'MEDIUM',
     insight: 'Search dominance and Cloud growth offset regulatory headwinds.',
     topFactors: [{ name: 'Customers', score: 1.2 }, { name: 'Performance', score: 1.1 }, { name: 'Geopolitics', score: -0.3 }],
     updatedAt: new Date().toISOString(),
@@ -93,9 +94,9 @@ const PLACEHOLDER_FEED: FeedItem[] = [
 /**
  * Build a smart-ordered feed from screener results:
  * 1. First 3: biggest movers (highest absolute changePercent)
- * 2. Next 3: top BUY signals (highest aiScore with signal=BUY)
- * 3. Next 2: top SELL signals (stocks to watch / avoid)
- * 4. Remaining: HOLD stocks sorted by absolute changePercent
+ * 2. Next 3: top-scoring stocks (score >= 7)
+ * 3. Next 2: low-scoring stocks (score < 4, stocks to watch)
+ * 4. Remaining: mid-range stocks sorted by absolute changePercent
  */
 function buildSmartFeed(results: any[]): FeedItem[] {
   const seen = new Set<string>();
@@ -107,7 +108,7 @@ function buildSmartFeed(results: any[]): FeedItem[] {
     ticker: r.ticker,
     companyName: r.companyName || '',
     compositeScore: r.aiScore || r.compositeScore || 5,
-    signal: r.signal || 'HOLD',
+    scoreLabel: r.scoreLabel || 'Neutral',
     confidence: r.confidence || undefined,
     insight: r.insight || '',
     topFactors: r.topFactors || [],
@@ -126,17 +127,17 @@ function buildSmartFeed(results: any[]): FeedItem[] {
     .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0));
   for (const r of movers.slice(0, 3)) add(toFeedItem(r));
 
-  // 2. Top BUY signals (top 3 by aiScore)
-  const buys = results
-    .filter((r) => r.signal === 'BUY')
+  // 2. Top-scoring stocks (score >= 7, top 3 by aiScore)
+  const topScoring = results
+    .filter((r) => (r.aiScore || r.compositeScore || 0) >= 7)
     .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
-  for (const r of buys.slice(0, 3)) add(toFeedItem(r));
+  for (const r of topScoring.slice(0, 3)) add(toFeedItem(r));
 
-  // 3. Top SELL signals (top 2)
-  const sells = results
-    .filter((r) => r.signal === 'SELL')
+  // 3. Low-scoring stocks (score < 4, top 2)
+  const lowScoring = results
+    .filter((r) => (r.aiScore || r.compositeScore || 10) < 4)
     .sort((a, b) => (a.aiScore || 10) - (b.aiScore || 10));
-  for (const r of sells.slice(0, 2)) add(toFeedItem(r));
+  for (const r of lowScoring.slice(0, 2)) add(toFeedItem(r));
 
   // 4. Remaining: sorted by absolute changePercent (most interesting first)
   const rest = results
@@ -300,7 +301,7 @@ export const FeedScreen: React.FC = () => {
             ticker: entry.ticker,
             companyName: entry.companyName || entry.company_name || '',
             compositeScore: entry.compositeScore || entry.composite_score || 5,
-            signal: entry.signal || 'HOLD',
+            scoreLabel: entry.scoreLabel || 'Neutral',
             confidence: entry.confidence,
             insight: entry.insight || '',
             topFactors: entry.topFactors || entry.top_factors || [],
@@ -481,12 +482,12 @@ export const FeedScreen: React.FC = () => {
             }}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={`View ${liveBannerEvent.ticker} signal alert`}
+            accessibilityLabel={`View ${liveBannerEvent.ticker} score alert`}
           >
             <View style={styles.liveBannerDot} />
             <View style={styles.liveBannerContent}>
               <Text style={styles.liveBannerTitle} numberOfLines={1}>
-                {liveBannerEvent.ticker} Signal Alert
+                {liveBannerEvent.ticker} Score Alert
               </Text>
               <Text style={styles.liveBannerText} numberOfLines={1}>
                 {liveBannerEvent.summary}
@@ -518,6 +519,7 @@ export const FeedScreen: React.FC = () => {
             tintColor="#60A5FA"
           />
         }
+        ListFooterComponent={<DisclaimerFooter />}
       />
 
       <SearchOverlay
@@ -652,9 +654,9 @@ const styles = StyleSheet.create({
   liveBannerInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    backgroundColor: 'rgba(245,166,35,0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
+    borderColor: 'rgba(245,166,35,0.3)',
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -664,10 +666,10 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#EF4444',
+    backgroundColor: '#F5A623',
   },
   liveBannerContent: { flex: 1 },
-  liveBannerTitle: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
+  liveBannerTitle: { color: '#F5A623', fontSize: 13, fontWeight: '700' },
   liveBannerText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
   chatFab: {
     position: 'absolute', bottom: 24, right: 20, zIndex: 100,

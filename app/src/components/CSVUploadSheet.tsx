@@ -177,7 +177,7 @@ export const CSVUploadSheet: React.FC<CSVUploadSheetProps> = ({ visible, onClose
           {step === 3 && (
             <View style={styles.doneContainer}>
               <View style={styles.checkCircle}>
-                <Ionicons name="checkmark" size={40} color="#10B981" />
+                <Ionicons name="checkmark" size={40} color="#00C9A7" />
               </View>
               <Text style={styles.doneText}>
                 {preview.length} holdings imported successfully
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     padding: 16,
     minHeight: 160,
   },
-  error: { color: '#EF4444', fontSize: 13, marginTop: 12 },
+  error: { color: '#F5A623', fontSize: 13, marginTop: 12 },
   parseBtn: {
     backgroundColor: '#60A5FA',
     borderRadius: 12,
@@ -265,14 +265,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   backBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
-  importBtn: { flex: 2, backgroundColor: '#10B981', borderRadius: 12, padding: 14, alignItems: 'center' },
+  importBtn: { flex: 2, backgroundColor: '#00C9A7', borderRadius: 12, padding: 14, alignItems: 'center' },
   importBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   doneContainer: { alignItems: 'center', padding: 32 },
   checkCircle: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,

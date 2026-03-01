@@ -30,7 +30,7 @@ const FILTER_TABS: { id: FilterTab; label: string }[] = [
 ];
 
 const IMPACT_COLORS: Record<string, string> = {
-  high: '#EF4444',
+  high: '#F5A623',
   medium: '#FBBF24',
   low: '#6B7280',
   none: '#374151',
@@ -38,7 +38,7 @@ const IMPACT_COLORS: Record<string, string> = {
 
 const DIRECTION_COLORS: Record<string, string> = {
   positive: '#34D399',
-  negative: '#EF4444',
+  negative: '#F5A623',
   neutral: '#9CA3AF',
 };
 

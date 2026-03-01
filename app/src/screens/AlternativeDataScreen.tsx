@@ -82,7 +82,7 @@ const PipelineFunnel: React.FC<{ funnel: FDAData['pipelineFunnel'] }> = ({ funne
     { label: 'Phase II', count: funnel.phase2, color: '#60A5FA' },
     { label: 'Phase III', count: funnel.phase3, color: '#F59E0B' },
     { label: 'Phase IV', count: funnel.phase4, color: '#8B5CF6' },
-    { label: 'Approved', count: funnel.approved, color: '#10B981' },
+    { label: 'Approved', count: funnel.approved, color: '#00C9A7' },
   ];
   const maxCount = Math.max(...stages.map((s) => s.count), 1);
 
@@ -197,7 +197,7 @@ export const AlternativeDataScreen: React.FC<AlternativeDataScreenProps> = ({
               </View>
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, {
-                  color: patents.velocity >= 0 ? '#10B981' : '#EF4444',
+                  color: patents.velocity >= 0 ? '#00C9A7' : '#F5A623',
                 }]}>
                   {patents.velocity >= 0 ? '+' : ''}{safeNum(patents.velocity).toFixed(0)}%
                 </Text>
@@ -302,7 +302,7 @@ export const AlternativeDataScreen: React.FC<AlternativeDataScreenProps> = ({
               </View>
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, {
-                  color: contracts.awardGrowth >= 0 ? '#10B981' : '#EF4444',
+                  color: contracts.awardGrowth >= 0 ? '#00C9A7' : '#F5A623',
                 }]}>
                   {contracts.awardGrowth >= 0 ? '+' : ''}{safeNum(contracts.awardGrowth).toFixed(0)}%
                 </Text>
@@ -433,11 +433,11 @@ export const AlternativeDataScreen: React.FC<AlternativeDataScreenProps> = ({
                       </Text>
                       <View style={[styles.pdufaBadge, {
                         backgroundColor: p.isWithin90Days
-                          ? 'rgba(239,68,68,0.15)'
+                          ? 'rgba(245,166,35,0.15)'
                           : 'rgba(245,158,11,0.15)',
                       }]}>
                         <Text style={[styles.pdufaDays, {
-                          color: p.isWithin90Days ? '#EF4444' : '#F59E0B',
+                          color: p.isWithin90Days ? '#F5A623' : '#F59E0B',
                         }]}>
                           {p.daysAway}d
                         </Text>
@@ -458,7 +458,7 @@ export const AlternativeDataScreen: React.FC<AlternativeDataScreenProps> = ({
                   <View key={`approval-${i}`} style={styles.listItem}>
                     <View style={styles.listItemHeader}>
                       <Text style={styles.listItemTitle}>{a.brandName}</Text>
-                      <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                      <Ionicons name="checkmark-circle" size={16} color="#00C9A7" />
                     </View>
                     {a.genericName ? (
                       <Text style={styles.listItemDesc}>{a.genericName}</Text>

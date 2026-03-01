@@ -70,7 +70,7 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                 <Text
                   style={[
                     styles.impactValue,
-                    { color: (sc.portfolioImpact ?? 0) >= 0 ? '#10B981' : '#EF4444' },
+                    { color: (sc.portfolioImpact ?? 0) >= 0 ? '#00C9A7' : '#F5A623' },
                   ]}
                 >
                   {(sc.portfolioImpact ?? 0) >= 0 ? '+' : ''}
@@ -85,7 +85,7 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                 <Text
                   style={[
                     styles.impactValue,
-                    { color: (sc.sp500Impact ?? 0) >= 0 ? '#10B981' : '#EF4444' },
+                    { color: (sc.sp500Impact ?? 0) >= 0 ? '#00C9A7' : '#F5A623' },
                   ]}
                 >
                   {(sc.sp500Impact ?? 0) >= 0 ? '+' : ''}
@@ -109,7 +109,7 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                     <Ionicons
                       name={(sc.bestPerformer.impact ?? 0) >= 0 ? 'arrow-up' : 'arrow-down'}
                       size={12}
-                      color={(sc.bestPerformer.impact ?? 0) >= 0 ? '#4ADE80' : '#F87171'}
+                      color={(sc.bestPerformer.impact ?? 0) >= 0 ? '#00C9A7' : '#F5A623'}
                     />
                     <Text style={styles.performerText}>
                       {sc.bestPerformer.ticker} {(sc.bestPerformer.impact ?? 0) > 0 ? '+' : ''}
@@ -122,7 +122,7 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
                     <Ionicons
                       name={(sc.worstPerformer.impact ?? 0) >= 0 ? 'arrow-up' : 'arrow-down'}
                       size={12}
-                      color={(sc.worstPerformer.impact ?? 0) >= 0 ? '#4ADE80' : '#F87171'}
+                      color={(sc.worstPerformer.impact ?? 0) >= 0 ? '#00C9A7' : '#F5A623'}
                     />
                     <Text style={styles.performerText}>
                       {sc.worstPerformer.ticker} {(sc.worstPerformer.impact ?? 0) > 0 ? '+' : ''}

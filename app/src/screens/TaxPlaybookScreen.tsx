@@ -155,7 +155,7 @@ export const TaxPlaybookScreen: React.FC = () => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Tax Playbook</Text>
+          <Text style={styles.headerTitle}>Tax Education Calculator</Text>
         </View>
         <View style={styles.emptyState}>
           <Text style={{ fontSize: 48 }}>📋</Text>
@@ -174,8 +174,8 @@ export const TaxPlaybookScreen: React.FC = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Tax Playbook</Text>
-        {isTaxLoading && <ActivityIndicator color="#10B981" size="small" />}
+        <Text style={styles.headerTitle}>Tax Education Calculator</Text>
+        {isTaxLoading && <ActivityIndicator color="#00C9A7" size="small" />}
       </View>
 
       {/* Tab selector */}
@@ -190,7 +190,7 @@ export const TaxPlaybookScreen: React.FC = () => {
             <Ionicons
               name={tab.icon as any}
               size={16}
-              color={activeTab === tab.id ? '#10B981' : 'rgba(255,255,255,0.4)'}
+              color={activeTab === tab.id ? '#00C9A7' : 'rgba(255,255,255,0.4)'}
             />
             <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
               {tab.label}
@@ -209,7 +209,7 @@ export const TaxPlaybookScreen: React.FC = () => {
             {/* Tax bracket selector */}
             <Text style={styles.sectionTitle}>Tax-Loss Harvesting</Text>
             <Text style={styles.sectionSubtitle}>
-              Scan your holdings for positions with unrealized losses you can harvest
+              Potential tax-loss harvesting opportunities in your holdings
             </Text>
 
             <Text style={styles.bracketLabel}>Your Tax Bracket</Text>
@@ -236,14 +236,14 @@ export const TaxPlaybookScreen: React.FC = () => {
               <View style={styles.harvestSummary}>
                 <View style={styles.harvestSummaryItem}>
                   <Text style={styles.harvestSummaryLabel}>Unrealized Losses</Text>
-                  <Text style={[styles.harvestSummaryValue, { color: '#EF4444' }]}>
+                  <Text style={[styles.harvestSummaryValue, { color: '#F5A623' }]}>
                     {formatMoney(taxHarvest.totalUnrealizedLoss)}
                   </Text>
                 </View>
                 <View style={styles.harvestSummaryDivider} />
                 <View style={styles.harvestSummaryItem}>
                   <Text style={styles.harvestSummaryLabel}>Estimated Savings</Text>
-                  <Text style={[styles.harvestSummaryValue, { color: '#10B981' }]}>
+                  <Text style={[styles.harvestSummaryValue, { color: '#00C9A7' }]}>
                     {formatMoney(taxHarvest.totalTaxSavings)}
                   </Text>
                 </View>
@@ -285,7 +285,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                         </View>
                         <View style={styles.lossDetailRow}>
                           <Text style={styles.lossDetailLabel}>Unrealized Loss</Text>
-                          <Text style={[styles.lossDetailValue, { color: '#EF4444' }]}>
+                          <Text style={[styles.lossDetailValue, { color: '#F5A623' }]}>
                             {formatMoney(loss.unrealizedLoss)}
                           </Text>
                         </View>
@@ -316,7 +316,7 @@ export const TaxPlaybookScreen: React.FC = () => {
               </View>
             ) : (
               <View style={styles.noLossCard}>
-                <Ionicons name="checkmark-circle" size={32} color="#10B981" />
+                <Ionicons name="checkmark-circle" size={32} color="#00C9A7" />
                 <Text style={styles.noLossTitle}>No Harvesting Opportunities</Text>
                 <Text style={styles.noLossSubtitle}>
                   None of your positions have unrealized losses right now.
@@ -325,7 +325,7 @@ export const TaxPlaybookScreen: React.FC = () => {
             )}
 
             <Text style={styles.aiDisclaimer}>
-              For educational purposes only. Not investment advice.
+              For educational purposes only. Not tax advice. Consult a tax professional for personalized tax advice.
             </Text>
           </View>
         )}
@@ -387,7 +387,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                       <Text
                         style={[
                           styles.taxBreakdownGain,
-                          { color: h.gain >= 0 ? '#10B981' : '#EF4444' },
+                          { color: h.gain >= 0 ? '#00C9A7' : '#F5A623' },
                         ]}
                       >
                         {h.gain >= 0 ? '+' : ''}{formatMoney(h.gain)}
@@ -405,7 +405,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                         <>
                           <View style={styles.taxBreakdownRow}>
                             <Text style={styles.taxBreakdownLabel}>Tax if sell today</Text>
-                            <Text style={[styles.taxBreakdownValue, { color: '#EF4444' }]}>
+                            <Text style={[styles.taxBreakdownValue, { color: '#F5A623' }]}>
                               {formatMoney(h.taxIfSellNow)}
                             </Text>
                           </View>
@@ -414,7 +414,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                               <Text style={styles.taxBreakdownLabel}>
                                 Tax if wait {h.daysToLongTerm}d
                               </Text>
-                              <Text style={[styles.taxBreakdownValue, { color: '#10B981' }]}>
+                              <Text style={[styles.taxBreakdownValue, { color: '#00C9A7' }]}>
                                 {formatMoney(h.taxIfWait)}
                               </Text>
                             </View>
@@ -454,13 +454,13 @@ export const TaxPlaybookScreen: React.FC = () => {
             <View style={styles.yearEndSummary}>
               <View style={styles.yearEndRow}>
                 <Text style={styles.yearEndLabel}>Projected Capital Gains</Text>
-                <Text style={[styles.yearEndValue, { color: '#10B981' }]}>
+                <Text style={[styles.yearEndValue, { color: '#00C9A7' }]}>
                   {formatMoney(realizedGains.totalGains)}
                 </Text>
               </View>
               <View style={styles.yearEndRow}>
                 <Text style={styles.yearEndLabel}>Available Losses to Offset</Text>
-                <Text style={[styles.yearEndValue, { color: '#EF4444' }]}>
+                <Text style={[styles.yearEndValue, { color: '#F5A623' }]}>
                   {formatMoney(Math.abs(realizedGains.totalLosses))}
                 </Text>
               </View>
@@ -470,7 +470,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                   style={[
                     styles.yearEndValue,
                     {
-                      color: realizedGains.net > 0 ? '#FBBF24' : '#10B981',
+                      color: realizedGains.net > 0 ? '#FBBF24' : '#00C9A7',
                       fontWeight: '800',
                     },
                   ]}
@@ -482,7 +482,7 @@ export const TaxPlaybookScreen: React.FC = () => {
                 <Text style={styles.yearEndLabel}>
                   Estimated Tax ({taxBracket}% bracket)
                 </Text>
-                <Text style={[styles.yearEndValue, { color: '#EF4444' }]}>
+                <Text style={[styles.yearEndValue, { color: '#F5A623' }]}>
                   {formatMoney(Math.max(0, realizedGains.net) * (taxBracket / 100))}
                 </Text>
               </View>
@@ -607,7 +607,7 @@ export const TaxPlaybookScreen: React.FC = () => {
             {longTermMilestones.length > 0 && (
               <View style={styles.calendarMilestones}>
                 <View style={styles.calendarMilestonesHeader}>
-                  <Ionicons name="timer-outline" size={18} color="#10B981" />
+                  <Ionicons name="timer-outline" size={18} color="#00C9A7" />
                   <Text style={styles.calendarMilestonesTitle}>Long-Term Milestones</Text>
                 </View>
                 {longTermMilestones.map((h) => {
@@ -701,7 +701,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   tabActive: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
   },
   tabText: {
     color: 'rgba(255,255,255,0.4)',
@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   tabTextActive: {
-    color: '#10B981',
+    color: '#00C9A7',
   },
 
   // ─── Section ───
@@ -751,8 +751,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
   },
   bracketPillActive: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
-    borderColor: '#10B981',
+    backgroundColor: 'rgba(0,201,167,0.15)',
+    borderColor: '#00C9A7',
   },
   bracketPillText: {
     color: 'rgba(255,255,255,0.5)',
@@ -760,7 +760,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bracketPillTextActive: {
-    color: '#10B981',
+    color: '#00C9A7',
   },
 
   // ─── Filing Status ───
@@ -847,13 +847,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   lossBadge: {
-    backgroundColor: 'rgba(16,185,129,0.12)',
+    backgroundColor: 'rgba(0,201,167,0.12)',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   lossBadgeText: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -974,13 +974,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   savingsHighlight: {
-    backgroundColor: 'rgba(16,185,129,0.1)',
+    backgroundColor: 'rgba(0,201,167,0.1)',
     borderRadius: 8,
     padding: 8,
     marginTop: 4,
   },
   savingsText: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
@@ -1087,7 +1087,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   milestoneGain: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     marginTop: 2,
   },
@@ -1222,11 +1222,11 @@ const styles = StyleSheet.create({
 
   // ─── Calendar Milestones ───
   calendarMilestones: {
-    backgroundColor: 'rgba(16,185,129,0.06)',
+    backgroundColor: 'rgba(0,201,167,0.06)',
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.12)',
+    borderColor: 'rgba(0,201,167,0.12)',
   },
   calendarMilestonesHeader: {
     flexDirection: 'row',
@@ -1235,7 +1235,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   calendarMilestonesTitle: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 15,
     fontWeight: '700',
   },

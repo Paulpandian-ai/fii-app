@@ -24,6 +24,7 @@ import { LearningPaths } from '../components/LearningPaths';
 import { AskCoach } from '../components/AskCoach';
 import { ProgressSection } from '../components/ProgressSection';
 import { VolatilityAlert } from '../components/VolatilityAlert';
+import { DisclaimerFooter } from '../components/DisclaimerFooter';
 
 export const CoachScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
@@ -186,6 +187,8 @@ export const CoachScreen: React.FC = () => {
           achievements={achievements}
           isAchievementsLoading={isAchievementsLoading}
         />
+
+        <DisclaimerFooter />
       </ScrollView>
 
       {/* Volatility Alert (Modal overlay) */}

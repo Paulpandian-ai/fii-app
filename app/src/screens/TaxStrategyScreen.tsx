@@ -61,7 +61,7 @@ export const TaxStrategyScreen: React.FC = () => {
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tax Strategy</Text>
-        {isTaxLoading && <ActivityIndicator color="#10B981" size="small" />}
+        {isTaxLoading && <ActivityIndicator color="#00C9A7" size="small" />}
       </View>
 
       <ScrollView
@@ -175,12 +175,12 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: 'rgba(0,201,167,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepNumberText: {
-    color: '#10B981',
+    color: '#00C9A7',
     fontSize: 12,
     fontWeight: '800',
   },

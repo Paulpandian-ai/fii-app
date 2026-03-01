@@ -16,20 +16,15 @@ import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { getBaskets } from '../services/api';
-import type { Basket, BasketStock, RootStackParamList, Signal } from '../types';
+import type { Basket, BasketStock, RootStackParamList, ScoreLabel } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
-
 const RISK_COLORS: Record<string, string> = {
-  Low: '#10B981',
+  Low: '#00C9A7',
   Medium: '#F59E0B',
-  High: '#EF4444',
+  High: '#F5A623',
 };
 
 export const BasketListScreen: React.FC = () => {
@@ -81,8 +76,8 @@ export const BasketListScreen: React.FC = () => {
         <Text style={styles.stockName} numberOfLines={1}>{stock.companyName}</Text>
       </View>
       <Text style={styles.stockWeight}>{((stock.weight ?? 0) * 100).toFixed(0)}%</Text>
-      <View style={[styles.signalBadge, { backgroundColor: SIGNAL_COLORS[stock.signal] + '20' }]}>
-        <Text style={[styles.signalText, { color: SIGNAL_COLORS[stock.signal] }]}>{stock.signal}</Text>
+      <View style={[styles.signalBadge, { backgroundColor: getScoreColor(stock.score) + '20' }]}>
+        <Text style={[styles.signalText, { color: getScoreColor(stock.score) }]}>{getScoreLabel(stock.score)}</Text>
       </View>
       <Text style={styles.stockScore}>{(stock.score ?? 0).toFixed(1)}</Text>
     </TouchableOpacity>
@@ -122,7 +117,7 @@ export const BasketListScreen: React.FC = () => {
           </View>
           <View style={styles.metaItem}>
             <Text style={styles.metaLabel}>YTD</Text>
-            <Text style={[styles.metaValue, { color: (item.returnYTD ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+            <Text style={[styles.metaValue, { color: (item.returnYTD ?? 0) >= 0 ? '#00C9A7' : '#F5A623' }]}>
               {(item.returnYTD ?? 0) >= 0 ? '+' : ''}{(item.returnYTD ?? 0).toFixed(1)}%
             </Text>
           </View>

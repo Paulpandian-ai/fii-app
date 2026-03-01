@@ -19,7 +19,7 @@ const DONUT_STROKE = 20;
 
 // Allocation slice colors
 const SLICE_COLORS = [
-  '#60A5FA', '#FBBF24', '#10B981', '#F472B6',
+  '#60A5FA', '#FBBF24', '#00C9A7', '#F472B6',
   '#A78BFA', '#F97316', '#06B6D4', '#84CC16',
   '#E879F9', '#FB923C', '#2DD4BF', '#FCA5A5',
 ];
@@ -166,7 +166,7 @@ export const BestPortfolio: React.FC<Props> = ({
               {((a.weight ?? 0) * 100).toFixed(1)}%
             </Text>
             <View style={styles.allocScore}>
-              <SignalBadge signal={a.signal} />
+              <SignalBadge scoreLabel={a.scoreLabel} score={a.score} />
             </View>
           </View>
         ))}
@@ -368,11 +368,11 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   compBarBetter: {
-    color: '#10B981',
+    color: '#00C9A7',
   },
   moneyBanner: {
     marginTop: 14,
-    backgroundColor: 'rgba(239,68,68,0.1)',
+    backgroundColor: 'rgba(245,166,35,0.1)',
     borderRadius: 10,
     padding: 12,
     alignItems: 'center',
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   moneyAmount: {
-    color: '#EF4444',
+    color: '#F5A623',
     fontWeight: '800',
     fontSize: 16,
   },

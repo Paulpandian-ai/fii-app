@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getCurrentSession } from './auth';
 import { useSignalStore } from '../store/signalStore';
-import type { Signal } from '../types';
+import { getScoreLabel } from '../utils/scoreColors';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.fii.app';
 
@@ -70,15 +70,18 @@ setInterval(() => {
 
 /** Helper: extract signal summaries from any API response and cache them. */
 const _cacheSignals = (
-  items: Array<{ ticker?: string; score?: number; signal?: string; compositeScore?: number }>,
+  items: Array<{ ticker?: string; score?: number; signal?: string; compositeScore?: number; score_label?: string; scoreLabel?: string }>,
 ) => {
   const summaries = items
-    .filter((i) => i.ticker && (i.score != null || i.compositeScore != null) && i.signal)
-    .map((i) => ({
-      ticker: i.ticker!,
-      score: i.score ?? i.compositeScore ?? 0,
-      signal: (i.signal as Signal) || 'HOLD',
-    }));
+    .filter((i) => i.ticker && (i.score != null || i.compositeScore != null))
+    .map((i) => {
+      const score = i.score ?? i.compositeScore ?? 0;
+      return {
+        ticker: i.ticker!,
+        score,
+        scoreLabel: (i.score_label ?? i.scoreLabel ?? getScoreLabel(score)) as any,
+      };
+    });
   if (summaries.length > 0) {
     useSignalStore.getState().upsertSignals(summaries);
   }

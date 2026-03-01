@@ -1,28 +1,23 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import type { Signal } from '../types';
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { ScoreLabel } from '../types';
 
 interface StockMiniCardProps {
   ticker: string;
   companyName: string;
   price: number;
   changePercent: number;
-  signal?: Signal | null;
+  scoreLabel?: ScoreLabel | null;
   aiScore?: number | null;
   onPress: () => void;
 }
 
-const SIGNAL_COLORS: Record<string, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
-
 export const StockMiniCard: React.FC<StockMiniCardProps> = React.memo(
-  ({ ticker, companyName, price, changePercent, signal, aiScore, onPress }) => {
+  ({ ticker, companyName, price, changePercent, scoreLabel, aiScore, onPress }) => {
     const isPositive = changePercent >= 0;
-    const changeColor = isPositive ? '#10B981' : '#EF4444';
-    const signalColor = signal ? SIGNAL_COLORS[signal] || '#6B7280' : '#6B7280';
+    const changeColor = isPositive ? '#00C9A7' : '#F5A623';
+    const signalColor = scoreLabel ? (SCORE_COLORS[scoreLabel] || '#6B7280') : '#6B7280';
 
     return (
       <TouchableOpacity
@@ -30,18 +25,18 @@ export const StockMiniCard: React.FC<StockMiniCardProps> = React.memo(
         onPress={onPress}
         activeOpacity={0.8}
         accessibilityRole="button"
-        accessibilityLabel={`${ticker} ${signal || ''} ${price}`}
+        accessibilityLabel={`${ticker} ${scoreLabel || ''} ${price}`}
       >
         {/* Signal indicator bar */}
         <View style={[styles.signalBar, { backgroundColor: signalColor }]} />
 
         <View style={styles.content}>
-          {/* Header: ticker + signal badge */}
+          {/* Header: ticker + score label badge */}
           <View style={styles.header}>
             <Text style={styles.ticker}>{ticker}</Text>
-            {signal && (
+            {scoreLabel && (
               <View style={[styles.signalBadge, { backgroundColor: signalColor }]}>
-                <Text style={styles.signalText}>{signal}</Text>
+                <Text style={styles.signalText}>{scoreLabel}</Text>
               </View>
             )}
           </View>

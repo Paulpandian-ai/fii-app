@@ -136,13 +136,13 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
             {inWatchlist && (
               <Ionicons name="bookmark" size={10} color="#60A5FA" style={styles.bookmarkIcon} />
             )}
-            {item.score != null && item.signal != null && (
+            {item.score != null && (
               <View style={[styles.searchSignalPill, {
-                backgroundColor: item.signal === 'BUY' ? 'rgba(16,185,129,0.15)' : item.signal === 'SELL' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                backgroundColor: item.score >= 7 ? 'rgba(0,201,167,0.15)' : item.score < 4 ? 'rgba(88,86,214,0.15)' : 'rgba(142,142,147,0.15)',
               }]}>
                 <Text style={[styles.searchSignalText, {
-                  color: item.signal === 'BUY' ? '#10B981' : item.signal === 'SELL' ? '#EF4444' : '#F59E0B',
-                }]}>{item.signal} {item.score.toFixed(1)}</Text>
+                  color: item.score >= 7 ? '#00C9A7' : item.score < 4 ? '#5856D6' : '#8E8E93',
+                }]}>{item.score.toFixed(1)}</Text>
               </View>
             )}
           </View>

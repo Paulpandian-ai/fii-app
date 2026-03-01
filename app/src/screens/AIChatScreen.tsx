@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { sendChatMessage } from '../services/api';
+import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
 
 interface ChatMsg {
   role: 'user' | 'assistant';
@@ -25,7 +26,7 @@ interface ChatMsg {
 
 const SUGGESTED_QUESTIONS = [
   'What does the FII score mean?',
-  'Is now a good time to buy tech stocks?',
+  'What factors are driving tech scores right now?',
   'Explain factor investing to me',
   'What affects supply chain scores?',
 ];
@@ -192,6 +193,8 @@ export const AIChatScreen: React.FC = () => {
             )}
           </TouchableOpacity>
         </View>
+
+        {messages.some((m) => m.role === 'assistant') && <AIContentDisclaimer />}
 
         <View style={styles.disclaimer}>
           <Ionicons name="information-circle-outline" size={12} color="rgba(255,255,255,0.2)" />

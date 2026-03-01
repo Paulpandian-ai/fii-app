@@ -107,7 +107,7 @@ export const DisciplineScore: React.FC<Props> = ({ data, isLoading }) => {
           <Text style={styles.statLabel}>Panic Events Survived</Text>
         </View>
         <View style={styles.statCard}>
-          <Ionicons name="cash" size={20} color="#10B981" />
+          <Ionicons name="cash" size={20} color="#00C9A7" />
           <Text style={styles.statValue}>
             ${((stats.worstAvoided ?? 0) >= 1000
               ? `${((stats.worstAvoided ?? 0) / 1000).toFixed(1)}K`

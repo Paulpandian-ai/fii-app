@@ -12,13 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useWatchlistStore } from '../store/watchlistStore';
-import type { RootStackParamList, Signal, WatchlistItem } from '../types';
-
-const SIGNAL_COLORS: Record<Signal, string> = {
-  BUY: '#10B981',
-  HOLD: '#F59E0B',
-  SELL: '#EF4444',
-};
+import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import type { RootStackParamList, ScoreLabel, WatchlistItem } from '../types';
 
 interface WatchlistTabsProps {
   onOpenSearch?: () => void;
@@ -73,15 +68,15 @@ export const WatchlistTabs: React.FC<WatchlistTabsProps> = ({ onOpenSearch }) =>
         <Text style={styles.itemName} numberOfLines={1}>{item.companyName}</Text>
       </View>
       <View style={styles.itemRight}>
-        {item.signal && (
-          <View style={[styles.signalPill, { backgroundColor: SIGNAL_COLORS[item.signal] + '20' }]}>
-            <Text style={[styles.signalText, { color: SIGNAL_COLORS[item.signal] }]}>
-              {item.signal}
+        {item.scoreLabel && (
+          <View style={[styles.signalPill, { backgroundColor: getScoreColor(item.score) + '20' }]}>
+            <Text style={[styles.signalText, { color: getScoreColor(item.score) }]}>
+              {item.scoreLabel}
             </Text>
           </View>
         )}
         {item.changePercent != null && (
-          <Text style={[styles.itemChange, { color: (item.changePercent ?? 0) >= 0 ? '#10B981' : '#EF4444' }]}>
+          <Text style={[styles.itemChange, { color: (item.changePercent ?? 0) >= 0 ? '#00C9A7' : '#F5A623' }]}>
             {(item.changePercent ?? 0) >= 0 ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
           </Text>
         )}

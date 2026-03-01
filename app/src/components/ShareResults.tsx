@@ -72,7 +72,7 @@ export const ShareResults: React.FC<Props> = ({ optimization, projection }) => {
             </View>
             <View style={styles.statBlock}>
               <Text style={styles.statLabel}>Return</Text>
-              <Text style={[styles.statValue, { color: '#10B981' }]}>
+              <Text style={[styles.statValue, { color: '#00C9A7' }]}>
                 {(opt.expectedReturn ?? 0).toFixed(1)}%
               </Text>
             </View>

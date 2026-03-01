@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   icon: {
-    color: '#EF4444',
+    color: '#F5A623',
     fontSize: 48,
     fontWeight: '800',
     marginBottom: 16,

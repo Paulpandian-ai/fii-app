@@ -32,9 +32,11 @@ import type {
   AlternativeData,
   FactorCategory,
   Confidence,
-  Signal,
+  ScoreLabel,
   Alternative,
 } from '../types';
+import { ScoreInfoTooltip } from '../components/ScoreInfoTooltip';
+import { getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 const FACTOR_NAMES: Record<string, string> = {
   A1: 'Operational Disruption', A2: 'Supplier Earnings Miss', A3: 'Lead Time Extensions',
@@ -55,9 +57,9 @@ const CATEGORIES: { id: string; name: string; icon: string; factorIds: string[] 
 ];
 
 const CONFIDENCE_COLORS: Record<Confidence, string> = {
-  HIGH: '#10B981',
-  MEDIUM: '#F59E0B',
-  LOW: '#EF4444',
+  HIGH: '#4A90D9',
+  MEDIUM: '#8E8E93',
+  LOW: '#F5A623',
 };
 
 /** Safe number: coerce anything to a finite number or 0. */
@@ -239,11 +241,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const confidence = analysis.confidence || 'MEDIUM';
   const showAlternatives =
     analysis.alternatives?.length > 0 &&
-    (analysis.signal === 'SELL' || (analysis.signal === 'HOLD' && safeNum(analysis.compositeScore) <= 4));
+    safeNum(analysis.compositeScore) <= 4;
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Close signal detail">
+      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Close score detail">
         <Ionicons name="close" size={28} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
@@ -254,7 +256,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             <RadarScore
               scores={factors.dimensionScores}
               size={200}
-              signal={analysis.signal as 'BUY' | 'HOLD' | 'SELL'}
+              scoreLabel={analysis.scoreLabel as ScoreLabel}
             />
           ) : (
             <ScoreRing score={safeNum(analysis.compositeScore)} size={100} />
@@ -264,13 +266,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           {hasPriceToShow && (
             <View style={styles.priceRow}>
               <Text style={styles.price}>${priceValue.toFixed(2)}</Text>
-              <Text style={[styles.priceChange, { color: isPositive ? '#10B981' : '#EF4444' }]}>
+              <Text style={[styles.priceChange, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
                 {isPositive ? '+' : ''}${priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePct.toFixed(1)}%)
               </Text>
             </View>
           )}
           <View style={styles.badgeRow}>
-            <SignalBadge signal={analysis.signal as Signal} />
+            <SignalBadge scoreLabel={analysis.scoreLabel as ScoreLabel} score={safeNum(analysis.compositeScore)} />
+            <ScoreInfoTooltip />
             <View style={[styles.confidencePill, { backgroundColor: CONFIDENCE_COLORS[confidence] + '30' }]}>
               <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] }]}>
                 {confidence}
@@ -305,11 +308,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             {/* Top Positive */}
             {(factors.topPositive || []).map((f: FactorContribution, i: number) => (
               <View key={`pos-${f.factorId}-${i}`} style={styles.alphaCard}>
-                <View style={[styles.alphaAccent, { backgroundColor: '#10B981' }]} />
+                <View style={[styles.alphaAccent, { backgroundColor: '#00C9A7' }]} />
                 <View style={styles.alphaContent}>
                   <View style={styles.alphaRow}>
                     <Text style={styles.alphaName}>{f.factorName}</Text>
-                    <Text style={[styles.alphaScore, { color: '#10B981' }]}>
+                    <Text style={[styles.alphaScore, { color: '#00C9A7' }]}>
                       +{safeNum(f.normalizedScore).toFixed(1)}
                     </Text>
                   </View>
@@ -321,11 +324,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             {/* Top Negative */}
             {(factors.topNegative || []).map((f: FactorContribution, i: number) => (
               <View key={`neg-${f.factorId}-${i}`} style={styles.alphaCard}>
-                <View style={[styles.alphaAccent, { backgroundColor: '#EF4444' }]} />
+                <View style={[styles.alphaAccent, { backgroundColor: '#F5A623' }]} />
                 <View style={styles.alphaContent}>
                   <View style={styles.alphaRow}>
                     <Text style={styles.alphaName}>{f.factorName}</Text>
-                    <Text style={[styles.alphaScore, { color: '#EF4444' }]}>
+                    <Text style={[styles.alphaScore, { color: '#F5A623' }]}>
                       {safeNum(f.normalizedScore).toFixed(1)}
                     </Text>
                   </View>
@@ -372,13 +375,13 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                           styles.factorBarFill,
                           {
                             width: `${Math.min(100, barWidth)}%`,
-                            backgroundColor: isPos ? '#10B981' : '#EF4444',
+                            backgroundColor: isPos ? '#00C9A7' : '#F5A623',
                             alignSelf: isPos ? 'flex-start' : 'flex-end',
                           },
                         ]} />
                       </View>
                       <Text style={[styles.factorBarValue, {
-                        color: isPos ? '#10B981' : f.normalizedScore < 0 ? '#EF4444' : 'rgba(255,255,255,0.5)',
+                        color: isPos ? '#00C9A7' : f.normalizedScore < 0 ? '#F5A623' : 'rgba(255,255,255,0.5)',
                       }]}>
                         {isPos ? '+' : ''}{safeNum(f.normalizedScore).toFixed(1)}
                       </Text>
@@ -431,7 +434,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                     <View style={styles.subFactors}>
                       {cat.subFactors.map((sf) => {
                         const sfScore = safeNum(sf.score);
-                        const sfColor = sfScore >= 0 ? '#10B981' : '#EF4444';
+                        const sfColor = sfScore >= 0 ? '#00C9A7' : '#F5A623';
                         const sign = sfScore >= 0 ? '+' : '';
                         return (
                           <View key={sf.id} style={styles.subFactorRow}>
@@ -465,17 +468,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               </View>
               <View style={styles.techSignals}>
                 {technicals.signals?.trend && (
-                  <View style={[styles.techPill, { backgroundColor: technicals.signals.trend.includes('bullish') ? 'rgba(16,185,129,0.15)' : technicals.signals.trend.includes('bearish') ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
-                    <Ionicons name="trending-up-outline" size={12} color={technicals.signals.trend.includes('bullish') ? '#10B981' : technicals.signals.trend.includes('bearish') ? '#EF4444' : '#94A3B8'} />
-                    <Text style={[styles.techPillText, { color: technicals.signals.trend.includes('bullish') ? '#10B981' : technicals.signals.trend.includes('bearish') ? '#EF4444' : '#94A3B8' }]}>
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.trend.includes('bullish') ? 'rgba(74,144,217,0.15)' : technicals.signals.trend.includes('bearish') ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="trending-up-outline" size={12} color={technicals.signals.trend.includes('bullish') ? '#4A90D9' : technicals.signals.trend.includes('bearish') ? '#F5A623' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.trend.includes('bullish') ? '#4A90D9' : technicals.signals.trend.includes('bearish') ? '#F5A623' : '#94A3B8' }]}>
                       {technicals.signals.trend}
                     </Text>
                   </View>
                 )}
                 {technicals.signals?.momentum && (
-                  <View style={[styles.techPill, { backgroundColor: technicals.signals.momentum === 'oversold' ? 'rgba(16,185,129,0.15)' : technicals.signals.momentum === 'overbought' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
-                    <Ionicons name="speedometer-outline" size={12} color={technicals.signals.momentum === 'oversold' ? '#10B981' : technicals.signals.momentum === 'overbought' ? '#EF4444' : '#94A3B8'} />
-                    <Text style={[styles.techPillText, { color: technicals.signals.momentum === 'oversold' ? '#10B981' : technicals.signals.momentum === 'overbought' ? '#EF4444' : '#94A3B8' }]}>
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.momentum === 'oversold' ? 'rgba(74,144,217,0.15)' : technicals.signals.momentum === 'overbought' ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="speedometer-outline" size={12} color={technicals.signals.momentum === 'oversold' ? '#4A90D9' : technicals.signals.momentum === 'overbought' ? '#F5A623' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.momentum === 'oversold' ? '#4A90D9' : technicals.signals.momentum === 'overbought' ? '#F5A623' : '#94A3B8' }]}>
                       {technicals.signals.momentum}
                     </Text>
                   </View>
@@ -523,11 +526,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <View style={styles.healthCardLeft}>
                 <View style={[styles.healthGradeBadge, {
                   borderColor: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                    ? '#10B981' : fundamentals.grade.startsWith('C') ? '#F59E0B' : '#EF4444',
+                    ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
                 }]}>
                   <Text style={[styles.healthGradeText, {
                     color: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                      ? '#10B981' : fundamentals.grade.startsWith('C') ? '#F59E0B' : '#EF4444',
+                      ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
                   }]}>
                     {fundamentals.grade}
                   </Text>
@@ -536,7 +539,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Text style={styles.healthTitle}>Financial Health</Text>
                   {fundamentals.dcf && fundamentals.dcf.fairValue > 0 && (
                     <Text style={[styles.healthDcf, {
-                      color: (fundamentals.dcf.upside ?? 0) >= 0 ? '#10B981' : '#EF4444',
+                      color: (fundamentals.dcf.upside ?? 0) >= 0 ? '#00C9A7' : '#F5A623',
                     }]}>
                       Fair Value: ${safeNum(fundamentals.dcf.fairValue).toFixed(0)}
                       {fundamentals.dcf.upside != null
@@ -615,22 +618,22 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 <View style={styles.stressPreview}>
                   <Text style={styles.stressPreviewLabel}>Severely Adverse</Text>
                   <View style={styles.stressPreviewRow}>
-                    <Text style={[styles.stressPreviewImpact, { color: '#EF4444' }]}>
+                    <Text style={[styles.stressPreviewImpact, { color: '#F5A623' }]}>
                       {severe.priceImpact > 0 ? '+' : ''}{severe.priceImpact}%
                     </Text>
                     <View style={[styles.stressResilienceBadge, {
                       backgroundColor: severe.resilienceScore >= 7
-                        ? 'rgba(16,185,129,0.15)'
+                        ? 'rgba(0,201,167,0.15)'
                         : severe.resilienceScore >= 5
                         ? 'rgba(245,158,11,0.15)'
                         : 'rgba(239,68,80,0.15)',
                     }]}>
                       <Text style={[styles.stressResilienceText, {
                         color: severe.resilienceScore >= 7
-                          ? '#10B981'
+                          ? '#00C9A7'
                           : severe.resilienceScore >= 5
-                          ? '#F59E0B'
-                          : '#EF4444',
+                          ? '#8E8E93'
+                          : '#F5A623',
                       }]}>
                         {severe.resilienceScore.toFixed(1)} / 10
                       </Text>
@@ -646,17 +649,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Text style={styles.stressScenarioName}>{scenario.scenario}</Text>
                   <View style={[styles.stressResilienceBadge, {
                     backgroundColor: scenario.resilienceScore >= 7
-                      ? 'rgba(16,185,129,0.15)'
+                      ? 'rgba(0,201,167,0.15)'
                       : scenario.resilienceScore >= 5
-                      ? 'rgba(245,158,11,0.15)'
-                      : 'rgba(239,68,80,0.15)',
+                      ? 'rgba(142,142,147,0.15)'
+                      : 'rgba(245,166,35,0.15)',
                   }]}>
                     <Text style={[styles.stressResilienceText, {
                       color: scenario.resilienceScore >= 7
-                        ? '#10B981'
+                        ? '#00C9A7'
                         : scenario.resilienceScore >= 5
-                        ? '#F59E0B'
-                        : '#EF4444',
+                        ? '#8E8E93'
+                        : '#F5A623',
                     }]}>
                       {scenario.resilienceScore.toFixed(1)}
                     </Text>
@@ -671,23 +674,23 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.3)" />
                   <View style={styles.stressPriceCol}>
                     <Text style={styles.stressPriceLabel}>Stressed</Text>
-                    <Text style={[styles.stressPriceValue, { color: '#EF4444' }]}>
+                    <Text style={[styles.stressPriceValue, { color: '#F5A623' }]}>
                       ${scenario.stressedPrice}
                     </Text>
                   </View>
                   <View style={[styles.stressImpactPill, {
                     backgroundColor: scenario.priceImpact > -10
-                      ? 'rgba(16,185,129,0.15)'
+                      ? 'rgba(0,201,167,0.15)'
                       : scenario.priceImpact > -30
-                      ? 'rgba(245,158,11,0.15)'
-                      : 'rgba(239,68,80,0.15)',
+                      ? 'rgba(142,142,147,0.15)'
+                      : 'rgba(245,166,35,0.15)',
                   }]}>
                     <Text style={[styles.stressImpactText, {
                       color: scenario.priceImpact > -10
-                        ? '#10B981'
+                        ? '#00C9A7'
                         : scenario.priceImpact > -30
-                        ? '#F59E0B'
-                        : '#EF4444',
+                        ? '#8E8E93'
+                        : '#F5A623',
                     }]}>
                       {scenario.priceImpact > 0 ? '+' : ''}{scenario.priceImpact}%
                     </Text>
@@ -740,7 +743,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               >
                 <View style={styles.altHeader}>
                   <Text style={styles.altTicker}>{alt.ticker}</Text>
-                  <SignalBadge signal={alt.signal as Signal} />
+                  <SignalBadge scoreLabel={alt.scoreLabel as ScoreLabel} score={alt.score} />
                 </View>
                 <Text style={styles.altName}>{alt.companyName}</Text>
                 <Text style={styles.altReason}>{alt.reason}</Text>
@@ -775,12 +778,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         {/* Signal History */}
         {signalHistory.length > 1 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Signal History (30 Days)</Text>
+            <Text style={styles.sectionTitle}>Score History (30 Days)</Text>
             <View style={styles.historyCard}>
               <View style={styles.historyDots}>
                 {signalHistory.map((point, idx) => {
                   const scoreNorm = Math.max(0, Math.min(1, ((point.score ?? 0) - 1) / 9));
-                  const color = (point.score ?? 0) >= 7 ? '#34D399' : (point.score ?? 0) <= 3.5 ? '#EF4444' : '#FBBF24';
+                  const color = getScoreColor(point.score ?? 0);
                   return (
                     <View key={`${point.date}-${idx}`} style={styles.historyDotCol}>
                       <View style={[styles.historyDot, { backgroundColor: color, bottom: scoreNorm * 40 }]} />
@@ -816,9 +819,9 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               </TouchableOpacity>
             </View>
             {recentEvents.slice(0, 5).map((event, idx) => {
-              const impactColor = event.impact === 'high' ? '#EF4444' : event.impact === 'medium' ? '#FBBF24' : '#6B7280';
+              const impactColor = event.impact === 'high' ? '#F5A623' : event.impact === 'medium' ? '#8E8E93' : '#6B7280';
               const dirIcon = event.direction === 'positive' ? 'trending-up' : event.direction === 'negative' ? 'trending-down' : 'remove';
-              const dirColor = event.direction === 'positive' ? '#34D399' : event.direction === 'negative' ? '#EF4444' : '#9CA3AF';
+              const dirColor = event.direction === 'positive' ? '#4A90D9' : event.direction === 'negative' ? '#F5A623' : '#9CA3AF';
               return (
                 <TouchableOpacity
                   key={`${event.timestamp}-${idx}`}

@@ -154,11 +154,11 @@ export const WealthAdvisorScreen: React.FC = () => {
     if (sectorCount >= 5) strengths.push(`Diversified across ${sectorCount} sectors`);
     if (sectorCount < 3) weaknesses.push(`Concentrated in only ${sectorCount} sector${sectorCount === 1 ? '' : 's'}`);
 
-    const buyCount = holdings.filter((h) => signals[h.ticker]?.signal === 'BUY').length;
-    if (buyCount > holdings.length * 0.6) strengths.push(`${buyCount} of ${holdings.length} holdings have BUY signals`);
+    const highScoreCount = holdings.filter((h) => (signals[h.ticker]?.score ?? 0) >= 7).length;
+    if (highScoreCount > holdings.length * 0.6) strengths.push(`${highScoreCount} of ${holdings.length} holdings have strong FII scores`);
 
-    const sellCount = holdings.filter((h) => signals[h.ticker]?.signal === 'SELL').length;
-    if (sellCount > 0) weaknesses.push(`${sellCount} holding${sellCount !== 1 ? 's' : ''} with SELL signal — review positions`);
+    const lowScoreCount = holdings.filter((h) => (signals[h.ticker]?.score ?? 0) > 0 && (signals[h.ticker]?.score ?? 0) < 4).length;
+    if (lowScoreCount > 0) weaknesses.push(`${lowScoreCount} holding${lowScoreCount !== 1 ? 's' : ''} with low FII scores — review positions`);
 
     if (diversification && diversification.diversificationScore < 50) {
       opportunities.push('Improve diversification — consider international or bond exposure');
@@ -207,7 +207,7 @@ export const WealthAdvisorScreen: React.FC = () => {
         category: 'Cash Position',
         reason: 'Market volatility is elevated — consider keeping 10% in cash for opportunities.',
         icon: 'wallet',
-        color: '#10B981',
+        color: '#00C9A7',
       });
     }
   }
@@ -219,13 +219,13 @@ export const WealthAdvisorScreen: React.FC = () => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Wealth Advisor</Text>
+          <Text style={styles.headerTitle}>Portfolio Analytics</Text>
         </View>
         <View style={styles.emptyState}>
           <Text style={{ fontSize: 48 }}>💰</Text>
           <Text style={styles.emptyTitle}>Add Your Portfolio First</Text>
           <Text style={styles.emptySubtitle}>
-            Add at least 3 holdings in the Portfolio tab to get personalized wealth recommendations.
+            Add at least 3 holdings in the Portfolio tab to get personalized portfolio analytics.
           </Text>
         </View>
       </LinearGradient>
@@ -238,7 +238,7 @@ export const WealthAdvisorScreen: React.FC = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Wealth Advisor</Text>
+        <Text style={styles.headerTitle}>Portfolio Analytics</Text>
         {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
       </View>
 
@@ -260,10 +260,10 @@ export const WealthAdvisorScreen: React.FC = () => {
           ) : hasRun ? (
             <View style={styles.briefingContainer}>
               {strengths.length > 0 && (
-                <View style={[styles.briefingCard, { borderLeftColor: '#10B981' }]}>
+                <View style={[styles.briefingCard, { borderLeftColor: '#00C9A7' }]}>
                   <View style={styles.briefingHeader}>
-                    <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                    <Text style={[styles.briefingLabel, { color: '#10B981' }]}>Strengths</Text>
+                    <Ionicons name="checkmark-circle" size={18} color="#00C9A7" />
+                    <Text style={[styles.briefingLabel, { color: '#00C9A7' }]}>Strengths</Text>
                   </View>
                   {strengths.map((s, i) => (
                     <Text key={i} style={styles.briefingText}>• {s}</Text>
@@ -272,10 +272,10 @@ export const WealthAdvisorScreen: React.FC = () => {
               )}
 
               {weaknesses.length > 0 && (
-                <View style={[styles.briefingCard, { borderLeftColor: '#EF4444' }]}>
+                <View style={[styles.briefingCard, { borderLeftColor: '#F5A623' }]}>
                   <View style={styles.briefingHeader}>
-                    <Ionicons name="alert-circle" size={18} color="#EF4444" />
-                    <Text style={[styles.briefingLabel, { color: '#EF4444' }]}>Weaknesses</Text>
+                    <Ionicons name="alert-circle" size={18} color="#F5A623" />
+                    <Text style={[styles.briefingLabel, { color: '#F5A623' }]}>Weaknesses</Text>
                   </View>
                   {weaknesses.map((w, i) => (
                     <Text key={i} style={styles.briefingText}>• {w}</Text>
@@ -302,12 +302,12 @@ export const WealthAdvisorScreen: React.FC = () => {
           ) : null}
         </View>
 
-        {/* ═══ 2B. REBALANCING RECOMMENDATIONS ═══ */}
+        {/* ═══ 2B. PORTFOLIO CONCENTRATION INSIGHTS ═══ */}
         <RebalancingMoves moves={moves} isLoading={isRebalancing} />
 
-        {/* ═══ 2C. WHAT SHOULD I BUY NEXT? ═══ */}
+        {/* ═══ 2C. HIGH-SCORING STOCKS BY SECTOR ═══ */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>What Should I Buy Next?</Text>
+          <Text style={styles.sectionTitle}>High-Scoring Stocks by Sector</Text>
           <Text style={styles.sectionSubtitle}>
             Stocks that could improve your portfolio based on gaps and FII scores
           </Text>
@@ -346,7 +346,7 @@ export const WealthAdvisorScreen: React.FC = () => {
             </View>
           ) : (
             <Text style={styles.emptyText}>
-              Add more holdings to get buy recommendations based on portfolio gaps.
+              Add more holdings to see high-scoring stocks based on portfolio gaps.
             </Text>
           )}
         </View>
@@ -406,7 +406,7 @@ export const WealthAdvisorScreen: React.FC = () => {
                   <Text
                     style={[
                       styles.scenarioImpact,
-                      { color: scenario.portfolioImpact < 0 ? '#EF4444' : '#10B981' },
+                      { color: scenario.portfolioImpact < 0 ? '#F5A623' : '#00C9A7' },
                     ]}
                   >
                     {scenario.portfolioImpact >= 0 ? '+' : ''}{(scenario.portfolioImpact * 100).toFixed(1)}%
@@ -531,18 +531,18 @@ const styles = StyleSheet.create({
   },
   buyRecScoreBadge: {
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.12)',
+    backgroundColor: 'rgba(0,201,167,0.12)',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   buyRecScoreText: {
-    color: '#10B981',
+    color: '#4A90D9',
     fontSize: 18,
     fontWeight: '800',
   },
   buyRecScoreLabel: {
-    color: '#10B981',
+    color: '#4A90D9',
     fontSize: 9,
     fontWeight: '600',
     marginTop: -1,

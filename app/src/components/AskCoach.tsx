@@ -15,11 +15,11 @@ import { sendChatMessage } from '../services/api';
 import { useCoachStore } from '../store/coachStore';
 
 const DAILY_SUGGESTIONS = [
-  ['What does P/E ratio mean?', 'Is my portfolio diversified enough?', "What's happening in the market today?"],
-  ['Explain my FII score for NVDA', 'What are the risks to my portfolio?', 'How do I read a candlestick chart?'],
-  ['What is dollar-cost averaging?', 'Should I rebalance my portfolio?', 'How do dividends work?'],
+  ['What does P/E ratio mean?', 'How does my sector allocation compare to the S&P 500?', "What's happening in the market today?"],
+  ['Explain my FII score for NVDA', 'What factor exposures does my portfolio have?', 'How do I read a candlestick chart?'],
+  ['What is dollar-cost averaging?', 'What factors affect my stocks?', 'How do dividends work?'],
   ['What is a bear market?', 'How do interest rates affect stocks?', 'What does beta mean?'],
-  ['How does tax-loss harvesting work?', 'What is the Sharpe ratio?', 'When should I sell a stock?'],
+  ['How does tax-loss harvesting work?', 'What is the Sharpe ratio?', 'What factors indicate stock weakness?'],
   ['What is market capitalization?', 'How do I analyze earnings?', 'What drives stock prices?'],
   ['What is an ETF?', 'How do supply chains affect stocks?', 'What is sector rotation?'],
 ];
