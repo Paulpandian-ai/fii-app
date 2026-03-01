@@ -691,7 +691,7 @@ def rescore_signal_on_event(ticker, event):
             return None
 
         old_score = current.get("compositeScore", 5)
-        old_signal = current.get("signal", "HOLD")
+        old_signal = current.get("signal", "Neutral")
 
         # Apply event-based adjustment
         direction = event.get("direction", "neutral")
@@ -711,13 +711,17 @@ def rescore_signal_on_event(ticker, event):
 
         new_score = max(1, min(10, round(old_score + adjustment, 1)))
 
-        # Determine new signal
-        if new_score >= 7:
-            new_signal = "BUY"
-        elif new_score <= 3.5:
-            new_signal = "SELL"
+        # Determine new score label
+        if new_score >= 9:
+            new_signal = "Strong"
+        elif new_score >= 7:
+            new_signal = "Favorable"
+        elif new_score >= 5:
+            new_signal = "Neutral"
+        elif new_score >= 3:
+            new_signal = "Weak"
         else:
-            new_signal = "HOLD"
+            new_signal = "Caution"
 
         signal_changed = new_signal != old_signal
 
@@ -965,7 +969,7 @@ def get_signal_history(ticker, days=30):
     for item in history:
         score = item.get("compositeScore")
         ts = item.get("analyzedAt") or item.get("updatedAt")
-        signal = item.get("signal", "HOLD")
+        signal = item.get("signal", "Neutral")
         if score is not None and ts:
             points.append({
                 "date": ts[:10],

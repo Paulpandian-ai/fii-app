@@ -147,10 +147,11 @@ def compute_aggregate_metrics():
         if r3m is None:
             continue
         r3m = float(r3m)
-        signal = snap.get("signal", "HOLD")
-        if signal == "BUY":
+        signal = snap.get("signal", "Neutral")
+        # Map legacy and new labels to categories
+        if signal in ("Strong", "Favorable"):
             buy_returns.append(r3m)
-        elif signal == "SELL":
+        elif signal in ("Weak", "Caution"):
             sell_returns.append(r3m)
         else:
             hold_returns.append(r3m)
@@ -158,12 +159,12 @@ def compute_aggregate_metrics():
     def _avg(lst):
         return round(sum(lst) / len(lst), 2) if lst else 0
 
-    def _hit_rate(returns, signal):
+    def _hit_rate(returns, label):
         if not returns:
             return 0
-        if signal == "BUY":
+        if label in ("Strong", "Favorable"):
             hits = sum(1 for r in returns if r > 0)
-        elif signal == "SELL":
+        elif label in ("Weak", "Caution"):
             hits = sum(1 for r in returns if r < 0)
         else:
             hits = sum(1 for r in returns if abs(r) < 10)
@@ -197,15 +198,15 @@ def compute_aggregate_metrics():
     for ticker, snaps in per_ticker.items():
         t_returns = [float(s.get("return3M", 0)) for s in snaps if s.get("return3M") is not None]
         t_signals = len(snaps)
-        t_buys = sum(1 for s in snaps if s.get("signal") == "BUY")
-        t_buy_returns = [float(s.get("return3M", 0)) for s in snaps if s.get("signal") == "BUY" and s.get("return3M") is not None]
-        t_hit = _hit_rate(t_buy_returns, "BUY") if t_buy_returns else 0
+        t_strong = sum(1 for s in snaps if s.get("signal") in ("Strong", "Favorable"))
+        t_strong_returns = [float(s.get("return3M", 0)) for s in snaps if s.get("signal") in ("Strong", "Favorable") and s.get("return3M") is not None]
+        t_hit = _hit_rate(t_strong_returns, "Strong") if t_strong_returns else 0
 
         ticker_performance.append({
             "ticker": ticker,
             "companyName": COMPANY_NAMES.get(ticker, ticker),
             "totalSignals": t_signals,
-            "buySignals": t_buys,
+            "strongSignals": t_strong,
             "avgReturn3M": _avg(t_returns),
             "hitRate": t_hit,
         })
@@ -214,9 +215,9 @@ def compute_aggregate_metrics():
         "overallHitRate": overall_hit,
         "totalSignals": len(all_snapshots),
         "signalPerformance": {
-            "BUY": {"count": len(buy_returns), "avgReturn3M": _avg(buy_returns), "hitRate": _hit_rate(buy_returns, "BUY")},
-            "HOLD": {"count": len(hold_returns), "avgReturn3M": _avg(hold_returns), "hitRate": _hit_rate(hold_returns, "HOLD")},
-            "SELL": {"count": len(sell_returns), "avgReturn3M": _avg(sell_returns), "hitRate": _hit_rate(sell_returns, "SELL")},
+            "Strong": {"count": len(buy_returns), "avgReturn3M": _avg(buy_returns), "hitRate": _hit_rate(buy_returns, "Strong")},
+            "Neutral": {"count": len(hold_returns), "avgReturn3M": _avg(hold_returns), "hitRate": _hit_rate(hold_returns, "Neutral")},
+            "Caution": {"count": len(sell_returns), "avgReturn3M": _avg(sell_returns), "hitRate": _hit_rate(sell_returns, "Caution")},
         },
         "scoreBands": {band: {"count": len(rets), "avgReturn3M": _avg(rets)} for band, rets in score_bands.items()},
         "tickerPerformance": sorted(ticker_performance, key=lambda x: x["hitRate"], reverse=True),
@@ -250,9 +251,9 @@ def _generate_demo_metrics():
         "overallHitRate": 62.4,
         "totalSignals": 312,
         "signalPerformance": {
-            "BUY": {"count": 142, "avgReturn3M": 8.7, "hitRate": 64.8},
-            "HOLD": {"count": 105, "avgReturn3M": 2.1, "hitRate": 58.1},
-            "SELL": {"count": 65, "avgReturn3M": -4.3, "hitRate": 60.0},
+            "Strong": {"count": 142, "avgReturn3M": 8.7, "hitRate": 64.8},
+            "Neutral": {"count": 105, "avgReturn3M": 2.1, "hitRate": 58.1},
+            "Caution": {"count": 65, "avgReturn3M": -4.3, "hitRate": 60.0},
         },
         "scoreBands": {
             "1-3": {"count": 45, "avgReturn3M": -6.2},
@@ -276,7 +277,7 @@ def _get_methodology():
         "weights": {"micro_web": 0.25, "macro_climate": 0.20, "correlations": 0.20, "risk_performance": 0.15},
         "dataSources": ["SEC EDGAR (10-K, 10-Q, 8-K)", "Federal Reserve FRED", "Finnhub Market Data", "Claude AI Scoring"],
         "scoringRange": "1.0 - 10.0",
-        "signalThresholds": {"BUY": "> 6.0", "HOLD": "3.0 - 6.0", "SELL": "< 3.0"},
+        "scoreLabels": {"Strong": "9-10", "Favorable": "7-8", "Neutral": "5-6", "Weak": "3-4", "Caution": "1-2"},
         "backtestPeriod": "Rolling 6-month evaluation with 1M, 3M, 6M forward returns",
         "disclaimer": "Past performance does not guarantee future results. Backtested using historical data.",
     }
@@ -304,7 +305,7 @@ def get_track_record_ticker(ticker):
         history.append({
             "date": snap.get("date", ""),
             "score": float(snap.get("score", 0)),
-            "signal": snap.get("signal", "HOLD"),
+            "signal": snap.get("signal", "Neutral"),
             "confidence": snap.get("confidence", "MEDIUM"),
             "priceAtSignal": float(snap.get("priceAtSignal", 0)),
             "return1M": snap.get("return1M"),

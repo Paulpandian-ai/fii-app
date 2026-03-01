@@ -103,13 +103,34 @@ def _compile_feed() -> list[dict]:
         top_factors = json.loads(item.get("topFactors", "[]"))
         tier = item.get("tier") or get_tier(ticker)
         is_etf = item.get("isETF", False) or ticker in ETF_SET
+
+        # Parse new fields
+        score_drivers = []
+        try:
+            sd_raw = item.get("score_drivers", "[]")
+            score_drivers = json.loads(sd_raw) if isinstance(sd_raw, str) else (sd_raw if isinstance(sd_raw, list) else [])
+        except Exception:
+            pass
+
+        factor_pcts = {}
+        try:
+            fp_raw = item.get("factor_percentiles", "{}")
+            factor_pcts = json.loads(fp_raw) if isinstance(fp_raw, str) else (fp_raw if isinstance(fp_raw, dict) else {})
+        except Exception:
+            pass
+
         signals.append({
             "id": f"signal-{ticker}",
             "type": "signal",
             "ticker": ticker,
             "companyName": item.get("companyName", ticker),
             "compositeScore": float(item.get("compositeScore", 5.0)),
-            "signal": item.get("signal", "HOLD"),
+            "signal": item.get("signal", "Neutral"),
+            "score_label": item.get("score_label", item.get("signal", "Neutral")),
+            "percentile_rank": int(item.get("percentile_rank", 50)),
+            "sector_percentile": int(item.get("sector_percentile", 50)),
+            "factor_percentiles": factor_pcts,
+            "score_drivers": score_drivers,
             "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,

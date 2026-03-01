@@ -22,6 +22,14 @@ class Signal(str, Enum):
     SELL = "SELL"
 
 
+class ScoreLabel(str, Enum):
+    STRONG = "Strong"
+    FAVORABLE = "Favorable"
+    NEUTRAL = "Neutral"
+    WEAK = "Weak"
+    CAUTION = "Caution"
+
+
 class Confidence(str, Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"

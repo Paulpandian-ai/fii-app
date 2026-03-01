@@ -36,7 +36,15 @@ def _get_client():
 
 # ─── Factor Scoring ───
 
-FACTOR_SCORING_PROMPT = """You are a quantitative financial analyst. Given the following data about {ticker}:
+EDUCATIONAL_SYSTEM_PREAMBLE = """You are an educational financial analysis assistant for Factor Impact Intelligence (FII). You provide factual, data-driven analysis of publicly available market data. Important rules:
+* NEVER say 'buy', 'sell', 'hold', or 'recommend'
+* NEVER provide personalized investment advice
+* Frame all analysis as: 'The data shows...', 'Factor analysis indicates...', 'Historically, stocks with these characteristics...'
+* End every analysis with: 'For educational purposes only. Not investment advice.'
+* Use score labels: Strong, Favorable, Neutral, Weak, Caution
+* NEVER use: BUY, HOLD, SELL"""
+
+FACTOR_SCORING_PROMPT = """You are an educational financial analysis assistant for Factor Impact Intelligence. Given the following data about {ticker}:
 
 SUPPLY CHAIN DATA:
 {supply_chain}
@@ -125,6 +133,7 @@ def score_factors(
         message = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=4096,
+            system=EDUCATIONAL_SYSTEM_PREAMBLE,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -156,18 +165,20 @@ def score_factors(
 
 # ─── Reasoning Generation ───
 
-REASONING_PROMPT = """Write an 80-120 word stock analysis for retail investors.
+REASONING_PROMPT = """Write an 80-120 word educational stock analysis for retail investors.
 
 Ticker: {ticker}
 Company: {company_name}
 FII Score: {score}/10
-Signal: {signal}
+Score Label: {signal}
 Top positives: {positives}
 Top negatives: {negatives}
 
 Be punchy and specific. Mention specific companies, data points, and numbers.
-Write in present tense. No disclaimers, no "this is not financial advice".
-Start with the most important insight. End with a forward-looking statement."""
+Write in present tense. Explain what the data shows factually.
+Do NOT provide personalized investment advice or recommendations to buy, sell, or hold.
+Start with the most important insight. End with a forward-looking statement.
+End with: 'For educational purposes only. Not investment advice.'"""
 
 
 def generate_reasoning(
@@ -221,6 +232,7 @@ def generate_reasoning(
         message = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=300,
+            system=EDUCATIONAL_SYSTEM_PREAMBLE,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -228,24 +240,26 @@ def generate_reasoning(
 
     except Exception as e:
         logger.error(f"[Claude] Reasoning generation failed for {ticker}: {e}")
-        return f"Analysis for {ticker} is currently being processed."
+        return f"Analysis for {ticker} is currently being processed. For educational purposes only. Not investment advice."
 
 
 # ─── News-Aware Reasoning Generation ───
 
-REASONING_WITH_NEWS_PROMPT = """Write an 80-120 word stock analysis for retail investors.
+REASONING_WITH_NEWS_PROMPT = """Write an 80-120 word educational stock analysis for retail investors.
 
 Ticker: {ticker}
 Company: {company_name}
 FII Score: {score}/10
-Signal: {signal}
+Score Label: {signal}
 Top positives: {positives}
 Top negatives: {negatives}
 {news_context}
 Be punchy and specific. Mention specific companies, data points, and numbers.
-Write in present tense. No disclaimers, no "this is not financial advice".
+Write in present tense. Explain what the data shows factually.
+Do NOT provide personalized investment advice or recommendations to buy, sell, or hold.
 Incorporate the recent news into your analysis where relevant.
-Start with the most important insight. End with a forward-looking statement."""
+Start with the most important insight. End with a forward-looking statement.
+End with: 'For educational purposes only. Not investment advice.'"""
 
 
 def generate_reasoning_with_news(
@@ -328,6 +342,7 @@ def generate_reasoning_with_news(
         message = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=300,
+            system=EDUCATIONAL_SYSTEM_PREAMBLE,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -347,13 +362,13 @@ def generate_reasoning_with_news(
 
 # ─── Alternatives Generation ───
 
-ALTERNATIVES_PROMPT = """Given that {ticker} ({company_name}) has a {signal} signal with a score of {score}/10,
-suggest alternatives for an investor.
+ALTERNATIVES_PROMPT = """Given that {ticker} ({company_name}) has a score label of {signal} with a score of {score}/10,
+suggest educational comparisons for analysis.
 
-Type A: List 3 same-sector peers that likely have higher scores. For each, explain in one sentence why it may be stronger.
-Type B: List 2-3 inverse ETFs or hedges that protect against the key risks of holding {ticker}.
+Type A: List 3 same-sector peers that may have stronger factor profiles. For each, explain in one sentence why the data may be more favorable.
+Type B: List 2-3 ETFs or instruments that provide different risk exposure compared to {ticker}.
 
-Key risks: {risks}
+Key risk factors: {risks}
 
 Return JSON only:
 {{
@@ -361,7 +376,7 @@ Return JSON only:
     {{"ticker": "...", "reason": "...", "estimated_score_range": "7-8"}}
   ],
   "hedges": [
-    {{"ticker": "...", "type": "inverse_etf|put_option|short", "reason": "..."}}
+    {{"ticker": "...", "type": "inverse_etf|diversifier|sector_etf", "reason": "..."}}
   ]
 }}"""
 
@@ -387,7 +402,8 @@ def generate_alternatives(
     Returns:
         List of Alternative dicts.
     """
-    if signal == "BUY" or (signal == "HOLD" and score > 4):
+    # Only generate alternatives for weak/caution scores (4 or below)
+    if score > 4:
         return []
 
     try:
@@ -411,6 +427,7 @@ def generate_alternatives(
         message = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=1024,
+            system=EDUCATIONAL_SYSTEM_PREAMBLE,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -422,7 +439,7 @@ def generate_alternatives(
                 "ticker": peer.get("ticker", ""),
                 "company_name": "",
                 "score": 0,
-                "signal": "BUY",
+                "signal": "Favorable",
                 "reason": peer.get("reason", ""),
                 "alt_type": "same_sector_peer",
             })
@@ -431,7 +448,7 @@ def generate_alternatives(
                 "ticker": hedge.get("ticker", ""),
                 "company_name": "",
                 "score": 0,
-                "signal": "HOLD",
+                "signal": "Neutral",
                 "reason": hedge.get("reason", ""),
                 "alt_type": "inverse_hedge",
             })

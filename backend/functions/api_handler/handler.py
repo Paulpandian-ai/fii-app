@@ -230,7 +230,7 @@ def _handle_earnings_calendar(method, query_params):
                 # Get current signal for this stock
                 signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST")
                 ai_score = float(signal_data.get("compositeScore", 0)) if signal_data else None
-                signal = signal_data.get("signal", "HOLD") if signal_data else None
+                signal = signal_data.get("signal", "Neutral") if signal_data else None
 
                 # Historical earnings surprises from DynamoDB
                 hist = []
@@ -289,7 +289,7 @@ def _handle_earnings_calendar(method, query_params):
                 "surprise": None,
                 "surprisePercent": None,
                 "aiScore": float(signal_data.get("compositeScore", 5.5)) if signal_data else round(random.uniform(3.0, 9.0), 1),
-                "signal": signal_data.get("signal", "HOLD") if signal_data else random.choice(["BUY", "HOLD", "SELL"]),
+                "signal": signal_data.get("signal", "Neutral") if signal_data else random.choice(["Strong", "Favorable", "Neutral", "Weak", "Caution"]),
                 "historicalSurprises": [random.choice(["beat", "miss"]) for _ in range(4)],
                 "beatStreak": random.randint(0, 4),
                 "quarter": None,
@@ -472,7 +472,17 @@ def _handle_signal(method, ticker, user_id):
 
         # Derive composite from technical only (no Claude for on-the-fly)
         composite = round(max(1, min(10, tech_score)), 1)
-        signal = "BUY" if composite >= 6.5 else "SELL" if composite <= 3.5 else "HOLD"
+        score_int = round(composite)
+        if score_int >= 9:
+            signal = "Strong"
+        elif score_int >= 7:
+            signal = "Favorable"
+        elif score_int >= 5:
+            signal = "Neutral"
+        elif score_int >= 3:
+            signal = "Weak"
+        else:
+            signal = "Caution"
 
         result = {
             "ticker": ticker,
@@ -509,7 +519,7 @@ def _handle_signal(method, ticker, user_id):
                 "ticker": summary["ticker"],
                 "companyName": summary.get("companyName", ticker),
                 "compositeScore": float(summary.get("compositeScore", 5.0)),
-                "signal": summary.get("signal", "HOLD"),
+                "signal": summary.get("signal", "Neutral"),
                 "confidence": summary.get("confidence", "MEDIUM"),
                 "insight": summary.get("insight", ""),
                 "reasoning": summary.get("reasoning", ""),
@@ -891,11 +901,30 @@ def _handle_batch_signals(method, query_params, user_id):
         ticker = item.get("ticker", "")
         _raw_tf = item.get("topFactors", "[]")
         top_factors = json.loads(_raw_tf) if isinstance(_raw_tf, str) else (_raw_tf if isinstance(_raw_tf, list) else [])
+        # Parse new fields
+        score_drivers = []
+        try:
+            sd_raw = item.get("score_drivers", "[]")
+            score_drivers = json.loads(sd_raw) if isinstance(sd_raw, str) else (sd_raw if isinstance(sd_raw, list) else [])
+        except Exception:
+            pass
+        factor_pcts = {}
+        try:
+            fp_raw = item.get("factor_percentiles", "{}")
+            factor_pcts = json.loads(fp_raw) if isinstance(fp_raw, str) else (fp_raw if isinstance(fp_raw, dict) else {})
+        except Exception:
+            pass
+
         signals[ticker] = {
             "ticker": ticker,
             "companyName": item.get("companyName", ticker),
             "compositeScore": float(item.get("compositeScore", 5.0)),
-            "signal": item.get("signal", "HOLD"),
+            "signal": item.get("signal", "Neutral"),
+            "score_label": item.get("score_label", item.get("signal", "Neutral")),
+            "percentile_rank": int(item.get("percentile_rank", 50)),
+            "sector_percentile": int(item.get("sector_percentile", 50)),
+            "factor_percentiles": factor_pcts,
+            "score_drivers": score_drivers,
             "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,
@@ -1966,7 +1995,7 @@ def _handle_charts(method, ticker, query_params):
                 events.append({
                     "t": int(evt_dt.timestamp()),
                     "type": "signal",
-                    "label": f"{signal_data.get('signal', 'HOLD')} signal",
+                    "label": f"{signal_data.get('signal', 'Neutral')} score",
                 })
             except (ValueError, TypeError):
                 pass
@@ -2018,23 +2047,23 @@ _SCREENER_TEMPLATES = [
     {
         "id": "ai_top_picks",
         "name": "AI Top Picks",
-        "description": "Stocks with highest AI confidence scores",
+        "description": "Stocks with highest FII factor scores",
         "icon": "sparkles",
-        "filters": {"aiScore": "6,10", "signal": "BUY"},
+        "filters": {"aiScore": "7,10", "signal": "Strong,Favorable"},
     },
     {
         "id": "value_plays",
         "name": "Value Plays",
-        "description": "Large-cap BUY signals with strong AI scores",
+        "description": "Large-cap stocks with favorable factor profiles",
         "icon": "diamond",
-        "filters": {"signal": "BUY", "marketCap": "large,mega"},
+        "filters": {"signal": "Strong,Favorable", "marketCap": "large,mega"},
     },
     {
         "id": "momentum_leaders",
         "name": "Momentum Leaders",
-        "description": "BUY signals with strongest price momentum",
+        "description": "Favorably scored stocks with strongest price momentum",
         "icon": "trending-up",
-        "filters": {"signal": "BUY", "sortBy": "changePercent"},
+        "filters": {"signal": "Strong,Favorable", "sortBy": "changePercent"},
     },
     {
         "id": "dividend_stars",
@@ -2046,16 +2075,16 @@ _SCREENER_TEMPLATES = [
     {
         "id": "undervalued_ai",
         "name": "Undervalued by AI",
-        "description": "AI sees upside the market hasn't priced in",
+        "description": "Factor analysis shows upside the market may not have priced in",
         "icon": "eye",
-        "filters": {"aiScore": "6,10"},
+        "filters": {"aiScore": "7,10"},
     },
     {
         "id": "risk_alerts",
         "name": "Risk Alerts",
-        "description": "Stocks with warning signals from AI analysis",
+        "description": "Stocks with caution signals from factor analysis",
         "icon": "warning",
-        "filters": {"aiScore": "1,5", "signal": "SELL"},
+        "filters": {"aiScore": "1,4", "signal": "Weak,Caution"},
     },
 ]
 
@@ -2083,7 +2112,14 @@ def _handle_screener(method, query_params):
     rsi_range = _parse_range(query_params.get("rsi"))
     pe_range = _parse_range(query_params.get("peRatio"))
 
-    signal_filter = [s.strip().upper() for s in query_params.get("signal", "").split(",") if s.strip()] or None
+    min_score = query_params.get("min_score")
+    if min_score:
+        try:
+            min_score = float(min_score)
+        except ValueError:
+            min_score = None
+
+    signal_filter = [s.strip() for s in query_params.get("signal", "").split(",") if s.strip()] or None
     sector_filter = [s.strip() for s in query_params.get("sector", "").split(",") if s.strip()] or None
     grade_filter = [g.strip().upper() for g in query_params.get("fundamentalGrade", "").split(",") if g.strip()] or None
     mcap_filter = [m.strip().lower() for m in query_params.get("marketCap", "").split(",") if m.strip()] or None
@@ -2190,6 +2226,9 @@ def _handle_screener(method, query_params):
             pass
 
         # ── Step 4: Apply filters ──
+        if min_score is not None:
+            if ai_score is None or ai_score < min_score:
+                continue
         if ai_range:
             if ai_score is None:
                 continue
@@ -2219,6 +2258,33 @@ def _handle_screener(method, query_params):
         if tier_filter and stock_tier not in tier_filter:
             continue
 
+        # Parse new signal fields
+        score_label = None
+        percentile_rank = None
+        sector_pct = None
+        factor_pcts_screener = {}
+        score_drivers_screener = []
+        if signal_item:
+            score_label = signal_item.get("score_label", sig)
+            try:
+                percentile_rank = int(signal_item.get("percentile_rank", 0))
+            except (ValueError, TypeError):
+                percentile_rank = None
+            try:
+                sector_pct = int(signal_item.get("sector_percentile", 0))
+            except (ValueError, TypeError):
+                sector_pct = None
+            try:
+                fp_raw = signal_item.get("factor_percentiles", "{}")
+                factor_pcts_screener = json.loads(fp_raw) if isinstance(fp_raw, str) else (fp_raw if isinstance(fp_raw, dict) else {})
+            except Exception:
+                pass
+            try:
+                sd_raw = signal_item.get("score_drivers", "[]")
+                score_drivers_screener = json.loads(sd_raw) if isinstance(sd_raw, str) else (sd_raw if isinstance(sd_raw, list) else [])
+            except Exception:
+                pass
+
         results.append({
             "ticker": ticker,
             "companyName": company or ticker,
@@ -2227,6 +2293,11 @@ def _handle_screener(method, query_params):
             "changePercent": round(change_pct, 2) if change_pct else 0.0,
             "aiScore": round(ai_score, 1) if ai_score is not None else None,
             "signal": sig,
+            "score_label": score_label,
+            "percentile_rank": percentile_rank,
+            "sector_percentile": sector_pct,
+            "factor_percentiles": factor_pcts_screener if factor_pcts_screener else None,
+            "score_drivers": score_drivers_screener if score_drivers_screener else None,
             "confidence": conf,
             "technicalScore": round(tech_score, 1) if tech_score is not None else None,
             "fundamentalGrade": grade,
@@ -2248,7 +2319,7 @@ def _handle_screener(method, query_params):
         "marketCap": lambda x: x.get("marketCap") or 0,
         "peRatio": lambda x: x.get("peRatio") if x.get("peRatio") is not None and x.get("peRatio") > 0 else 9999,
         "ticker": lambda x: x.get("ticker", ""),
-        "signal": lambda x: {"BUY": 3, "HOLD": 2, "SELL": 1}.get(x.get("signal") or "", 0),
+        "signal": lambda x: {"Strong": 5, "Favorable": 4, "Neutral": 3, "Weak": 2, "Caution": 1}.get(x.get("signal") or "", 0),
     }
     key_fn = sort_key_map.get(sort_by, sort_key_map["changePercent"])
     # For ticker sort, ascending is more natural (A-Z)
@@ -2812,10 +2883,10 @@ def _handle_portfolio_summary(user_id):
             biggest_winner = {"ticker": ticker, "gainLossPercent": round(gain_loss_pct, 2)}
 
         sig = signals_by_ticker.get(ticker, {})
-        signal_val = sig.get("signal", "HOLD")
+        signal_val = sig.get("signal", "Neutral")
         score = float(sig.get("compositeScore", 5.0))
 
-        if signal_val == "SELL":
+        if signal_val in ("Weak", "Caution"):
             sell_count += 1
 
         if biggest_risk is None or score < biggest_risk["score"]:
@@ -2926,10 +2997,10 @@ def _handle_portfolio_health(user_id):
     else:
         div_desc += " — well diversified"
 
-    # 2) Risk Balance (0-100): ratio of BUY/HOLD vs SELL signals
-    buy_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "BUY")
-    hold_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "HOLD")
-    sell_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "SELL")
+    # 2) Risk Balance (0-100): ratio of Strong/Favorable vs Weak/Caution signals
+    buy_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") in ("Strong", "Favorable"))
+    hold_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "Neutral")
+    sell_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") in ("Weak", "Caution"))
     if n > 0:
         risk_score = int(((buy_count * 1.0 + hold_count * 0.6) / n) * 100)
     else:
@@ -3197,7 +3268,7 @@ def _enrich_baskets_with_signals(baskets):
         for s in b.get("stocks", []):
             sig = signals_map.get(s["ticker"], {})
             score = sig.get("compositeScore", 5.0)
-            signal = sig.get("signal", "HOLD")
+            signal = sig.get("signal", "Neutral")
             new_stocks.append({
                 **s,
                 "score": round(score, 1),
@@ -3291,7 +3362,7 @@ def _enrich_trending_with_signals(items):
         enriched.append({
             **item,
             "score": round(sig.get("compositeScore", 5.0), 1),
-            "signal": sig.get("signal", "HOLD"),
+            "signal": sig.get("signal", "Neutral"),
             "insight": insight,
             "topFactors": top_factors,
             "price": float(full.get("price", item.get("price", 0))),
@@ -3368,7 +3439,7 @@ def _enrich_discovery_with_signals(cards):
         enriched.append({
             **card,
             "score": round(sig.get("compositeScore", 5.0), 1),
-            "signal": sig.get("signal", "HOLD"),
+            "signal": sig.get("signal", "Neutral"),
             "insight": insight,
             "topFactors": top_factors,
             "price": float(full.get("price", card.get("price", 0))),
@@ -3629,7 +3700,7 @@ def _get_signal_data_for_tickers(tickers):
             "ticker": ticker,
             "companyName": item.get("companyName", ticker),
             "compositeScore": float(item.get("compositeScore", 5.0)),
-            "signal": item.get("signal", "HOLD"),
+            "signal": item.get("signal", "Neutral"),
             "confidence": item.get("confidence", "MEDIUM"),
         }
     return result
@@ -3771,7 +3842,7 @@ def _handle_strategy_optimize(body, user_id):
             "companyName": sig.get("companyName", t),
             "weight": round(w, 4),
             "score": sig.get("compositeScore", 5.0),
-            "signal": sig.get("signal", "HOLD"),
+            "signal": sig.get("signal", "Neutral"),
         })
     allocation.sort(key=lambda x: x["weight"], reverse=True)
 
@@ -4099,7 +4170,7 @@ def _handle_strategy_backtest(body, user_id):
 
     for ticker in tickers_input:
         sig = signals_map.get(ticker, {})
-        signal = sig.get("signal", "HOLD")
+        signal = sig.get("signal", "Neutral")
         score = float(sig.get("compositeScore", 5.0))
         company_name = sig.get("companyName", ticker)
 
@@ -4135,10 +4206,10 @@ def _handle_strategy_backtest(body, user_id):
         # Determine if signal was correct using relaxed, realistic thresholds
         strength = _signal_strength(score)
 
-        if signal == "BUY":
+        if signal in ("Strong", "Favorable"):
             buy_total += 1
-            # Strong Buy (8+) needs >+5%; regular Buy (7-7.9) needs >0%
-            if score >= 8:
+            # Strong (9-10) needs >+5%; Favorable (7-8) needs >0%
+            if score >= 9:
                 correct = actual_return > 5.0
                 borderline = not correct and actual_return > 0.0
             else:
@@ -4149,9 +4220,9 @@ def _handle_strategy_backtest(body, user_id):
             elif borderline:
                 buy_borderline += 1
             status = "correct" if correct else ("borderline" if borderline else "incorrect")
-        elif signal == "SELL":
+        elif signal in ("Weak", "Caution"):
             sell_total += 1
-            # Sell correct if return < +2% (didn't rally significantly)
+            # Weak/Caution correct if return < +2% (didn't rally significantly)
             correct = actual_return < 2.0
             borderline = not correct and actual_return < 8.0
             if correct:
@@ -4159,7 +4230,7 @@ def _handle_strategy_backtest(body, user_id):
             elif borderline:
                 sell_borderline += 1
             status = "correct" if correct else ("borderline" if borderline else "incorrect")
-        else:  # HOLD
+        else:  # Neutral
             hold_total += 1
             # Wider band: -10% to +15%
             correct = -10.0 <= actual_return <= 15.0
@@ -4173,13 +4244,13 @@ def _handle_strategy_backtest(body, user_id):
         # Build context note for borderline/interesting cases
         note = None
         if status == "borderline" and strength == "Weak Hold":
-            note = f"Weak Hold ({score:.1f}) — borderline signal correctly indicated caution"
-        elif status == "borderline" and signal == "BUY":
+            note = f"Weak signal ({score:.1f}) — borderline correctly indicated caution"
+        elif status == "borderline" and signal in ("Strong", "Favorable"):
             note = f"{strength} ({score:.1f}) — small loss within noise range"
         elif status == "correct" and strength == "Weak Hold" and actual_return < -5.0:
-            note = f"Weak Hold ({score:.1f}) — near-sell signal, decline was expected"
-        elif status == "correct" and signal == "SELL":
-            note = f"{strength} ({score:.1f}) — correctly avoided rally"
+            note = f"Weak signal ({score:.1f}) — decline was expected"
+        elif status == "correct" and signal in ("Weak", "Caution"):
+            note = f"{strength} ({score:.1f}) — correctly identified risk"
 
         # Estimate signal date as ~3 months ago
         signal_date = (datetime.utcnow() - timedelta(days=months * 30)).strftime("%b %Y")
@@ -4230,7 +4301,7 @@ def _handle_strategy_backtest(body, user_id):
         pass
 
     # Weighted average of returns for stocks with BUY/HOLD signals
-    signal_returns = [r["actualReturn"] for r in results if r["signal"] in ("BUY", "HOLD")]
+    signal_returns = [r["actualReturn"] for r in results if r["signal"] in ("Strong", "Favorable", "Neutral")]
     if signal_returns:
         portfolio_return = round(sum(signal_returns) / len(signal_returns), 1)
 
@@ -4294,19 +4365,19 @@ def _handle_strategy_rebalance(body, user_id):
             continue  # Skip tiny changes
 
         sig = signals_map.get(t, {})
-        signal_val = sig.get("signal", "HOLD")
+        signal_val = sig.get("signal", "Neutral")
         score = sig.get("compositeScore", 5.0)
 
         if diff > 0:
             direction = "increase"
             reason = f"Score {score:.1f}/10 — underweighted vs optimal allocation"
-            if signal_val == "BUY":
-                reason = f"BUY signal (score {score:.1f}) — increase exposure"
+            if signal_val in ("Strong", "Favorable"):
+                reason = f"{signal_val} (score {score:.1f}) — data suggests increasing exposure"
         else:
             direction = "decrease"
             reason = f"Score {score:.1f}/10 — overweighted vs optimal allocation"
-            if signal_val == "SELL":
-                reason = f"SELL signal (score {score:.1f}) — reduce risk"
+            if signal_val in ("Weak", "Caution"):
+                reason = f"{signal_val} (score {score:.1f}) — data suggests reducing exposure"
 
         moves.append({
             "ticker": t,
@@ -4441,7 +4512,7 @@ def _handle_strategy_diversification(body, user_id):
     port_vol = float(np.sqrt(np.array(list(weights.values())) @ cov_matrix @ np.array(list(weights.values())))) if n > 0 else 0.2
     volatility_risk = min(100, max(0, port_vol * 100 * 4))
     correlation_risk = min(100, max(0, avg_corr * 130))
-    sell_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") == "SELL")
+    sell_count = sum(1 for t in tickers if signals_map.get(t, {}).get("signal") in ("Weak", "Caution"))
     signal_risk = min(100, max(0, (sell_count / max(n, 1)) * 200))
 
     risk_radar = [
@@ -4577,7 +4648,7 @@ def _handle_strategy_tax_harvest(body, user_id):
             "unrealizedLoss": round(loss_amt, 2),
             "taxSavings": round(savings, 2),
             "sector": sector,
-            "signal": sig.get("signal", "HOLD"),
+            "signal": sig.get("signal", "Neutral"),
             "score": sig.get("compositeScore", 5.0),
             "replacements": replacements,
         })

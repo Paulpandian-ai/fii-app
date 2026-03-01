@@ -219,19 +219,22 @@ def _detect_changes() -> list[dict]:
 
 # ── REASON: Claude Analysis ──────────────────────────────────────────────────
 
-INSIGHT_PROMPT = """You are a stock analyst AI. Analyze this event and provide a brief, actionable insight.
+INSIGHT_PROMPT = """You are an educational financial analysis assistant for Factor Impact Intelligence. Analyze this event and provide a brief, factual insight.
 
 Event: {change_json}
 Current Price: ${price} ({change_pct}%)
-AI Signal: {signal} (Score: {score})
+FII Score Label: {signal} (Score: {score})
 Technical Score: {tech_score}
 
 Provide:
 1. A one-sentence headline (max 15 words)
-2. A 2-3 sentence explanation of why this matters
-3. An action recommendation (BUY/HOLD/SELL/WATCH)
+2. A 2-3 sentence explanation of why this matters for educational understanding
+3. A score label assessment (Strong/Favorable/Neutral/Weak/Caution/Watch)
 4. Urgency level (1-10, integer)
 5. Confidence level (LOW/MEDIUM/HIGH)
+
+NEVER use the words BUY, SELL, or HOLD. Use educational score labels instead.
+End the explanation with: 'For educational purposes only. Not investment advice.'
 
 Respond in JSON format only:
 {{"headline": "...", "explanation": "...", "action": "...", "urgency": 5, "confidence": "MEDIUM"}}"""
@@ -260,10 +263,19 @@ def _analyze_with_claude(change: dict) -> dict:
              if change["significance"] < 9
              else "claude-sonnet-4-5-20250929")
 
+    EDUCATIONAL_PREAMBLE = (
+        "You are an educational financial analysis assistant for Factor Impact Intelligence (FII). "
+        "You provide factual, data-driven analysis of publicly available market data. "
+        "NEVER say 'buy', 'sell', 'hold', or 'recommend'. "
+        "Use score labels: Strong, Favorable, Neutral, Weak, Caution. "
+        "End every analysis with: 'For educational purposes only. Not investment advice.'"
+    )
+
     client = _get_client()
     response = client.messages.create(
         model=model,
         max_tokens=300,
+        system=EDUCATIONAL_PREAMBLE,
         messages=[{"role": "user", "content": prompt}],
     )
 

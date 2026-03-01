@@ -30,18 +30,28 @@ import sec_edgar
 from models import (
     ALL_SECURITIES,
     COMPANY_NAMES,
+    DIMENSION_FACTOR_MAP,
+    DIMENSION_WEIGHTS,
     ETF_SET,
     FACTOR_IDS,
     FACTOR_NAMES,
     PEER_MAP,
+    STOCK_SECTORS,
     STOCK_UNIVERSE,
     TIER_1_SET,
     TIER_2_SET,
     TIER_3_SET,
     compute_composite_score,
+    compute_dimension_scores,
+    compute_weighted_composite,
+    compute_z_scores,
     determine_confidence,
     determine_signal,
     get_tier,
+    percentile_to_fii_score,
+    score_to_label,
+    should_update_score,
+    z_to_percentile,
 )
 
 logger = logging.getLogger()
@@ -69,7 +79,7 @@ def lambda_handler(event, context):
             result = analyze_ticker(ticker, tier=tier)
             logger.info(
                 f"[SignalEngine] {ticker}: score={result['compositeScore']}, "
-                f"signal={result['signal']}"
+                f"label={result['score_label']}"
             )
 
             # Normalize signal distribution across all stocks
@@ -81,7 +91,7 @@ def lambda_handler(event, context):
                     "analyzed": 1,
                     "errors": 0,
                     "results": [
-                        {"ticker": result["ticker"], "score": result["compositeScore"], "signal": result["signal"]}
+                        {"ticker": result["ticker"], "score": result["compositeScore"], "score_label": result["score_label"]}
                     ],
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }),
@@ -233,7 +243,7 @@ def analyze_ticker(ticker: str, tier: str = None) -> dict:
     # Blend: 60% factor analysis + 40% technical score (normalized to same 1-10 scale)
     composite_score = round(factor_composite * 0.6 + technical_score * 0.4, 1)
     composite_score = max(1.0, min(10.0, composite_score))
-    signal = determine_signal(composite_score)
+    label = score_to_label(round(composite_score))
     confidence = determine_confidence(scores_only)
 
     # Delay between Claude API calls to avoid 429 rate limiting
@@ -245,7 +255,7 @@ def analyze_ticker(ticker: str, tier: str = None) -> dict:
         ticker=ticker,
         company_name=company_name,
         score=composite_score,
-        signal=signal.value,
+        signal=label,
         factor_details=factor_details,
     )
 
@@ -260,7 +270,7 @@ def analyze_ticker(ticker: str, tier: str = None) -> dict:
     alternatives = claude_client.generate_alternatives(
         ticker=ticker,
         company_name=company_name,
-        signal=signal.value,
+        signal=label,
         score=composite_score,
         factor_details=factor_details,
     )
@@ -283,7 +293,8 @@ def analyze_ticker(ticker: str, tier: str = None) -> dict:
         "ticker": ticker,
         "companyName": company_name,
         "compositeScore": composite_score,
-        "signal": signal.value,
+        "signal": label,
+        "score_label": label,
         "confidence": confidence.value,
         "insight": insight,
         "reasoning": reasoning,
@@ -351,14 +362,15 @@ def _analyze_technical_only(ticker: str, company_name: str, is_etf: bool = False
 
     # Composite = technical score mapped to 1-10
     composite_score = round(max(1.0, min(10.0, technical_score)), 1)
-    signal = determine_signal(composite_score)
+    label = score_to_label(round(composite_score))
     now = datetime.now(timezone.utc).isoformat()
 
     result = {
         "ticker": ticker,
         "companyName": company_name,
         "compositeScore": composite_score,
-        "signal": signal.value,
+        "signal": label,
+        "score_label": label,
         "confidence": "LOW",
         "insight": f"Technical analysis only. Score: {composite_score}/10.",
         "reasoning": "",
@@ -439,14 +451,15 @@ def _analyze_tier2(ticker: str, company_name: str, peers: list) -> dict:
     # Composite: 50% technical + 50% fundamental
     composite_score = round((technical_score * 0.5 + fundamental_score * 0.5), 1)
     composite_score = max(1.0, min(10.0, composite_score))
-    signal = determine_signal(composite_score)
+    label = score_to_label(round(composite_score))
     now = datetime.now(timezone.utc).isoformat()
 
     result = {
         "ticker": ticker,
         "companyName": company_name,
         "compositeScore": composite_score,
-        "signal": signal.value,
+        "signal": label,
+        "score_label": label,
         "confidence": "LOW",
         "insight": f"Technical + fundamental analysis. Score: {composite_score}/10.",
         "reasoning": "",
@@ -550,74 +563,207 @@ def _merge_precomputed_scores(
 
 
 def _normalize_signals() -> None:
-    """Normalize signal labels across all stocks using mean/stddev distribution.
+    """Normalize signals across all stocks using forced distribution.
 
-    Reads all SIGNAL#LATEST records, computes mean and standard deviation
-    of composite scores, then re-labels:
-      - score > mean + 0.5*stddev -> BUY
-      - score < mean - 0.5*stddev -> SELL
-      - otherwise -> HOLD
+    Reads all SIGNAL#LATEST records, computes z-scores and percentile
+    ranks per dimension and composite, then assigns FII Scores 1-10
+    using forced distribution and educational score labels.
     """
-    all_scores = []
-    signal_items = []
+    import math
+
+    all_items = []  # (ticker, item, raw_composite, dimension_raw_scores)
 
     for ticker in ALL_SECURITIES:
         try:
             item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
             if item:
-                score = float(item.get("compositeScore", 0))
-                signal_items.append((ticker, item, score))
-                all_scores.append(score)
+                raw_composite = float(item.get("compositeScore", 0))
+                # Try to get per-factor scores from FACTORS record
+                factors_item = db.get_item(f"SIGNAL#{ticker}", "FACTORS")
+                factor_details = {}
+                if factors_item:
+                    fd_raw = factors_item.get("factorDetails", "{}")
+                    factor_details = json.loads(fd_raw) if isinstance(fd_raw, str) else fd_raw
+
+                # Compute per-dimension raw scores
+                dim_scores = {}
+                for dim_name, factor_ids in DIMENSION_FACTOR_MAP.items():
+                    scores = [
+                        float(factor_details.get(fid, {}).get("score", 0))
+                        for fid in factor_ids
+                    ]
+                    dim_scores[dim_name] = sum(scores) / len(scores) if scores else 0.0
+
+                all_items.append((ticker, item, raw_composite, dim_scores))
         except Exception:
             pass
 
-    if len(all_scores) < 3:
+    if len(all_items) < 3:
         logger.info("[SignalEngine] Not enough signals to normalize")
         return
 
-    # Compute mean and standard deviation
-    mean = sum(all_scores) / len(all_scores)
-    variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
-    stddev = variance ** 0.5
+    # ── Step 1: Compute z-scores per dimension across all stocks ──
+    dim_names = list(DIMENSION_WEIGHTS.keys())
+    dim_raw_values = {dim: [] for dim in dim_names}
+    for _ticker, _item, _composite, dim_scores in all_items:
+        for dim in dim_names:
+            dim_raw_values[dim].append(dim_scores.get(dim, 0.0))
 
-    if stddev < 0.1:
-        logger.info(f"[SignalEngine] Stddev too small ({stddev:.2f}), skipping normalization")
-        return
+    # z-scores per dimension
+    dim_z_scores = {}
+    for dim in dim_names:
+        dim_z_scores[dim] = compute_z_scores(dim_raw_values[dim])
 
-    buy_threshold = mean + 0.5 * stddev
-    sell_threshold = mean - 0.5 * stddev
+    # ── Step 2: Convert to percentile ranks per dimension ──
+    dim_percentiles = {dim: [] for dim in dim_names}
+    for dim in dim_names:
+        dim_percentiles[dim] = [z_to_percentile(z) for z in dim_z_scores[dim]]
 
-    logger.info(
-        f"[SignalEngine] Normalizing signals: mean={mean:.2f}, stddev={stddev:.2f}, "
-        f"buy>={buy_threshold:.2f}, sell<={sell_threshold:.2f}"
-    )
+    # ── Step 3: Compute weighted composite percentile ──
+    composite_percentiles = []
+    for i in range(len(all_items)):
+        weighted = 0.0
+        for dim in dim_names:
+            weighted += dim_percentiles[dim][i] * DIMENSION_WEIGHTS[dim]
+        composite_percentiles.append(weighted)
 
+    # ── Step 4: Compute sector-level percentile ranks ──
+    # Group by sector
+    sector_groups = {}  # sector -> list of (index, composite_percentile)
+    for i, (ticker, _item, _comp, _dims) in enumerate(all_items):
+        sector = STOCK_SECTORS.get(ticker, "Unknown")
+        if sector not in sector_groups:
+            sector_groups[sector] = []
+        sector_groups[sector].append((i, composite_percentiles[i]))
+
+    sector_percentiles = [0.0] * len(all_items)
+    for sector, entries in sector_groups.items():
+        if len(entries) < 2:
+            for idx, _ in entries:
+                sector_percentiles[idx] = 50.0
+            continue
+        # Rank within sector
+        sorted_entries = sorted(entries, key=lambda x: x[1])
+        for rank, (idx, _) in enumerate(sorted_entries):
+            sector_percentiles[idx] = (rank / (len(sorted_entries) - 1)) * 100.0
+
+    # ── Step 5: Apply forced distribution to assign FII Scores ──
     updated = 0
-    for ticker, item, score in signal_items:
-        if score >= buy_threshold:
-            new_signal = "BUY"
-        elif score <= sell_threshold:
-            new_signal = "SELL"
-        else:
-            new_signal = "HOLD"
+    score_distribution = {}
 
-        old_signal = item.get("signal", "HOLD")
-        if new_signal != old_signal:
-            db.update_item(f"SIGNAL#{ticker}", "LATEST", {"signal": new_signal})
+    for i, (ticker, item, raw_composite, dim_scores) in enumerate(all_items):
+        pct = composite_percentiles[i]
+        fii_score = percentile_to_fii_score(pct)
+        score_label = score_to_label(fii_score)
 
-            # Also update the S3 detail file so the detail view stays in sync
+        # Stability buffer — check previous score
+        old_score = item.get("previous_score")
+        old_pct = item.get("percentile_rank")
+        if old_score is not None:
             try:
-                s3_data = s3.read_json(f"signals/{ticker}.json")
-                if s3_data:
-                    s3_data["signal"] = new_signal
-                    s3.write_json(f"signals/{ticker}.json", s3_data)
-            except Exception as e:
-                logger.warning(f"[SignalEngine] Failed to update S3 for {ticker}: {e}")
+                old_score = int(old_score)
+                old_pct = float(old_pct) if old_pct is not None else None
+                if not should_update_score(pct, old_score, old_pct):
+                    fii_score = old_score
+                    score_label = score_to_label(fii_score)
+            except (ValueError, TypeError):
+                pass
 
-            updated += 1
-            logger.info(f"[SignalEngine] {ticker}: {old_signal} -> {new_signal} (score={score:.1f})")
+        # Build factor_percentiles
+        factor_pcts = {}
+        for dim in dim_names:
+            factor_pcts[dim] = round(dim_percentiles[dim][i], 1)
 
-    logger.info(f"[SignalEngine] Normalization complete: {updated} signals updated")
+        # Identify top 3 score drivers
+        score_drivers = _compute_score_drivers(dim_scores, dim_percentiles, dim_names, i)
+
+        # Determine confidence
+        confidence_val = item.get("confidence", "MEDIUM")
+
+        # Update DynamoDB with all new fields
+        update_fields = {
+            "compositeScore": str(fii_score),
+            "signal": score_label,  # backward compat: "signal" field = score_label
+            "score_label": score_label,
+            "percentile_rank": int(round(pct)),
+            "sector_percentile": int(round(sector_percentiles[i])),
+            "factor_percentiles": json.dumps(factor_pcts),
+            "score_drivers": json.dumps(score_drivers),
+            "confidence": confidence_val,
+            "previous_score": str(fii_score),
+        }
+
+        try:
+            db.update_item(f"SIGNAL#{ticker}", "LATEST", update_fields)
+        except Exception as e:
+            logger.warning(f"[SignalEngine] Failed to update {ticker}: {e}")
+            continue
+
+        # Also update the S3 detail file
+        try:
+            s3_data = s3.read_json(f"signals/{ticker}.json")
+            if s3_data:
+                s3_data["compositeScore"] = fii_score
+                s3_data["signal"] = score_label
+                s3_data["score_label"] = score_label
+                s3_data["percentile_rank"] = int(round(pct))
+                s3_data["sector_percentile"] = int(round(sector_percentiles[i]))
+                s3_data["factor_percentiles"] = factor_pcts
+                s3_data["score_drivers"] = score_drivers
+                s3.write_json(f"signals/{ticker}.json", s3_data)
+        except Exception as e:
+            logger.warning(f"[SignalEngine] Failed to update S3 for {ticker}: {e}")
+
+        updated += 1
+        score_distribution[fii_score] = score_distribution.get(fii_score, 0) + 1
+
+    # Log distribution
+    dist_str = ", ".join(f"Score {s}: {c}" for s, c in sorted(score_distribution.items(), reverse=True))
+    logger.info(f"[SignalEngine] Forced distribution complete: {updated} stocks updated. {dist_str}")
+
+
+def _compute_score_drivers(
+    dim_scores: dict,
+    dim_percentiles: dict,
+    dim_names: list,
+    stock_index: int,
+) -> list[dict]:
+    """Identify top 3 factors with highest absolute impact on composite score."""
+    impacts = []
+    for dim in dim_names:
+        raw = dim_scores.get(dim, 0.0)
+        pct = dim_percentiles[dim][stock_index]
+        deviation = abs(pct - 50.0)  # deviation from median
+        direction = "positive" if pct >= 50 else "negative"
+
+        # Generate description from dimension name + direction
+        dim_labels = {
+            "supply_chain_upstream": "Upstream supply chain factors",
+            "supply_chain_downstream": "Downstream customer demand factors",
+            "geopolitical": "Geopolitical risk exposure",
+            "monetary": "Monetary policy and interest rate sensitivity",
+            "correlations": "Market correlation and sector dynamics",
+            "risk_performance": "Risk-adjusted performance metrics",
+        }
+        label = dim_labels.get(dim, dim)
+        if direction == "positive":
+            desc = f"{label} trending favorably"
+        else:
+            desc = f"{label} showing headwinds"
+
+        impacts.append({
+            "factor": dim,
+            "direction": direction,
+            "description": desc,
+            "deviation": deviation,
+        })
+
+    # Sort by absolute deviation, take top 3
+    impacts.sort(key=lambda x: x["deviation"], reverse=True)
+    return [
+        {"factor": d["factor"], "direction": d["direction"], "description": d["description"]}
+        for d in impacts[:3]
+    ]
 
 
 def _store_signal(ticker: str, result: dict) -> None:
@@ -633,6 +779,40 @@ def _store_signal(ticker: str, result: dict) -> None:
     pk = f"SIGNAL#{ticker}"
     now = result["analyzedAt"]
 
+    # Compute score_label from composite (pre-normalization, will be updated in _normalize_signals)
+    raw_score = result["compositeScore"]
+    label = score_to_label(round(raw_score))
+
+    # Compute initial score_drivers from factor_details
+    score_drivers = []
+    if result.get("factorDetails"):
+        dim_scores = compute_dimension_scores(
+            {fid: d["score"] for fid, d in result["factorDetails"].items()}
+        )
+        # Sort dimensions by absolute value
+        sorted_dims = sorted(dim_scores.items(), key=lambda x: abs(x[1]), reverse=True)
+        dim_labels = {
+            "supply_chain_upstream": "Upstream supply chain factors",
+            "supply_chain_downstream": "Downstream customer demand factors",
+            "geopolitical": "Geopolitical risk exposure",
+            "monetary": "Monetary policy and interest rate sensitivity",
+            "correlations": "Market correlation and sector dynamics",
+            "risk_performance": "Risk-adjusted performance metrics",
+        }
+        for dim_name, dim_val in sorted_dims[:3]:
+            direction = "positive" if dim_val >= 0 else "negative"
+            label_text = dim_labels.get(dim_name, dim_name)
+            desc = f"{label_text} trending favorably" if direction == "positive" else f"{label_text} showing headwinds"
+            score_drivers.append({
+                "factor": dim_name,
+                "direction": direction,
+                "description": desc,
+            })
+
+    # Get previous score for stability buffer
+    prev_item = db.get_item(pk, "LATEST")
+    previous_score = prev_item.get("previous_score", "") if prev_item else ""
+
     # DynamoDB: LATEST summary
     db.put_item({
         "PK": pk,
@@ -642,14 +822,17 @@ def _store_signal(ticker: str, result: dict) -> None:
         "ticker": ticker,
         "companyName": result["companyName"],
         "compositeScore": str(result["compositeScore"]),
-        "signal": result["signal"],
+        "signal": label,  # backward compat: signal field = score_label
+        "score_label": label,
         "confidence": result["confidence"],
         "insight": result["insight"],
         "reasoning": result.get("reasoning", ""),
         "topFactors": json.dumps(result.get("topFactors", [])),
+        "score_drivers": json.dumps(score_drivers),
         "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
         "tier": result.get("tier", "TIER_1"),
         "isETF": result.get("isETF", False),
+        "previous_score": previous_score,
         "lastUpdated": now,
     })
 
@@ -661,6 +844,11 @@ def _store_signal(ticker: str, result: dict) -> None:
         "factorDetails": json.dumps(result["factorDetails"]),
         "lastUpdated": now,
     })
+
+    # Add new fields to S3 result
+    result["signal"] = label
+    result["score_label"] = label
+    result["score_drivers"] = score_drivers
 
     # S3: Full signal JSON
     s3.write_json(f"signals/{ticker}.json", result)

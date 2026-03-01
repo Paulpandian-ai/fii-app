@@ -326,12 +326,12 @@ def _run_signal_generation(tickers: list[str]) -> dict:
     results["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Summary
-    buy_count = sum(1 for s in results["signals"].values() if s["signal"] == "BUY")
-    hold_count = sum(1 for s in results["signals"].values() if s["signal"] == "HOLD")
-    sell_count = sum(1 for s in results["signals"].values() if s["signal"] == "SELL")
+    strong_count = sum(1 for s in results["signals"].values() if s["signal"] in ("Strong", "Favorable"))
+    neutral_count = sum(1 for s in results["signals"].values() if s["signal"] == "Neutral")
+    weak_count = sum(1 for s in results["signals"].values() if s["signal"] in ("Weak", "Caution"))
     logger.info(
         f"[SignalGen] Complete: {results['generated']} signals "
-        f"(BUY={buy_count}, HOLD={hold_count}, SELL={sell_count}) "
+        f"(Strong/Favorable={strong_count}, Neutral={neutral_count}, Weak/Caution={weak_count}) "
         f"in {elapsed:.1f}s"
     )
 
@@ -745,13 +745,18 @@ def _refresh_signals(ticker: str) -> None:
     )
     composite = round(max(1.0, min(10.0, composite)), 1)
 
-    # ── Signal thresholds ──
-    if composite >= 6.2:
-        signal = "BUY"
-    elif composite < 4.8:
-        signal = "SELL"
+    # ── Score label thresholds ──
+    score_int = round(composite)
+    if score_int >= 9:
+        signal = "Strong"
+    elif score_int >= 7:
+        signal = "Favorable"
+    elif score_int >= 5:
+        signal = "Neutral"
+    elif score_int >= 3:
+        signal = "Weak"
     else:
-        signal = "HOLD"
+        signal = "Caution"
 
     # ── Confidence ──
     if data_sources >= 5:
