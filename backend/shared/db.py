@@ -98,18 +98,36 @@ def delete_item(pk: str, sk: str) -> None:
     _table.delete_item(Key={"PK": pk, "SK": sk})
 
 
-def batch_get(keys: list[dict]) -> list[dict]:
-    """Batch get up to 100 items by their primary keys.
+def batch_get(keys: list[dict], batch_size: int = 100) -> list[dict]:
+    """Batch get items by their primary keys with automatic chunking.
+
+    DynamoDB limits BatchGetItem to 100 keys per request. This function
+    automatically chunks larger key lists into multiple requests.
 
     Args:
         keys: List of dicts, each with "PK" and "SK".
+        batch_size: Max keys per request (default 100, DynamoDB limit).
     """
     formatted_keys = [{"PK": k["PK"], "SK": k["SK"]} for k in keys]
+    all_items = []
 
-    response = _dynamodb.batch_get_item(
-        RequestItems={_table_name: {"Keys": formatted_keys}}
-    )
-    return response.get("Responses", {}).get(_table_name, [])
+    for i in range(0, len(formatted_keys), batch_size):
+        chunk = formatted_keys[i : i + batch_size]
+        response = _dynamodb.batch_get_item(
+            RequestItems={_table_name: {"Keys": chunk}}
+        )
+        all_items.extend(response.get("Responses", {}).get(_table_name, []))
+
+        # Handle unprocessed keys (throttling / partial results)
+        unprocessed = response.get("UnprocessedKeys", {})
+        while unprocessed.get(_table_name):
+            response = _dynamodb.batch_get_item(RequestItems=unprocessed)
+            all_items.extend(
+                response.get("Responses", {}).get(_table_name, [])
+            )
+            unprocessed = response.get("UnprocessedKeys", {})
+
+    return all_items
 
 
 def query_between(
