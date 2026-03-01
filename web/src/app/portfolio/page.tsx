@@ -8,7 +8,7 @@ import { SignalBadge } from '@/components/SignalBadge';
 import { CardSkeleton, StockRowSkeleton } from '@/components/Skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DisclaimerBanner } from '@/components/DisclaimerBanner';
-import { formatCurrency, formatPercent, cn } from '@/lib/utils';
+import { formatCurrency, formatPercent, cn, getScoreColor } from '@/lib/utils';
 import { useSignalStore } from '@/store/signalStore';
 import * as api from '@/lib/api';
 import type { TrendingItem } from '@/types';
@@ -276,12 +276,12 @@ function PortfolioContent() {
                       {formatPercent(h.gainLossPercent || 0)}
                     </td>
                     <td className="py-2.5 px-3 text-center">
-                      <span className="font-bold text-sm" style={{ color: sig && sig.score > 6 ? '#10B981' : sig && sig.score > 3 ? '#F59E0B' : '#EF4444' }}>
+                      <span className="font-bold text-sm" style={{ color: sig ? getScoreColor(sig.score) : '#8E8E93' }}>
                         {sig?.score.toFixed(1) ?? '—'}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-center">
-                      {sig ? <SignalBadge signal={sig.signal} size="sm" /> : <span className="text-fii-muted">—</span>}
+                      {sig ? <SignalBadge scoreLabel={sig.scoreLabel} score={sig.score} size="sm" /> : <span className="text-fii-muted">—</span>}
                     </td>
                   </tr>
                 );
@@ -299,7 +299,7 @@ function PortfolioContent() {
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-white">{h.ticker}</span>
-                    {sig && <SignalBadge signal={sig.signal} size="sm" />}
+                    {sig && <SignalBadge scoreLabel={sig.scoreLabel} score={sig.score} size="sm" />}
                   </div>
                   <span className={cn('text-sm font-medium', (h.gainLossPercent || 0) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                     {formatPercent(h.gainLossPercent || 0)}
@@ -330,7 +330,7 @@ function PortfolioContent() {
               <div key={t.ticker} className="flex-shrink-0 w-44 bg-fii-card rounded-xl border border-fii-border p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-semibold text-white text-sm">{t.ticker}</span>
-                  <SignalBadge signal={t.signal} size="sm" />
+                  <SignalBadge scoreLabel={t.scoreLabel} score={t.score} size="sm" />
                 </div>
                 <p className={cn('text-sm font-medium', t.changePercent >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                   {formatPercent(t.changePercent)}

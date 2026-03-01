@@ -6,14 +6,15 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { CardSkeleton } from '@/components/Skeleton';
 import { DisclaimerBanner } from '@/components/DisclaimerBanner';
 import { formatPercent, cn } from '@/lib/utils';
+import { SCORE_COLORS } from '@/lib/scoreColors';
 import * as api from '@/lib/api';
 
 interface BacktestResult {
   period: string;
   totalSignals: number;
-  buyAccuracy: number;
-  sellAccuracy: number;
-  holdAccuracy: number;
+  strongAccuracy: number;
+  cautionAccuracy: number;
+  neutralAccuracy: number;
   overallAccuracy: number;
   avgReturn: number;
   benchmarkReturn: number;
@@ -103,9 +104,9 @@ function BacktesterContent() {
           <div className="bg-fii-card rounded-xl border border-fii-border p-4 space-y-4">
             <h3 className="text-sm font-semibold text-white">Signal Accuracy</h3>
             {[
-              { label: 'BUY Signals', value: result.buyAccuracy, color: '#10B981' },
-              { label: 'HOLD Signals', value: result.holdAccuracy, color: '#F59E0B' },
-              { label: 'SELL Signals', value: result.sellAccuracy, color: '#EF4444' },
+              { label: 'Strong Signals', value: result.strongAccuracy, color: SCORE_COLORS.Strong },
+              { label: 'Neutral Signals', value: result.neutralAccuracy, color: SCORE_COLORS.Neutral },
+              { label: 'Caution Signals', value: result.cautionAccuracy, color: SCORE_COLORS.Caution },
             ].map((bar) => (
               <div key={bar.label} className="space-y-1">
                 <div className="flex justify-between text-xs">

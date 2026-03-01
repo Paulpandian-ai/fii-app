@@ -79,7 +79,7 @@ export function StockDetail({ item, priceData }: StockDetailProps) {
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-1">
             <h2 className="text-2xl font-bold text-white">{item.ticker}</h2>
-            <SignalBadge signal={item.signal} size="lg" />
+            <SignalBadge scoreLabel={item.scoreLabel} score={item.compositeScore} size="lg" />
           </div>
           <p className="text-fii-text-secondary text-sm mb-2">{item.companyName}</p>
           <div className="flex items-baseline gap-3">

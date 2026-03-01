@@ -7,7 +7,7 @@ import { SignalBadge } from '@/components/SignalBadge';
 import { StockRowSkeleton } from '@/components/Skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DisclaimerBanner } from '@/components/DisclaimerBanner';
-import { formatCurrency, formatPercent, cn } from '@/lib/utils';
+import { formatCurrency, formatPercent, cn, getScoreColor } from '@/lib/utils';
 import type { ScreenerResult, ScreenerTemplate } from '@/types';
 
 const SORT_OPTIONS = [
@@ -223,12 +223,12 @@ export default function ScreenerPage() {
                         {formatPercent(stock.changePercent)}
                       </td>
                       <td className="py-2.5 px-2 text-right">
-                        <span className="font-bold" style={{ color: stock.aiScore > 6 ? '#10B981' : stock.aiScore > 3 ? '#F59E0B' : '#EF4444' }}>
+                        <span className="font-bold" style={{ color: getScoreColor(stock.aiScore) }}>
                           {stock.aiScore.toFixed(1)}
                         </span>
                       </td>
                       <td className="py-2.5 px-2 text-center">
-                        <SignalBadge signal={stock.signal} size="sm" />
+                        <SignalBadge scoreLabel={stock.scoreLabel} score={stock.aiScore} size="sm" />
                       </td>
                       <td className="py-2.5 px-2 text-right text-fii-text-secondary">
                         {stock.peRatio?.toFixed(1) ?? '—'}
@@ -253,9 +253,9 @@ export default function ScreenerPage() {
                         {isInAnyWatchlist(stock.ticker) ? '★' : '☆'}
                       </button>
                       <span className="font-semibold text-white">{stock.ticker}</span>
-                      <SignalBadge signal={stock.signal} size="sm" />
+                      <SignalBadge scoreLabel={stock.scoreLabel} score={stock.aiScore} size="sm" />
                     </div>
-                    <span className="text-xs font-bold" style={{ color: stock.aiScore > 6 ? '#10B981' : stock.aiScore > 3 ? '#F59E0B' : '#EF4444' }}>
+                    <span className="text-xs font-bold" style={{ color: getScoreColor(stock.aiScore) }}>
                       {stock.aiScore.toFixed(1)}
                     </span>
                   </div>

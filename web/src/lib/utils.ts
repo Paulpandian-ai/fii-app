@@ -34,25 +34,13 @@ export function formatNumber(value: number, decimals = 2): string {
   }).format(value);
 }
 
-export function getScoreColor(score: number): string {
-  if (score <= 3) return '#EF4444';
-  if (score <= 6) return '#F59E0B';
-  return '#10B981';
-}
-
-export function getSignalColor(signal: string): { bg: string; text: string } {
-  switch (signal) {
-    case 'BUY': return { bg: '#10B981', text: '#FFFFFF' };
-    case 'SELL': return { bg: '#EF4444', text: '#FFFFFF' };
-    default: return { bg: '#F59E0B', text: '#000000' };
-  }
-}
+export { getScoreColor, getScoreLabel, getScoreLabelColor, SCORE_COLORS } from './scoreColors';
 
 export function getConfidenceColor(confidence: string): string {
   switch (confidence) {
-    case 'HIGH': return '#10B981';
-    case 'LOW': return '#EF4444';
-    default: return '#F59E0B';
+    case 'HIGH': return '#4A90D9';
+    case 'LOW': return '#F5A623';
+    default: return '#8E8E93';
   }
 }
 

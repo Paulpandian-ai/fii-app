@@ -18,7 +18,7 @@ const COACH_QUESTIONS = [
 
 const PROGRESS_ITEMS: Array<{ label: string; maxKey: keyof DisciplineScoreData['stats']; icon: string; color: string }> = [
   { label: 'Streak', maxKey: 'streak', icon: '🔥', color: '#FBBF24' },
-  { label: 'Signal Follow', maxKey: 'signalAlignment', icon: '📊', color: '#10B981' },
+  { label: 'Signal Follow', maxKey: 'signalAlignment', icon: '📊', color: '#00C9A7' },
   { label: 'Panic Survived', maxKey: 'panicSurvived', icon: '🛡️', color: '#8B5CF6' },
   { label: 'Worst Avoided', maxKey: 'worstAvoided', icon: '🛑', color: '#60A5FA' },
 ];

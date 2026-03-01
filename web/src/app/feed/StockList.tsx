@@ -67,7 +67,7 @@ export function StockList({ items, priceData, selectedTicker, onSelect }: StockL
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-white font-semibold text-sm">{item.ticker}</span>
-                <SignalBadge signal={item.signal} size="sm" />
+                <SignalBadge scoreLabel={item.scoreLabel} score={item.compositeScore} size="sm" />
               </div>
               <p className="text-fii-text-secondary text-xs truncate">
                 {item.companyName}

@@ -1,19 +1,23 @@
 import { getCurrentSession } from './auth';
-import type { Signal } from '@/types';
+import type { ScoreLabel } from '@/types';
 import { useSignalStore } from '@/store/signalStore';
+import { getScoreLabel } from '@/lib/scoreColors';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.fii.app';
 
 const _cacheSignals = (
-  items: Array<{ ticker?: string; score?: number; signal?: string; compositeScore?: number; aiScore?: number }>,
+  items: Array<{ ticker?: string; score?: number; scoreLabel?: string; signal?: string; compositeScore?: number; aiScore?: number }>,
 ) => {
   const summaries = items
-    .filter((i) => i.ticker && (i.score != null || i.compositeScore != null || i.aiScore != null) && i.signal)
-    .map((i) => ({
-      ticker: i.ticker!,
-      score: i.score ?? i.compositeScore ?? i.aiScore ?? 0,
-      signal: (i.signal as Signal) || 'HOLD',
-    }));
+    .filter((i) => i.ticker && (i.score != null || i.compositeScore != null || i.aiScore != null))
+    .map((i) => {
+      const score = i.score ?? i.compositeScore ?? i.aiScore ?? 0;
+      return {
+        ticker: i.ticker!,
+        score,
+        scoreLabel: (i.scoreLabel as ScoreLabel) || getScoreLabel(score),
+      };
+    });
   if (summaries.length > 0) {
     useSignalStore.getState().upsertSignals(summaries);
   }
