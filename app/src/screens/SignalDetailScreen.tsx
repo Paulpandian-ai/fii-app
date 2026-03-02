@@ -11,15 +11,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ScoreRing } from '../components/ScoreRing';
 import { RadarScore } from '../components/RadarScore';
-import { FactorRadarChart } from '../components/FactorRadarChart';
-import type { FactorPercentiles } from '../components/FactorRadarChart';
 import { SignalBadge } from '../components/SignalBadge';
 import { FactorBar } from '../components/FactorBar';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { TradeButton } from '../components/TradeButton';
-import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory, getStressTestAll, getScreener } from '../services/api';
+import { getSignalDetail, getPrice, getTechnicals, getFundamentals, getFactors, getAltData, getChartData, getEventsForTicker, getSignalHistory, getStressTestAll } from '../services/api';
 import { StockChart } from '../components/StockChart';
 import type { ChartData } from '../components/StockChart';
 import type { StockEvent, SignalHistoryPoint } from '../types';
@@ -34,11 +32,9 @@ import type {
   AlternativeData,
   FactorCategory,
   Confidence,
-  ScoreLabel,
+  Signal,
   Alternative,
 } from '../types';
-import { ScoreInfoTooltip } from '../components/ScoreInfoTooltip';
-import { getScoreColor, getScoreLabel } from '../utils/scoreColors';
 
 const FACTOR_NAMES: Record<string, string> = {
   A1: 'Operational Disruption', A2: 'Supplier Earnings Miss', A3: 'Lead Time Extensions',
@@ -58,55 +54,10 @@ const CATEGORIES: { id: string; name: string; icon: string; factorIds: string[] 
   { id: 'F', name: 'Risk & Performance', icon: 'trending-up-outline', factorIds: ['F1', 'F2', 'F3'] },
 ];
 
-const FACTOR_GAUGE_AXES = [
-  {
-    key: 'supply_chain_upstream',
-    label: 'Supply Chain (Upstream)',
-    matchKey: 'upstream',
-    icon: 'cube-outline',
-    tooltip: 'Measures the health and risk of this company\'s key suppliers. Disruptions can directly affect production and revenue.',
-  },
-  {
-    key: 'supply_chain_downstream',
-    label: 'Supply Chain (Downstream)',
-    matchKey: 'downstream',
-    icon: 'people-outline',
-    tooltip: 'Tracks the financial health and spending patterns of key customers. Weak customers mean future revenue risk.',
-  },
-  {
-    key: 'geopolitical',
-    label: 'Geopolitical',
-    matchKey: 'geopolitical',
-    icon: 'globe-outline',
-    tooltip: 'Assesses exposure to trade barriers, conflicts, and logistics disruptions that could affect operations or markets.',
-  },
-  {
-    key: 'monetary',
-    label: 'Monetary Policy',
-    matchKey: 'monetary',
-    icon: 'cash-outline',
-    tooltip: 'Evaluates sensitivity to interest rates, inflation, and central bank decisions that impact cost of capital and demand.',
-  },
-  {
-    key: 'correlations',
-    label: 'Correlations',
-    matchKey: 'correlation',
-    icon: 'git-compare-outline',
-    tooltip: 'Measures how this stock moves relative to sector peers, commodities, and broader risk sentiment.',
-  },
-  {
-    key: 'performance',
-    label: 'Risk & Performance',
-    matchKey: 'performance',
-    icon: 'trending-up-outline',
-    tooltip: 'Combines earnings surprises, guidance revisions, and volatility metrics to assess near-term risk/reward.',
-  },
-];
-
-const CONFIDENCE_COLORS: Record<Confidence, string> = {
-  HIGH: '#4A90D9',
-  MEDIUM: '#8E8E93',
-  LOW: '#F5A623',
+const CONFIDENCE_COLORS: Record<string, string> = {
+  HIGH: '#00C9A7',
+  MEDIUM: '#F5A623',
+  LOW: '#5856D6',
 };
 
 /** Safe number: coerce anything to a finite number or 0. */
@@ -165,15 +116,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [signalHistory, setSignalHistory] = useState<SignalHistoryPoint[]>([]);
   const [stressData, setStressData] = useState<any[] | null>(null);
   const [stressExpanded, setStressExpanded] = useState(false);
-  const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(null);
-  const [scoreDrivers, setScoreDrivers] = useState<Array<{ factor: string; direction: string; description: string }>>([]);
-  const [percentileRank, setPercentileRank] = useState<number | null>(null);
-  const [sectorPercentile, setSectorPercentile] = useState<number | null>(null);
-  const [peerStocks, setPeerStocks] = useState<Array<{ ticker: string; companyName: string; score: number; scoreLabel: string; factorPercentiles: FactorPercentiles }>>([]);
-  const [factorDeepDiveExpanded, setFactorDeepDiveExpanded] = useState(false);
-  const [factorDeepDiveMode, setFactorDeepDiveMode] = useState<'simple' | 'advanced'>('simple');
-  const [expandedFactorBar, setExpandedFactorBar] = useState<string | null>(null);
-  const [tooltipVisible, setTooltipVisible] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -199,41 +141,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
       if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult);
 
-      // Extract factor_percentiles from signal data
-      const sigRaw = signalData as any;
-      const fp = sigRaw?.factor_percentiles ?? factorData?.factor_percentiles;
-      if (fp && typeof fp === 'object') {
-        setFactorPercentiles({
-          supply_chain_upstream: Number(fp.supply_chain_upstream ?? 50),
-          supply_chain_downstream: Number(fp.supply_chain_downstream ?? 50),
-          geopolitical: Number(fp.geopolitical ?? 50),
-          monetary: Number(fp.monetary ?? 50),
-          correlations: Number(fp.correlations ?? 50),
-          performance: Number(fp.performance ?? 50),
-        });
-      }
-
-      // Extract percentile ranks
-      const pRank = sigRaw?.percentile_rank ?? sigRaw?.percentileRank;
-      if (pRank != null) setPercentileRank(safeNum(pRank));
-      const sRank = sigRaw?.sector_percentile ?? sigRaw?.sectorPercentile;
-      if (sRank != null) setSectorPercentile(safeNum(sRank));
-
-      // Extract score drivers
-      const drivers = sigRaw?.score_drivers ?? sigRaw?.scoreDrivers;
-      if (drivers) {
-        try {
-          const parsed = typeof drivers === 'string' ? JSON.parse(drivers) : drivers;
-          if (Array.isArray(parsed)) {
-            setScoreDrivers(parsed.map((d: any) => ({
-              factor: d.factor || d.name || '',
-              direction: d.direction || (d.score > 0 ? 'positive' : 'negative'),
-              description: d.description || d.explanation || '',
-            })));
-          }
-        } catch {}
-      }
-
       // Load events, signal history, and stress test (non-blocking)
       getEventsForTicker(ticker, { limit: '5' })
         .then((d) => setRecentEvents(d.events || []))
@@ -244,29 +151,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       getStressTestAll(ticker)
         .then((d) => setStressData(d.scenarios || []))
         .catch(() => {});
-
-      // Load sector peers for comparison
-      const sectorName = price?.sector;
-      if (sectorName) {
-        getScreener({ sector: sectorName, limit: '5', sort: 'score_desc' })
-          .then((d) => {
-            const results = (d.results || [])
-              .filter((r: any) => r.ticker !== ticker)
-              .slice(0, 3)
-              .map((r: any) => ({
-                ticker: r.ticker,
-                companyName: r.companyName || r.company_name || '',
-                score: safeNum(r.aiScore ?? r.score ?? r.compositeScore ?? 5),
-                scoreLabel: r.scoreLabel || getScoreLabel(safeNum(r.aiScore ?? r.score ?? 5)),
-                factorPercentiles: r.factor_percentiles ?? {
-                  supply_chain_upstream: 50, supply_chain_downstream: 50,
-                  geopolitical: 50, monetary: 50, correlations: 50, performance: 50,
-                },
-              }));
-            if (results.length > 0) setPeerStocks(results);
-          })
-          .catch(() => {});
-      }
     } finally {
       setLoading(false);
     }
@@ -355,52 +239,40 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const confidence = analysis.confidence || 'MEDIUM';
   const showAlternatives =
     analysis.alternatives?.length > 0 &&
-    safeNum(analysis.compositeScore) <= 4;
+    ((['Caution', 'Weak', 'SELL'].includes(analysis.signal)) || (['Neutral', 'HOLD'].includes(analysis.signal) && safeNum(analysis.compositeScore) <= 4));
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1F3864']} style={styles.container}>
-      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Close score detail">
+      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Close signal detail">
         <Ionicons name="close" size={28} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Section 1: HERO with Full Radar Chart */}
+        {/* Section 1: Header with Radar Chart */}
         <View style={styles.header}>
-          <FactorRadarChart
-            factorPercentiles={factorPercentiles ?? {
-              supply_chain_upstream: 50,
-              supply_chain_downstream: 50,
-              geopolitical: 50,
-              monetary: 50,
-              correlations: 50,
-              performance: 50,
-            }}
-            compositeScore={safeNum(analysis.compositeScore)}
-            scoreLabel={(analysis.scoreLabel as string) || getScoreLabel(safeNum(analysis.compositeScore))}
-            size="full"
-            showBenchmark
-            scoreDrivers={scoreDrivers}
-          />
+          {factors?.dimensionScores ? (
+            <RadarScore
+              scores={factors.dimensionScores}
+              size={200}
+              signal={analysis.signal}
+            />
+          ) : (
+            <ScoreRing score={safeNum(analysis.compositeScore)} size={100} />
+          )}
           <Text style={styles.ticker}>{analysis.ticker}</Text>
           <Text style={styles.companyName}>{analysis.companyName}</Text>
           {hasPriceToShow && (
             <View style={styles.priceRow}>
               <Text style={styles.price}>${priceValue.toFixed(2)}</Text>
-              <Text style={[styles.priceChange, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
+              <Text style={[styles.priceChange, { color: isPositive ? '#00C9A7' : '#5856D6' }]}>
                 {isPositive ? '+' : ''}${priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePct.toFixed(1)}%)
               </Text>
             </View>
           )}
-          {/* Score label + percentile + confidence */}
           <View style={styles.badgeRow}>
-            <SignalBadge scoreLabel={analysis.scoreLabel as ScoreLabel} score={safeNum(analysis.compositeScore)} />
-            <ScoreInfoTooltip />
-            {percentileRank != null && (
-              <Text style={styles.percentileRankText}>Top {Math.round(100 - percentileRank)}th</Text>
-            )}
-            <View style={[styles.confidencePill, { backgroundColor: CONFIDENCE_COLORS[confidence] + '30' }]}>
-              <View style={[styles.confidenceDot, { backgroundColor: CONFIDENCE_COLORS[confidence] }]} />
-              <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] }]}>
+            <SignalBadge signal={analysis.signal} score={safeNum(analysis.compositeScore)} />
+            <View style={[styles.confidencePill, { backgroundColor: (CONFIDENCE_COLORS[confidence] || '#8E8E93') + '30' }]}>
+              <Text style={[styles.confidenceText, { color: CONFIDENCE_COLORS[confidence] || '#8E8E93' }]}>
                 {confidence}
               </Text>
             </View>
@@ -426,76 +298,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           </View>
         </View>
 
-        {/* Section 2: Factor Breakdown (6 horizontal gauge bars) */}
-        <View style={styles.section}>
-          <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionTitle}>Factor Breakdown</Text>
-          </View>
-          {FACTOR_GAUGE_AXES.map((axis) => {
-            const val = factorPercentiles?.[axis.key as keyof FactorPercentiles] ?? 50;
-            const barColor = val >= 90 ? '#00C9A7' : val >= 70 ? '#4A90D9' : val >= 40 ? '#8E8E93' : val >= 20 ? '#F5A623' : '#5856D6';
-            const driverMatch = scoreDrivers.find(
-              (d) => d.factor.toLowerCase().includes(axis.matchKey),
-            );
-            const isExpanded = expandedFactorBar === axis.key;
-            return (
-              <TouchableOpacity
-                key={axis.key}
-                style={styles.gaugeRow}
-                onPress={() => setExpandedFactorBar(isExpanded ? null : axis.key)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.gaugeHeader}>
-                  <View style={styles.gaugeLeft}>
-                    <Ionicons name={axis.icon as any} size={14} color={barColor} />
-                    <Text style={styles.gaugeName}>{axis.label}</Text>
-                    <TouchableOpacity
-                      onPress={() => setTooltipVisible(tooltipVisible === axis.key ? null : axis.key)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.25)" />
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={[styles.gaugeValue, { color: barColor }]}>{Math.round(val)}th</Text>
-                </View>
-                {tooltipVisible === axis.key && (
-                  <View style={styles.eduTooltip}>
-                    <Text style={styles.eduTooltipText}>{axis.tooltip}</Text>
-                  </View>
-                )}
-                <View style={styles.gaugeTrack}>
-                  <View style={[styles.gaugeFill, { width: `${Math.min(100, Math.max(2, val))}%`, backgroundColor: barColor }]} />
-                </View>
-                {isExpanded && driverMatch && (
-                  <Text style={styles.gaugeDriverText}>{driverMatch.description}</Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Section 3: Score Drivers (top 3) */}
-        {scoreDrivers.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Score Drivers</Text>
-            {scoreDrivers.slice(0, 3).map((driver, idx) => {
-              const isUp = driver.direction === 'positive' || driver.direction === 'up';
-              const arrowColor = isUp ? '#00C9A7' : '#F5A623';
-              return (
-                <View key={`driver-${idx}`} style={styles.driverCard}>
-                  <Text style={[styles.driverArrow, { color: arrowColor }]}>
-                    {isUp ? '\u2191' : '\u2193'}
-                  </Text>
-                  <View style={styles.driverContent}>
-                    <Text style={styles.driverFactor}>{driver.factor}</Text>
-                    <Text style={styles.driverDesc}>{driver.description}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         {/* Section 2.5: What Drove This Score (Alpha Signals) */}
         {factors && (factors.topPositive?.length > 0 || factors.topNegative?.length > 0) && (
           <View style={styles.section}>
@@ -519,11 +321,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             {/* Top Negative */}
             {(factors.topNegative || []).map((f: FactorContribution, i: number) => (
               <View key={`neg-${f.factorId}-${i}`} style={styles.alphaCard}>
-                <View style={[styles.alphaAccent, { backgroundColor: '#F5A623' }]} />
+                <View style={[styles.alphaAccent, { backgroundColor: '#5856D6' }]} />
                 <View style={styles.alphaContent}>
                   <View style={styles.alphaRow}>
                     <Text style={styles.alphaName}>{f.factorName}</Text>
-                    <Text style={[styles.alphaScore, { color: '#F5A623' }]}>
+                    <Text style={[styles.alphaScore, { color: '#5856D6' }]}>
                       {safeNum(f.normalizedScore).toFixed(1)}
                     </Text>
                   </View>
@@ -570,13 +372,13 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                           styles.factorBarFill,
                           {
                             width: `${Math.min(100, barWidth)}%`,
-                            backgroundColor: isPos ? '#00C9A7' : '#F5A623',
+                            backgroundColor: isPos ? '#00C9A7' : '#5856D6',
                             alignSelf: isPos ? 'flex-start' : 'flex-end',
                           },
                         ]} />
                       </View>
                       <Text style={[styles.factorBarValue, {
-                        color: isPos ? '#00C9A7' : f.normalizedScore < 0 ? '#F5A623' : 'rgba(255,255,255,0.5)',
+                        color: isPos ? '#00C9A7' : f.normalizedScore < 0 ? '#5856D6' : 'rgba(255,255,255,0.5)',
                       }]}>
                         {isPos ? '+' : ''}{safeNum(f.normalizedScore).toFixed(1)}
                       </Text>
@@ -629,7 +431,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                     <View style={styles.subFactors}>
                       {cat.subFactors.map((sf) => {
                         const sfScore = safeNum(sf.score);
-                        const sfColor = sfScore >= 0 ? '#00C9A7' : '#F5A623';
+                        const sfColor = sfScore >= 0 ? '#00C9A7' : '#5856D6';
                         const sign = sfScore >= 0 ? '+' : '';
                         return (
                           <View key={sf.id} style={styles.subFactorRow}>
@@ -663,17 +465,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               </View>
               <View style={styles.techSignals}>
                 {technicals.signals?.trend && (
-                  <View style={[styles.techPill, { backgroundColor: technicals.signals.trend.includes('bullish') ? 'rgba(74,144,217,0.15)' : technicals.signals.trend.includes('bearish') ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.08)' }]}>
-                    <Ionicons name="trending-up-outline" size={12} color={technicals.signals.trend.includes('bullish') ? '#4A90D9' : technicals.signals.trend.includes('bearish') ? '#F5A623' : '#94A3B8'} />
-                    <Text style={[styles.techPillText, { color: technicals.signals.trend.includes('bullish') ? '#4A90D9' : technicals.signals.trend.includes('bearish') ? '#F5A623' : '#94A3B8' }]}>
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.trend.includes('bullish') ? 'rgba(16,185,129,0.15)' : technicals.signals.trend.includes('bearish') ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="trending-up-outline" size={12} color={technicals.signals.trend.includes('bullish') ? '#00C9A7' : technicals.signals.trend.includes('bearish') ? '#5856D6' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.trend.includes('bullish') ? '#00C9A7' : technicals.signals.trend.includes('bearish') ? '#5856D6' : '#94A3B8' }]}>
                       {technicals.signals.trend}
                     </Text>
                   </View>
                 )}
                 {technicals.signals?.momentum && (
-                  <View style={[styles.techPill, { backgroundColor: technicals.signals.momentum === 'oversold' ? 'rgba(74,144,217,0.15)' : technicals.signals.momentum === 'overbought' ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.08)' }]}>
-                    <Ionicons name="speedometer-outline" size={12} color={technicals.signals.momentum === 'oversold' ? '#4A90D9' : technicals.signals.momentum === 'overbought' ? '#F5A623' : '#94A3B8'} />
-                    <Text style={[styles.techPillText, { color: technicals.signals.momentum === 'oversold' ? '#4A90D9' : technicals.signals.momentum === 'overbought' ? '#F5A623' : '#94A3B8' }]}>
+                  <View style={[styles.techPill, { backgroundColor: technicals.signals.momentum === 'oversold' ? 'rgba(16,185,129,0.15)' : technicals.signals.momentum === 'overbought' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)' }]}>
+                    <Ionicons name="speedometer-outline" size={12} color={technicals.signals.momentum === 'oversold' ? '#00C9A7' : technicals.signals.momentum === 'overbought' ? '#5856D6' : '#94A3B8'} />
+                    <Text style={[styles.techPillText, { color: technicals.signals.momentum === 'oversold' ? '#00C9A7' : technicals.signals.momentum === 'overbought' ? '#5856D6' : '#94A3B8' }]}>
                       {technicals.signals.momentum}
                     </Text>
                   </View>
@@ -721,11 +523,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <View style={styles.healthCardLeft}>
                 <View style={[styles.healthGradeBadge, {
                   borderColor: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                    ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
+                    ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#5856D6',
                 }]}>
                   <Text style={[styles.healthGradeText, {
                     color: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                      ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
+                      ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#5856D6',
                   }]}>
                     {fundamentals.grade}
                   </Text>
@@ -734,7 +536,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Text style={styles.healthTitle}>Financial Health</Text>
                   {fundamentals.dcf && fundamentals.dcf.fairValue > 0 && (
                     <Text style={[styles.healthDcf, {
-                      color: (fundamentals.dcf.upside ?? 0) >= 0 ? '#00C9A7' : '#F5A623',
+                      color: (fundamentals.dcf.upside ?? 0) >= 0 ? '#00C9A7' : '#5856D6',
                     }]}>
                       Fair Value: ${safeNum(fundamentals.dcf.fairValue).toFixed(0)}
                       {fundamentals.dcf.upside != null
@@ -762,7 +564,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <View style={styles.altDataLeft}>
                 <View style={styles.altDataIcons}>
                   {(altData.available ?? []).includes('patents') && (
-                    <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
+                    <Ionicons name="bulb-outline" size={16} color="#F5A623" />
                   )}
                   {(altData.available ?? []).includes('contracts') && (
                     <Ionicons name="business-outline" size={16} color="#60A5FA" />
@@ -798,7 +600,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               activeOpacity={0.7}
             >
               <View style={styles.stressHeaderLeft}>
-                <Ionicons name="shield-checkmark-outline" size={20} color="#F59E0B" />
+                <Ionicons name="shield-checkmark-outline" size={20} color="#F5A623" />
                 <Text style={styles.stressTitle}>Macro Stress Test</Text>
               </View>
               <Ionicons
@@ -813,12 +615,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 <View style={styles.stressPreview}>
                   <Text style={styles.stressPreviewLabel}>Severely Adverse</Text>
                   <View style={styles.stressPreviewRow}>
-                    <Text style={[styles.stressPreviewImpact, { color: '#F5A623' }]}>
+                    <Text style={[styles.stressPreviewImpact, { color: '#5856D6' }]}>
                       {severe.priceImpact > 0 ? '+' : ''}{severe.priceImpact}%
                     </Text>
                     <View style={[styles.stressResilienceBadge, {
                       backgroundColor: severe.resilienceScore >= 7
-                        ? 'rgba(0,201,167,0.15)'
+                        ? 'rgba(16,185,129,0.15)'
                         : severe.resilienceScore >= 5
                         ? 'rgba(245,158,11,0.15)'
                         : 'rgba(239,68,80,0.15)',
@@ -828,7 +630,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                           ? '#00C9A7'
                           : severe.resilienceScore >= 5
                           ? '#8E8E93'
-                          : '#F5A623',
+                          : '#5856D6',
                       }]}>
                         {severe.resilienceScore.toFixed(1)} / 10
                       </Text>
@@ -844,17 +646,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Text style={styles.stressScenarioName}>{scenario.scenario}</Text>
                   <View style={[styles.stressResilienceBadge, {
                     backgroundColor: scenario.resilienceScore >= 7
-                      ? 'rgba(0,201,167,0.15)'
+                      ? 'rgba(16,185,129,0.15)'
                       : scenario.resilienceScore >= 5
-                      ? 'rgba(142,142,147,0.15)'
-                      : 'rgba(245,166,35,0.15)',
+                      ? 'rgba(245,158,11,0.15)'
+                      : 'rgba(239,68,80,0.15)',
                   }]}>
                     <Text style={[styles.stressResilienceText, {
                       color: scenario.resilienceScore >= 7
                         ? '#00C9A7'
                         : scenario.resilienceScore >= 5
                         ? '#8E8E93'
-                        : '#F5A623',
+                        : '#5856D6',
                     }]}>
                       {scenario.resilienceScore.toFixed(1)}
                     </Text>
@@ -869,23 +671,23 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.3)" />
                   <View style={styles.stressPriceCol}>
                     <Text style={styles.stressPriceLabel}>Stressed</Text>
-                    <Text style={[styles.stressPriceValue, { color: '#F5A623' }]}>
+                    <Text style={[styles.stressPriceValue, { color: '#5856D6' }]}>
                       ${scenario.stressedPrice}
                     </Text>
                   </View>
                   <View style={[styles.stressImpactPill, {
                     backgroundColor: scenario.priceImpact > -10
-                      ? 'rgba(0,201,167,0.15)'
+                      ? 'rgba(16,185,129,0.15)'
                       : scenario.priceImpact > -30
-                      ? 'rgba(142,142,147,0.15)'
-                      : 'rgba(245,166,35,0.15)',
+                      ? 'rgba(245,158,11,0.15)'
+                      : 'rgba(239,68,80,0.15)',
                   }]}>
                     <Text style={[styles.stressImpactText, {
                       color: scenario.priceImpact > -10
                         ? '#00C9A7'
                         : scenario.priceImpact > -30
                         ? '#8E8E93'
-                        : '#F5A623',
+                        : '#5856D6',
                     }]}>
                       {scenario.priceImpact > 0 ? '+' : ''}{scenario.priceImpact}%
                     </Text>
@@ -938,7 +740,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               >
                 <View style={styles.altHeader}>
                   <Text style={styles.altTicker}>{alt.ticker}</Text>
-                  <SignalBadge scoreLabel={alt.scoreLabel as ScoreLabel} score={alt.score} />
+                  <SignalBadge signal={alt.signal} score={safeNum(alt.compositeScore || alt.score)} />
                 </View>
                 <Text style={styles.altName}>{alt.companyName}</Text>
                 <Text style={styles.altReason}>{alt.reason}</Text>
@@ -973,12 +775,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         {/* Signal History */}
         {signalHistory.length > 1 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Score History (30 Days)</Text>
+            <Text style={styles.sectionTitle}>Signal History (30 Days)</Text>
             <View style={styles.historyCard}>
               <View style={styles.historyDots}>
                 {signalHistory.map((point, idx) => {
                   const scoreNorm = Math.max(0, Math.min(1, ((point.score ?? 0) - 1) / 9));
-                  const color = getScoreColor(point.score ?? 0);
+                  const color = (point.score ?? 0) >= 7 ? '#00C9A7' : (point.score ?? 0) <= 3.5 ? '#5856D6' : '#F5A623';
                   return (
                     <View key={`${point.date}-${idx}`} style={styles.historyDotCol}>
                       <View style={[styles.historyDot, { backgroundColor: color, bottom: scoreNorm * 40 }]} />
@@ -1014,9 +816,9 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               </TouchableOpacity>
             </View>
             {recentEvents.slice(0, 5).map((event, idx) => {
-              const impactColor = event.impact === 'high' ? '#F5A623' : event.impact === 'medium' ? '#8E8E93' : '#6B7280';
+              const impactColor = event.impact === 'high' ? '#5856D6' : event.impact === 'medium' ? '#F5A623' : '#6B7280';
               const dirIcon = event.direction === 'positive' ? 'trending-up' : event.direction === 'negative' ? 'trending-down' : 'remove';
-              const dirColor = event.direction === 'positive' ? '#4A90D9' : event.direction === 'negative' ? '#F5A623' : '#9CA3AF';
+              const dirColor = event.direction === 'positive' ? '#00C9A7' : event.direction === 'negative' ? '#5856D6' : '#9CA3AF';
               return (
                 <TouchableOpacity
                   key={`${event.timestamp}-${idx}`}
@@ -1040,143 +842,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 </TouchableOpacity>
               );
             })}
-          </View>
-        )}
-
-        {/* Section: Peer Comparison */}
-        {priceData?.sector && (
-          <View style={styles.peerSection}>
-            <Text style={styles.sectionTitle}>Sector Peers</Text>
-            <View style={styles.peerRow}>
-              {peerStocks.length > 0 ? (
-                peerStocks.slice(0, 3).map((peer) => (
-                  <TouchableOpacity
-                    key={peer.ticker}
-                    style={styles.peerCard}
-                    onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker })}
-                    activeOpacity={0.7}
-                  >
-                    <FactorRadarChart
-                      factorPercentiles={peer.factorPercentiles}
-                      compositeScore={peer.score}
-                      scoreLabel={peer.scoreLabel}
-                      size="thumbnail"
-                    />
-                    <Text style={styles.peerTicker}>{peer.ticker}</Text>
-                    <Text style={[styles.peerScore, { color: getScoreColor(peer.score) }]}>
-                      {peer.score.toFixed(1)}
-                    </Text>
-                    <Text style={styles.peerCompanyName} numberOfLines={1}>{peer.companyName}</Text>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                // Placeholder peers with neutral radars
-                [1, 2, 3].map((i) => (
-                  <View key={`placeholder-${i}`} style={styles.peerCard}>
-                    <FactorRadarChart
-                      factorPercentiles={{
-                        supply_chain_upstream: 50, supply_chain_downstream: 50,
-                        geopolitical: 50, monetary: 50, correlations: 50, performance: 50,
-                      }}
-                      compositeScore={5}
-                      scoreLabel="Neutral"
-                      size="thumbnail"
-                    />
-                    <Skeleton width={40} height={14} borderRadius={4} />
-                    <View style={{ height: 4 }} />
-                    <Skeleton width={60} height={10} borderRadius={4} />
-                  </View>
-                ))
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Section: Factor Deep Dive (collapsed by default) */}
-        {categories.length > 0 && (
-          <View style={styles.section}>
-            <TouchableOpacity
-              style={styles.deepDiveHeader}
-              onPress={() => setFactorDeepDiveExpanded(!factorDeepDiveExpanded)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.deepDiveHeaderLeft}>
-                <Ionicons name="layers-outline" size={20} color="#60A5FA" />
-                <Text style={styles.deepDiveTitle}>Factor Deep Dive</Text>
-              </View>
-              <Ionicons
-                name={factorDeepDiveExpanded ? 'chevron-up' : 'chevron-down'}
-                size={18}
-                color="rgba(255,255,255,0.4)"
-              />
-            </TouchableOpacity>
-
-            {factorDeepDiveExpanded && (
-              <View>
-                {/* Simple / Advanced toggle */}
-                <View style={styles.deepDiveToggle}>
-                  <TouchableOpacity
-                    style={[
-                      styles.deepDiveToggleBtn,
-                      factorDeepDiveMode === 'simple' && styles.deepDiveToggleBtnActive,
-                    ]}
-                    onPress={() => setFactorDeepDiveMode('simple')}
-                  >
-                    <Text style={[
-                      styles.deepDiveToggleText,
-                      factorDeepDiveMode === 'simple' && styles.deepDiveToggleTextActive,
-                    ]}>Simple</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.deepDiveToggleBtn,
-                      factorDeepDiveMode === 'advanced' && styles.deepDiveToggleBtnActive,
-                    ]}
-                    onPress={() => setFactorDeepDiveMode('advanced')}
-                  >
-                    <Text style={[
-                      styles.deepDiveToggleText,
-                      factorDeepDiveMode === 'advanced' && styles.deepDiveToggleTextActive,
-                    ]}>Advanced</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Sub-factor groups */}
-                {categories.map((cat) => (
-                  <View key={`deep-${cat.id}`} style={styles.deepDiveGroup}>
-                    <Text style={styles.deepDiveGroupTitle}>
-                      {cat.id}. {cat.name}
-                    </Text>
-                    {cat.subFactors.map((sf) => {
-                      const sfVal = safeNum(sf.score);
-                      // Map -2..+2 to 0..100 for bar
-                      const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
-                      const sfColor = sfVal >= 1 ? '#00C9A7' : sfVal >= 0 ? '#4A90D9' : sfVal >= -1 ? '#8E8E93' : '#F5A623';
-                      return (
-                        <View key={sf.id} style={styles.deepDiveSubRow}>
-                          <Text style={styles.deepDiveSubName} numberOfLines={1}>
-                            {sf.id} {sf.name}
-                          </Text>
-                          <View style={styles.deepDiveSubTrack}>
-                            <View style={[styles.deepDiveSubFill, { width: `${barPct}%`, backgroundColor: sfColor }]} />
-                          </View>
-                          <Text style={[styles.deepDiveSubValue, { color: sfColor }]}>
-                            {factorDeepDiveMode === 'advanced'
-                              ? sfVal.toFixed(2)
-                              : `${Math.round(barPct)}%`}
-                          </Text>
-                          {factorDeepDiveMode === 'advanced' && (
-                            <Text style={styles.deepDiveSubWeight}>
-                              w: {(1 / (categories.length * 3)).toFixed(2)}
-                            </Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
-            )}
           </View>
         )}
 
@@ -1469,160 +1134,11 @@ const styles = StyleSheet.create({
   stressBreakdownLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
   stressBreakdownValue: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
   stressRec: {
-    color: '#F59E0B', fontSize: 12, fontWeight: '700', marginTop: 10,
+    color: '#8E8E93', fontSize: 12, fontWeight: '700', marginTop: 10,
     textTransform: 'uppercase', letterSpacing: 0.5,
   },
   stressDisclaimer: {
     color: 'rgba(255,255,255,0.25)', fontSize: 10, textAlign: 'center',
     marginTop: 8, fontStyle: 'italic',
-  },
-
-  // Percentile rank
-  percentileRankText: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '600',
-  },
-  confidenceDot: {
-    width: 6, height: 6, borderRadius: 3, marginRight: 4,
-  },
-
-  // Section title row with info icon
-  sectionTitleRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16,
-  },
-
-  // Factor gauge bars
-  gaugeRow: {
-    marginBottom: 10,
-  },
-  gaugeHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 4,
-  },
-  gaugeLeft: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-  },
-  gaugeName: {
-    color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600',
-  },
-  gaugeValue: {
-    fontSize: 13, fontWeight: '800',
-  },
-  gaugeTrack: {
-    height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)',
-    overflow: 'hidden',
-  },
-  gaugeFill: {
-    height: 6, borderRadius: 3,
-  },
-  gaugeDriverText: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 4, lineHeight: 15,
-  },
-
-  // Educational tooltips
-  eduTooltip: {
-    backgroundColor: 'rgba(15,25,55,0.95)', borderRadius: 8,
-    padding: 10, marginBottom: 6,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-  },
-  eduTooltipText: {
-    color: 'rgba(255,255,255,0.6)', fontSize: 11, lineHeight: 16,
-  },
-
-  // Score drivers section
-  driverCard: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10,
-    padding: 12, marginBottom: 8, gap: 10,
-  },
-  driverArrow: {
-    fontSize: 20, fontWeight: '800', marginTop: -2,
-  },
-  driverContent: {
-    flex: 1,
-  },
-  driverFactor: {
-    color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginBottom: 2,
-  },
-  driverDesc: {
-    color: 'rgba(255,255,255,0.6)', fontSize: 12, lineHeight: 17,
-  },
-
-  // Peer comparison section
-  peerSection: {
-    marginBottom: 28,
-  },
-  peerRow: {
-    flexDirection: 'row', justifyContent: 'space-around', gap: 12,
-  },
-  peerCard: {
-    alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12, padding: 12, flex: 1,
-  },
-  peerTicker: {
-    color: '#FFFFFF', fontSize: 14, fontWeight: '800', letterSpacing: 1, marginTop: 6,
-  },
-  peerScore: {
-    fontSize: 13, fontWeight: '700', marginTop: 2,
-  },
-  peerCompanyName: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 10, marginTop: 2, textAlign: 'center',
-  },
-
-  // Factor deep dive
-  deepDiveHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12,
-    padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-  },
-  deepDiveHeaderLeft: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-  },
-  deepDiveTitle: {
-    color: '#FFFFFF', fontSize: 15, fontWeight: '700',
-  },
-  deepDiveToggle: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8,
-    padding: 4, marginTop: 12, alignSelf: 'flex-start',
-  },
-  deepDiveToggleBtn: {
-    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6,
-  },
-  deepDiveToggleBtnActive: {
-    backgroundColor: 'rgba(96,165,250,0.2)',
-  },
-  deepDiveToggleText: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600',
-  },
-  deepDiveToggleTextActive: {
-    color: '#60A5FA',
-  },
-  deepDiveGroup: {
-    marginTop: 12,
-  },
-  deepDiveGroupTitle: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
-  },
-  deepDiveSubRow: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: 8,
-  },
-  deepDiveSubName: {
-    color: 'rgba(255,255,255,0.65)', fontSize: 12, width: 110,
-  },
-  deepDiveSubTrack: {
-    flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-  },
-  deepDiveSubFill: {
-    height: 4, borderRadius: 2,
-  },
-  deepDiveSubValue: {
-    fontSize: 11, fontWeight: '700', width: 32, textAlign: 'right',
-    color: 'rgba(255,255,255,0.6)',
-  },
-  deepDiveSubWeight: {
-    fontSize: 10, fontWeight: '600', width: 28, textAlign: 'right',
-    color: 'rgba(255,255,255,0.35)',
   },
 });
