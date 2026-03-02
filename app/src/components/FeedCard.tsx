@@ -14,6 +14,8 @@ import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
 import type { EnrichmentData } from '../store/signalStore';
 import { getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import { FactorRadarChart } from './FactorRadarChart';
+import type { FactorPercentiles } from './FactorRadarChart';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -113,6 +115,17 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [dimensionScores, setDimensionScores] = useState<Record<string, number>>(cached?.dimensionScores ?? {});
   const [enrichedFactors, setEnrichedFactors] = useState<{ name: string; score: number }[]>(cached?.enrichedFactors ?? []);
   const [enrichedInsight, setEnrichedInsight] = useState<string | null>(cached?.enrichedInsight ?? null);
+
+  // ─── Factor percentiles for radar chart ───
+  const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(
+    (cached as any)?.factorPercentiles ?? null,
+  );
+  const [topScoreDriver, setTopScoreDriver] = useState<string | null>(
+    (cached as any)?.topScoreDriver ?? null,
+  );
+  const [percentileRank, setPercentileRank] = useState<number | null>(
+    (cached as any)?.percentileRank ?? null,
+  );
 
   // ─── AI Agent insight ───
   const [aiHeadline, setAiHeadline] = useState<string | null>(cached?.aiHeadline ?? null);
@@ -243,6 +256,44 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const factorsRaw = factorR.status === 'fulfilled' ? factorR.value : null;
       const dims = sig?.dimensionScores ?? factors?.dimensionScores ?? factorsRaw?.dimensionScores;
       if (dims && typeof dims === 'object' && Object.keys(dims).length > 0) { setDimensionScores(dims); ed.dimensionScores = dims; }
+
+      // ── Factor Percentiles: signal → factors endpoint ──
+      const fp = sig?.factor_percentiles ?? factors?.factor_percentiles ?? factorsRaw?.factor_percentiles;
+      if (fp && typeof fp === 'object') {
+        const parsed: FactorPercentiles = {
+          supply_chain_upstream: safeNum(fp.supply_chain_upstream ?? 50),
+          supply_chain_downstream: safeNum(fp.supply_chain_downstream ?? 50),
+          geopolitical: safeNum(fp.geopolitical ?? 50),
+          monetary: safeNum(fp.monetary ?? 50),
+          correlations: safeNum(fp.correlations ?? 50),
+          performance: safeNum(fp.performance ?? 50),
+        };
+        setFactorPercentiles(parsed);
+        (ed as any).factorPercentiles = parsed;
+      }
+
+      // ── Percentile rank ──
+      const pRank = sig?.percentile_rank ?? sig?.percentileRank;
+      if (pRank != null) {
+        const v = safeNum(pRank);
+        setPercentileRank(v);
+        (ed as any).percentileRank = v;
+      }
+
+      // ── Score drivers (extract top one for card display) ──
+      const drivers = sig?.score_drivers ?? sig?.scoreDrivers;
+      if (drivers) {
+        try {
+          const driverArr = typeof drivers === 'string' ? JSON.parse(drivers) : drivers;
+          if (Array.isArray(driverArr) && driverArr.length > 0) {
+            const topDriver = driverArr[0].description || driverArr[0].factor || '';
+            if (topDriver) {
+              setTopScoreDriver(topDriver);
+              (ed as any).topScoreDriver = topDriver;
+            }
+          }
+        } catch {}
+      }
 
       // ── Factor pills: signal → factors endpoint → feedItem.topFactors ──
       const pos = sig?.topPositive ?? factors?.topPositive ?? factorsRaw?.topPositive ?? [];
@@ -380,14 +431,35 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         </View>
 
-        {/* ── Score Dial ── */}
-        <View style={styles.scoreContainer}>
-          <ScoreRing score={score} size={110} />
+        {/* ── Score Section: Radar Thumbnail + Info ── */}
+        <View style={styles.scoreRadarRow}>
+          <FactorRadarChart
+            factorPercentiles={factorPercentiles ?? {
+              supply_chain_upstream: 50,
+              supply_chain_downstream: 50,
+              geopolitical: 50,
+              monetary: 50,
+              correlations: 50,
+              performance: 50,
+            }}
+            compositeScore={score}
+            scoreLabel={item.scoreLabel}
+            size="thumbnail"
+          />
+          <View style={styles.scoreInfoCol}>
+            <Text style={styles.ticker}>{item.ticker}</Text>
+            <Text style={styles.companyName} numberOfLines={1}>{item.companyName}</Text>
+            <View style={styles.scoreBadgeRow}>
+              <ScoreRing score={score} size={48} />
+              {percentileRank != null && (
+                <Text style={styles.percentileText}>Top {Math.round(100 - percentileRank)}th</Text>
+              )}
+            </View>
+            {topScoreDriver && (
+              <Text style={styles.driverText} numberOfLines={1}>{topScoreDriver}</Text>
+            )}
+          </View>
         </View>
-
-        {/* ── Ticker & Company ── */}
-        <Text style={styles.ticker}>{item.ticker}</Text>
-        <Text style={styles.companyName} numberOfLines={1}>{item.companyName}</Text>
 
         {/* ── Portfolio badge ── */}
         {ownedShares > 0 && (
@@ -668,23 +740,49 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Score
-  scoreContainer: { marginBottom: 10 },
+  // Score + Radar row
+  scoreRadarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 6,
+  },
+  scoreInfoCol: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  scoreBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  percentileText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  driverText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    fontWeight: '400',
+    marginTop: 3,
+    maxWidth: 200,
+  },
 
   // Ticker
   ticker: {
     color: '#FFFFFF',
-    fontSize: 38,
+    fontSize: 28,
     fontWeight: '800',
     letterSpacing: 2,
   },
   companyName: {
     color: 'rgba(255,255,255,0.5)',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '400',
-    marginTop: 2,
-    maxWidth: 280,
-    textAlign: 'center',
+    marginTop: 1,
+    maxWidth: 200,
   },
 
   // Owned badge
