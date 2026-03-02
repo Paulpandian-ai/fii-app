@@ -285,8 +285,7 @@ export default function App() {
           name="SignalDetail"
           component={WrappedSignalDetail}
           options={{
-            presentation: 'modal',
-            animation: 'slide_from_bottom',
+            animation: 'slide_from_right',
           }}
         />
         <Stack.Screen

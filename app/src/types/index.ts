@@ -1105,7 +1105,7 @@ export type RootTabParamList = {
 
 export type RootStackParamList = {
   MainTabs: undefined;
-  SignalDetail: { ticker: string; feedItemId: string };
+  SignalDetail: { ticker: string; feedItemId?: string; companyName?: string };
   FinancialHealth: { ticker: string };
   AlternativeData: { ticker: string };
   EventTimeline: { ticker: string };
