@@ -368,7 +368,7 @@ export const FeedScreen: React.FC = () => {
 
   const handleCardPress = useCallback((item: FeedEntry) => {
     if (!isEducationalCard(item)) {
-      navigation.navigate('SignalDetail', { ticker: item.ticker, feedItemId: item.id });
+      navigation.navigate('SignalDetail', { ticker: item.ticker, companyName: item.companyName });
     }
   }, [navigation]);
 
@@ -477,7 +477,6 @@ export const FeedScreen: React.FC = () => {
               dismissLiveBanner();
               navigation.navigate('SignalDetail', {
                 ticker: liveBannerEvent.ticker,
-                feedItemId: liveBannerEvent.ticker,
               });
             }}
             activeOpacity={0.85}

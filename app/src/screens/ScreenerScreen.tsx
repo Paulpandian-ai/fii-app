@@ -710,7 +710,7 @@ export const ScreenerScreen: React.FC = () => {
 
   const handleResultPress = useCallback(
     (item: ScreenerResult) => {
-      navigation.navigate('SignalDetail', { ticker: item.ticker, feedItemId: item.ticker });
+      navigation.navigate('SignalDetail', { ticker: item.ticker, companyName: item.companyName });
     },
     [navigation],
   );

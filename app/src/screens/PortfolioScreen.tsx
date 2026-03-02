@@ -464,7 +464,7 @@ export const PortfolioScreen: React.FC = () => {
   const handleSearchSelect = useCallback(
     (ticker: string) => {
       setSearchVisible(false);
-      navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
+      navigation.navigate('SignalDetail', { ticker });
     },
     [navigation],
   );
@@ -1120,7 +1120,7 @@ export const PortfolioScreen: React.FC = () => {
                           onPress={() =>
                             navigation.navigate('SignalDetail', {
                               ticker: item.ticker,
-                              feedItemId: item.id,
+                              companyName: item.companyName,
                             })
                           }
                         >
@@ -1320,7 +1320,7 @@ export const PortfolioScreen: React.FC = () => {
                               onPress={() =>
                                 navigation.navigate('SignalDetail', {
                                   ticker: item.ticker,
-                                  feedItemId: item.ticker,
+                                  companyName: item.companyName,
                                 })
                               }
                               onLongPress={() => showWlItemOptions(wl.id, item)}
