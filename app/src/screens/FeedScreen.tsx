@@ -374,7 +374,7 @@ export const FeedScreen: React.FC = () => {
 
   const handleSearchSelect = useCallback((ticker: string) => {
     setSearchVisible(false);
-    navigation.navigate('SignalDetail', { ticker, feedItemId: ticker });
+    navigation.navigate('SignalDetail', { ticker });
   }, [navigation]);
 
   const renderItem = useCallback(
