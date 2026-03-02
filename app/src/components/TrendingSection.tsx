@@ -15,6 +15,8 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getTrending } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
+import { FactorRadarChart } from './FactorRadarChart';
+import type { FactorPercentiles } from './FactorRadarChart';
 import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 import type { TrendingItem, RootStackParamList, ScoreLabel } from '../types';
 
@@ -37,6 +39,52 @@ function formatMarketCap(cap: string): string {
 function format52WRange(low: number, high: number, current: number): number {
   if (high <= low || high === 0) return 50;
   return Math.min(100, Math.max(0, ((current - low) / (high - low)) * 100));
+}
+
+// Approximate factor percentiles from topFactors (score 0-10 → percentile 0-100)
+const DEFAULT_TRENDING_PERCENTILES: FactorPercentiles = {
+  supply_chain_upstream: 50,
+  supply_chain_downstream: 50,
+  geopolitical: 50,
+  monetary: 50,
+  correlations: 50,
+  performance: 50,
+};
+
+const FACTOR_NAME_MAP: Record<string, keyof FactorPercentiles> = {
+  'supply chain': 'supply_chain_upstream',
+  'supply': 'supply_chain_upstream',
+  'upstream': 'supply_chain_upstream',
+  'downstream': 'supply_chain_downstream',
+  'geopolitical': 'geopolitical',
+  'geo': 'geopolitical',
+  'monetary': 'monetary',
+  'rate': 'monetary',
+  'correlations': 'correlations',
+  'correlation': 'correlations',
+  'performance': 'performance',
+  'momentum': 'performance',
+  'risk': 'performance',
+};
+
+function _trendingRadarPercentiles(item: TrendingItem): FactorPercentiles {
+  const result = { ...DEFAULT_TRENDING_PERCENTILES };
+  if (item.topFactors) {
+    for (const f of item.topFactors) {
+      const key = FACTOR_NAME_MAP[f.name.toLowerCase()];
+      if (key) {
+        result[key] = Math.min(100, Math.max(0, (f.score + 5) * 10));
+      }
+    }
+  }
+  // Use overall score as a rough baseline for all dimensions
+  const basePercentile = Math.min(100, Math.max(0, (item.score / 10) * 100));
+  for (const k of Object.keys(result) as (keyof FactorPercentiles)[]) {
+    if (result[k] === 50) {
+      result[k] = basePercentile;
+    }
+  }
+  return result;
 }
 
 export const TrendingSection: React.FC = () => {
@@ -252,7 +300,7 @@ export const TrendingSection: React.FC = () => {
                 <Text style={styles.swipeLabelUp}>View Details</Text>
               </Animated.View>
 
-              {/* Header: Rank + Ticker + Signal */}
+              {/* Header: Rank + Ticker + FII Score */}
               <View style={styles.cardTop}>
                 <View style={styles.cardTopLeft}>
                   <View style={styles.rankBadge}>
@@ -268,6 +316,17 @@ export const TrendingSection: React.FC = () => {
                   ) : null}
                 </View>
                 <View style={styles.cardTopRight}>
+                  {/* Thumbnail radar */}
+                  <View style={styles.cardRadarThumb}>
+                    <View style={{ transform: [{ scale: 48 / 72 }] }}>
+                      <FactorRadarChart
+                        factorPercentiles={_trendingRadarPercentiles(item)}
+                        compositeScore={item.score ?? 5}
+                        scoreLabel={getScoreLabel(item.score)}
+                        size="thumbnail"
+                      />
+                    </View>
+                  </View>
                   <Text style={styles.cardScoreNum}>{(item.score ?? 0).toFixed(1)}</Text>
                   <View style={[styles.signalPill, { backgroundColor: signalColor + '20' }]}>
                     <Ionicons name={SCORE_LABEL_ICONS[getScoreLabel(item.score)] as any} size={12} color={signalColor} />
@@ -465,6 +524,14 @@ const styles = StyleSheet.create({
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardTopLeft: { flex: 1 },
   cardTopRight: { alignItems: 'flex-end' },
+  cardRadarThumb: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
   rankBadge: {
     flexDirection: 'row',
     alignItems: 'center',

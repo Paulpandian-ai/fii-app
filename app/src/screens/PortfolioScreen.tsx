@@ -27,6 +27,8 @@ import { CSVUploadSheet } from '../components/CSVUploadSheet';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SectorPieChart } from '../components/SectorPieChart';
 import { TrendingSection } from '../components/TrendingSection';
+import { FactorRadarChart } from '../components/FactorRadarChart';
+import type { FactorPercentiles } from '../components/FactorRadarChart';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { LiveIndicator } from '../components/LiveIndicator';
@@ -35,7 +37,8 @@ import { RefreshProgressBar } from '../components/RefreshProgressBar';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { dataRefreshManager } from '../services/DataRefreshManager';
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
-import type { Holding, PortfolioHealth, RootStackParamList, Watchlist, WatchlistItem } from '../types';
+import { SCORE_COLORS, getScoreColor as getScoreColorFromUtil, getScoreLabel as getScoreLabelFromUtil } from '../utils/scoreColors';
+import type { Holding, PortfolioHealth, RootStackParamList, Watchlist, WatchlistItem, ScoreLabel } from '../types';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -568,6 +571,142 @@ export const PortfolioScreen: React.FC = () => {
     return totalWeight > 0 ? weightedSum / totalWeight : 0;
   }, [holdings, signals, hasHoldings]);
 
+  // ── Computed: Portfolio Factor Percentiles (Part A) ──
+  const portfolioFactorPercentiles = useMemo((): FactorPercentiles => {
+    const defaultPct: FactorPercentiles = {
+      supply_chain_upstream: 50,
+      supply_chain_downstream: 50,
+      geopolitical: 50,
+      monetary: 50,
+      correlations: 50,
+      performance: 50,
+    };
+    if (!hasHoldings) return defaultPct;
+
+    const dims: (keyof FactorPercentiles)[] = [
+      'supply_chain_upstream', 'supply_chain_downstream', 'geopolitical',
+      'monetary', 'correlations', 'performance',
+    ];
+    const dimNameMap: Record<string, keyof FactorPercentiles> = {
+      supplyChain: 'supply_chain_upstream',
+      supply_chain_upstream: 'supply_chain_upstream',
+      supply_chain_downstream: 'supply_chain_downstream',
+      geopolitical: 'geopolitical',
+      monetary: 'monetary',
+      correlations: 'correlations',
+      performance: 'performance',
+      macroGeo: 'geopolitical',
+      technical: 'performance',
+      fundamental: 'correlations',
+      sentiment: 'monetary',
+    };
+
+    const weightedSums: Record<string, number> = {};
+    let totalWeight = 0;
+
+    for (const dim of dims) weightedSums[dim] = 0;
+
+    for (const h of holdings) {
+      const enrichment = enrichmentCache[h.ticker];
+      const weight = h.totalValue || 0;
+      if (!enrichment || weight <= 0) continue;
+
+      const dimScores = enrichment.dimensionScores || {};
+      totalWeight += weight;
+
+      for (const [rawKey, rawVal] of Object.entries(dimScores)) {
+        const mappedKey = dimNameMap[rawKey];
+        if (mappedKey && typeof rawVal === 'number') {
+          // dimensionScores are 0-10, convert to percentile (0-100)
+          weightedSums[mappedKey] += (rawVal / 10) * 100 * weight;
+        }
+      }
+    }
+
+    if (totalWeight <= 0) return defaultPct;
+
+    const result = { ...defaultPct };
+    for (const dim of dims) {
+      result[dim] = Math.round(weightedSums[dim] / totalWeight);
+    }
+    return result;
+  }, [holdings, enrichmentCache, hasHoldings]);
+
+  // ── Computed: Strongest & Weakest Factor ──
+  const { strongestFactor, weakestFactor } = useMemo(() => {
+    const labels: Record<keyof FactorPercentiles, string> = {
+      supply_chain_upstream: 'Supply Chain (Upstream)',
+      supply_chain_downstream: 'Supply Chain (Downstream)',
+      geopolitical: 'Geopolitical',
+      monetary: 'Monetary',
+      correlations: 'Correlations',
+      performance: 'Performance',
+    };
+
+    const entries = Object.entries(portfolioFactorPercentiles) as [keyof FactorPercentiles, number][];
+    if (entries.length === 0) return { strongestFactor: '', weakestFactor: '' };
+
+    const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+    const strongest = sorted[0];
+    const weakest = sorted[sorted.length - 1];
+
+    return {
+      strongestFactor: `Strongest factor: ${labels[strongest[0]]} (${strongest[1]}th percentile)`,
+      weakestFactor: `Weakest factor: ${labels[weakest[0]]} (${weakest[1]}th percentile)`,
+    };
+  }, [portfolioFactorPercentiles]);
+
+  // ── Computed: Portfolio Factor Insights (Part D) ──
+  const portfolioInsights = useMemo(() => {
+    if (!hasHoldings) return [];
+    const insights: { icon: string; text: string }[] = [];
+
+    // Check for weak dimensions (< 30th percentile)
+    const dimLabels: Record<keyof FactorPercentiles, string> = {
+      supply_chain_upstream: 'supply chain (upstream)',
+      supply_chain_downstream: 'supply chain (downstream)',
+      geopolitical: 'geopolitical',
+      monetary: 'monetary policy',
+      correlations: 'correlations',
+      performance: 'performance',
+    };
+
+    for (const [key, val] of Object.entries(portfolioFactorPercentiles) as [keyof FactorPercentiles, number][]) {
+      if (val < 30) {
+        insights.push({
+          icon: 'information-circle-outline',
+          text: `Your portfolio has limited ${dimLabels[key]} exposure (${val}th percentile). Portfolios with concentrated factor profiles historically experience higher volatility.`,
+        });
+        break; // Only show one weak-dimension insight
+      }
+    }
+
+    // Check for sector concentration
+    if (sectorData.length > 0) {
+      const totalSectorValue = sectorData.reduce((sum, s) => sum + s.value, 0);
+      const topSector = sectorData[0]; // already sorted desc
+      if (totalSectorValue > 0) {
+        const topPct = (topSector.value / totalSectorValue) * 100;
+        if (topPct >= 60) {
+          insights.push({
+            icon: 'pie-chart-outline',
+            text: `${topPct.toFixed(0)}% of your portfolio is in ${topSector.name}. Sector concentration increases sensitivity to industry-specific events.`,
+          });
+        }
+      }
+    }
+
+    // High average score observation
+    if (weightedFIIScore >= 7) {
+      insights.push({
+        icon: 'trending-up-outline',
+        text: `Your portfolio's average factor score is ${weightedFIIScore.toFixed(1)}, placing it in the upper tier of portfolio factor profiles.`,
+      });
+    }
+
+    return insights.slice(0, 3);
+  }, [hasHoldings, portfolioFactorPercentiles, sectorData, weightedFIIScore]);
+
   // ── Computed: Risk Level ──
   const riskLevel = useMemo(() => {
     if (!healthData) return 'Medium';
@@ -778,11 +917,11 @@ export const PortfolioScreen: React.FC = () => {
           )}
         </View>
 
-        {/* ═══════ 2. PORTFOLIO HEALTH (collapsible) ═══════ */}
+        {/* ═══════ 2. PORTFOLIO FACTOR PROFILE (Part A) ═══════ */}
 
         <View style={styles.section}>
           <SectionHeader
-            title="Portfolio Health"
+            title="Portfolio Factor Profile"
             collapsed={!!collapsed.health}
             onToggle={() => toggleSection('health')}
           />
@@ -791,33 +930,35 @@ export const PortfolioScreen: React.FC = () => {
             <>
               {!hasHoldings ? (
                 <View style={styles.emptyBody}>
-                  <Ionicons name="heart-outline" size={32} color={COLORS.textHint} />
-                  <Text style={styles.emptyText}>Add holdings to see portfolio health</Text>
-                </View>
-              ) : healthLoading ? (
-                <View style={styles.sectionBody}>
-                  <Skeleton width={'100%'} height={80} borderRadius={12} />
-                </View>
-              ) : healthError ? (
-                <View style={styles.errorBody}>
-                  <Text style={styles.errorText}>Unable to load</Text>
-                  <TouchableOpacity style={styles.retryBtn} onPress={loadHealthData}>
-                    <Ionicons name="refresh" size={14} color={COLORS.primary} />
-                    <Text style={styles.retryText}>Retry</Text>
-                  </TouchableOpacity>
+                  <Ionicons name="analytics-outline" size={32} color={COLORS.textHint} />
+                  <Text style={styles.emptyText}>Add holdings to see your portfolio factor profile</Text>
                 </View>
               ) : (
                 <View style={styles.sectionBody}>
-                  <View style={styles.healthGrid}>
-                    <View style={styles.healthItem}>
-                      <Text style={styles.healthLabel}>Portfolio FII Score</Text>
-                      <Text
-                        style={[styles.healthValue, { color: getScoreColor(weightedFIIScore) }]}
-                      >
-                        {weightedFIIScore.toFixed(1)}
-                      </Text>
+                  {/* Full-size radar chart (200x200) */}
+                  <View style={styles.radarContainer}>
+                    <View style={{ transform: [{ scale: 200 / 260 }] }}>
+                      <FactorRadarChart
+                        factorPercentiles={portfolioFactorPercentiles}
+                        compositeScore={weightedFIIScore}
+                        scoreLabel={getScoreLabelFromUtil(weightedFIIScore)}
+                        size="full"
+                        showBenchmark={true}
+                      />
                     </View>
+                  </View>
+                  <Text style={styles.radarLabel}>Your Portfolio Factor Profile</Text>
 
+                  {/* Factor analysis summary */}
+                  <View style={styles.factorSummaryRow}>
+                    <Text style={styles.factorSummaryText}>{strongestFactor}</Text>
+                  </View>
+                  <View style={styles.factorSummaryRow}>
+                    <Text style={styles.factorSummaryText}>{weakestFactor}</Text>
+                  </View>
+
+                  {/* Health grid kept compact */}
+                  <View style={[styles.healthGrid, { marginTop: 12 }]}>
                     <View style={styles.healthItem}>
                       <Text style={styles.healthLabel}>Risk Level</Text>
                       <Text
@@ -849,18 +990,32 @@ export const PortfolioScreen: React.FC = () => {
                       </Text>
                     </View>
                   </View>
-
-                  <View style={styles.riskFactorRow}>
-                    <Ionicons name="warning-outline" size={14} color={COLORS.amber} />
-                    <Text style={styles.riskFactorText} numberOfLines={2}>
-                      {topRiskFactor}
-                    </Text>
-                  </View>
                 </View>
               )}
             </>
           )}
         </View>
+
+        {/* ═══════ 2b. PORTFOLIO FACTOR INSIGHTS (Part D) ═══════ */}
+
+        {hasHoldings && portfolioInsights.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.staticHeader}>
+              <Text style={styles.sectionTitle}>Portfolio Factor Insights</Text>
+            </View>
+            <View style={styles.sectionBody}>
+              {portfolioInsights.map((insight, idx) => (
+                <View key={idx} style={styles.insightCard}>
+                  <Ionicons name={insight.icon as any} size={16} color={COLORS.primary} />
+                  <Text style={styles.insightText}>{insight.text}</Text>
+                </View>
+              ))}
+              <Text style={styles.insightDisclaimer}>
+                Factor analysis is for educational purposes only. Past factor performance does not guarantee future results. This is not investment advice.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* ═══════ 3. HOLDINGS (collapsible) ═══════ */}
 
@@ -909,13 +1064,46 @@ export const PortfolioScreen: React.FC = () => {
                     ))}
                   </View>
 
-                  {/* Holdings list — new 3-row layout */}
+                  {/* Holdings list — with radar thumbnails (Part B) */}
                   {sortedHoldings.map((item) => {
                     const signal = signals[item.ticker];
+                    const enrichment = enrichmentCache[item.ticker];
                     const isPositive = (item.gainLoss || 0) >= 0;
                     const positionValue = (item.currentPrice ?? 0) * item.shares;
                     const gainLoss = item.gainLoss || 0;
                     const gainLossPct = item.gainLossPercent || 0;
+
+                    // Build factor percentiles from enrichment dimensionScores
+                    const holdingFP: FactorPercentiles = {
+                      supply_chain_upstream: 50,
+                      supply_chain_downstream: 50,
+                      geopolitical: 50,
+                      monetary: 50,
+                      correlations: 50,
+                      performance: 50,
+                    };
+                    if (enrichment?.dimensionScores) {
+                      const ds = enrichment.dimensionScores;
+                      const dimMap: Record<string, keyof FactorPercentiles> = {
+                        supplyChain: 'supply_chain_upstream',
+                        supply_chain_upstream: 'supply_chain_upstream',
+                        supply_chain_downstream: 'supply_chain_downstream',
+                        geopolitical: 'geopolitical',
+                        macroGeo: 'geopolitical',
+                        monetary: 'monetary',
+                        sentiment: 'monetary',
+                        correlations: 'correlations',
+                        fundamental: 'correlations',
+                        performance: 'performance',
+                        technical: 'performance',
+                      };
+                      for (const [k, v] of Object.entries(ds)) {
+                        const mapped = dimMap[k];
+                        if (mapped && typeof v === 'number') {
+                          holdingFP[mapped] = Math.round((v / 10) * 100);
+                        }
+                      }
+                    }
 
                     return (
                       <HoldingSwipeRow
@@ -936,6 +1124,18 @@ export const PortfolioScreen: React.FC = () => {
                             })
                           }
                         >
+                          {/* Radar thumbnail (40x40) */}
+                          <View style={styles.holdingRadarThumb}>
+                            <View style={{ transform: [{ scale: 40 / 72 }] }}>
+                              <FactorRadarChart
+                                factorPercentiles={holdingFP}
+                                compositeScore={signal?.score ?? 5}
+                                scoreLabel={signal?.scoreLabel ?? 'Neutral'}
+                                size="thumbnail"
+                              />
+                            </View>
+                          </View>
+
                           {/* Left: Ticker + Company */}
                           <View style={styles.holdingLeft}>
                             <View style={styles.holdingTickerRow}>
@@ -1069,11 +1269,46 @@ export const PortfolioScreen: React.FC = () => {
                       {avgScore > 0 && <FIIBadge score={avgScore} size={22} />}
                     </TouchableOpacity>
 
-                    {/* Watchlist items */}
+                    {/* Watchlist items (Part E: radar thumbnails) */}
                     {isExpanded && wl.items.length > 0 &&
                       wl.items.map((item) => {
                         const itemSignal = signals[item.ticker];
                         const isUp = (item.changePercent ?? 0) >= 0;
+                        const itemScore = itemSignal?.score ?? item.score ?? 5;
+
+                        // Build factor percentiles from enrichment
+                        const wlEnrichment = enrichmentCache[item.ticker];
+                        const wlFP: FactorPercentiles = {
+                          supply_chain_upstream: 50,
+                          supply_chain_downstream: 50,
+                          geopolitical: 50,
+                          monetary: 50,
+                          correlations: 50,
+                          performance: 50,
+                        };
+                        if (wlEnrichment?.dimensionScores) {
+                          const ds = wlEnrichment.dimensionScores;
+                          const dimMap: Record<string, keyof FactorPercentiles> = {
+                            supplyChain: 'supply_chain_upstream',
+                            supply_chain_upstream: 'supply_chain_upstream',
+                            supply_chain_downstream: 'supply_chain_downstream',
+                            geopolitical: 'geopolitical',
+                            macroGeo: 'geopolitical',
+                            monetary: 'monetary',
+                            sentiment: 'monetary',
+                            correlations: 'correlations',
+                            fundamental: 'correlations',
+                            performance: 'performance',
+                            technical: 'performance',
+                          };
+                          for (const [k, v] of Object.entries(ds)) {
+                            const mapped = dimMap[k];
+                            if (mapped && typeof v === 'number') {
+                              wlFP[mapped] = Math.round((v / 10) * 100);
+                            }
+                          }
+                        }
+
                         return (
                           <SwipeableWatchlistRow
                             key={item.ticker}
@@ -1090,6 +1325,17 @@ export const PortfolioScreen: React.FC = () => {
                               }
                               onLongPress={() => showWlItemOptions(wl.id, item)}
                             >
+                              {/* Radar thumbnail (40x40) */}
+                              <View style={styles.wlRadarThumb}>
+                                <View style={{ transform: [{ scale: 40 / 72 }] }}>
+                                  <FactorRadarChart
+                                    factorPercentiles={wlFP}
+                                    compositeScore={itemScore}
+                                    scoreLabel={itemSignal?.scoreLabel ?? getScoreLabelFromUtil(itemScore)}
+                                    size="thumbnail"
+                                  />
+                                </View>
+                              </View>
                               <View style={styles.wlItemLeft}>
                                 <Text style={styles.wlItemTicker}>{item.ticker}</Text>
                                 <Text style={styles.wlItemName} numberOfLines={1}>
@@ -1110,7 +1356,7 @@ export const PortfolioScreen: React.FC = () => {
                               </Text>
                               {(itemSignal || item.score) ? (
                                 <FIIBadge
-                                  score={itemSignal?.score ?? item.score ?? 0}
+                                  score={itemScore}
                                   size={24}
                                 />
                               ) : null}
@@ -1267,6 +1513,78 @@ const styles = StyleSheet.create({
   sectionBody: {
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+
+  // Part A: Radar container
+  radarContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 200,
+    marginBottom: 4,
+    overflow: 'hidden',
+  },
+  radarLabel: {
+    color: COLORS.textTertiary,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  factorSummaryRow: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  factorSummaryText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Part D: Insight cards
+  insightCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(96,165,250,0.06)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.1)',
+  },
+  insightText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  insightDisclaimer: {
+    color: COLORS.textHint,
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 4,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+
+  // Part B: Holding radar thumbnail
+  holdingRadarThumb: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+
+  // Part E: Watchlist radar thumbnail
+  wlRadarThumb: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
 
   // Card (Summary)
