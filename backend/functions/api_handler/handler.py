@@ -157,6 +157,8 @@ def lambda_handler(event, context):
             return _handle_charts(http_method, ticker, query_params)
         elif path.startswith("/screener/templates"):
             return _handle_screener_templates(http_method)
+        elif path.startswith("/screener/sectors"):
+            return _handle_screener_sectors(http_method, query_params)
         elif path.startswith("/screener"):
             return _handle_screener(http_method, query_params)
         elif path.startswith("/search"):
@@ -2119,6 +2121,13 @@ def _handle_screener(method, query_params):
         except ValueError:
             min_score = None
 
+    # Factor percentile minimum filters
+    min_supply_chain = _safe_float(query_params.get("min_supply_chain"), default=None)
+    min_geopolitical = _safe_float(query_params.get("min_geopolitical"), default=None)
+    min_monetary = _safe_float(query_params.get("min_monetary"), default=None)
+    min_correlations = _safe_float(query_params.get("min_correlations"), default=None)
+    min_performance = _safe_float(query_params.get("min_performance"), default=None)
+
     signal_filter = [s.strip() for s in query_params.get("signal", "").split(",") if s.strip()] or None
     sector_filter = [s.strip() for s in query_params.get("sector", "").split(",") if s.strip()] or None
     grade_filter = [g.strip().upper() for g in query_params.get("fundamentalGrade", "").split(",") if g.strip()] or None
@@ -2173,6 +2182,7 @@ def _handle_screener(method, query_params):
         ai_score = None
         sig = None
         conf = None
+        signal_item = None
         try:
             signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
             if signal_item:
@@ -2258,6 +2268,35 @@ def _handle_screener(method, query_params):
         if tier_filter and stock_tier not in tier_filter:
             continue
 
+        # ── Factor percentile pre-parse for filtering ──
+        _fp_raw = None
+        _fp_dict = {}
+        if signal_item:
+            try:
+                _fp_raw = signal_item.get("factor_percentiles", "{}")
+                _fp_dict = json.loads(_fp_raw) if isinstance(_fp_raw, str) else (_fp_raw if isinstance(_fp_raw, dict) else {})
+            except Exception:
+                _fp_dict = {}
+
+        # Apply factor percentile minimum filters
+        if min_supply_chain is not None:
+            sc_avg = (_safe_float(_fp_dict.get("supply_chain_upstream"), default=0)
+                      + _safe_float(_fp_dict.get("supply_chain_downstream"), default=0)) / 2
+            if sc_avg < min_supply_chain:
+                continue
+        if min_geopolitical is not None:
+            if _safe_float(_fp_dict.get("geopolitical"), default=0) < min_geopolitical:
+                continue
+        if min_monetary is not None:
+            if _safe_float(_fp_dict.get("monetary"), default=0) < min_monetary:
+                continue
+        if min_correlations is not None:
+            if _safe_float(_fp_dict.get("correlations"), default=0) < min_correlations:
+                continue
+        if min_performance is not None:
+            if _safe_float(_fp_dict.get("performance"), default=0) < min_performance:
+                continue
+
         # Parse new signal fields
         score_label = None
         percentile_rank = None
@@ -2311,6 +2350,10 @@ def _handle_screener(method, query_params):
         })
 
     # ── Step 5: Sort ──
+    def _fp_val(x, key):
+        fp = x.get("factor_percentiles") or {}
+        return _safe_float(fp.get(key), default=0)
+
     sort_key_map = {
         "aiScore": lambda x: x.get("aiScore") if x.get("aiScore") is not None else -999,
         "technicalScore": lambda x: x.get("technicalScore") if x.get("technicalScore") is not None else -999,
@@ -2320,6 +2363,13 @@ def _handle_screener(method, query_params):
         "peRatio": lambda x: x.get("peRatio") if x.get("peRatio") is not None and x.get("peRatio") > 0 else 9999,
         "ticker": lambda x: x.get("ticker", ""),
         "signal": lambda x: {"Strong": 5, "Favorable": 4, "Neutral": 3, "Weak": 2, "Caution": 1}.get(x.get("signal") or "", 0),
+        "percentileRank": lambda x: x.get("percentile_rank") if x.get("percentile_rank") is not None else -1,
+        "sectorPercentile": lambda x: x.get("sector_percentile") if x.get("sector_percentile") is not None else -1,
+        "supplyChain": lambda x: (_fp_val(x, "supply_chain_upstream") + _fp_val(x, "supply_chain_downstream")) / 2,
+        "geopolitical": lambda x: _fp_val(x, "geopolitical"),
+        "monetary": lambda x: _fp_val(x, "monetary"),
+        "correlations": lambda x: _fp_val(x, "correlations"),
+        "performance": lambda x: _fp_val(x, "performance"),
     }
     key_fn = sort_key_map.get(sort_by, sort_key_map["changePercent"])
     # For ticker sort, ascending is more natural (A-Z)
@@ -2339,6 +2389,78 @@ def _handle_screener(method, query_params):
         "sortBy": sort_by,
         "sortDir": sort_dir,
     })
+
+
+def _handle_screener_sectors(method, query_params):
+    """GET /screener/sectors — Sector summary with top stock per sector."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    from models import STOCK_SECTORS, ETF_SET, get_tier
+
+    table = db.table()
+
+    # Scan all PRICE# records
+    all_price_items = []
+    scan_kwargs = {
+        "FilterExpression": "begins_with(PK, :pk) AND SK = :sk",
+        "ExpressionAttributeValues": {":pk": "PRICE#", ":sk": "LATEST"},
+    }
+    while True:
+        resp = table.scan(**scan_kwargs)
+        all_price_items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+
+    # Build sector aggregations
+    sector_data = {}  # sector -> { stocks: [{ticker, score}], totalScore, count }
+
+    for price_item in all_price_items:
+        pk = price_item.get("PK", "")
+        ticker = pk.replace("PRICE#", "") if pk.startswith("PRICE#") else ""
+        if not ticker or ticker in ETF_SET:
+            continue
+
+        sector = price_item.get("sector", "") or STOCK_SECTORS.get(ticker, "")
+        if not sector:
+            continue
+
+        ai_score = None
+        try:
+            signal_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if signal_item:
+                ai_score = _safe_float(signal_item.get("compositeScore"), default=None)
+        except Exception:
+            pass
+
+        if sector not in sector_data:
+            sector_data[sector] = {"stocks": [], "totalScore": 0, "count": 0}
+
+        score_val = ai_score if ai_score is not None else 0
+        sector_data[sector]["stocks"].append({"ticker": ticker, "score": round(score_val, 1)})
+        sector_data[sector]["totalScore"] += score_val
+        sector_data[sector]["count"] += 1
+
+    # Build response
+    sectors_response = []
+    for sector_name, data in sector_data.items():
+        count = data["count"]
+        avg_score = round(data["totalScore"] / count, 1) if count > 0 else 0
+        # Find top stock by score
+        top = max(data["stocks"], key=lambda s: s["score"]) if data["stocks"] else {"ticker": "", "score": 0}
+        sectors_response.append({
+            "name": sector_name,
+            "stockCount": count,
+            "avgScore": avg_score,
+            "topStock": top,
+        })
+
+    # Sort by avg score descending
+    sectors_response.sort(key=lambda s: s["avgScore"], reverse=True)
+
+    return _response(200, {"sectors": sectors_response})
 
 
 def _parse_range(val):

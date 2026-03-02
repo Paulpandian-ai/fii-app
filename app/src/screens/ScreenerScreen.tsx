@@ -13,23 +13,26 @@ import {
   Dimensions,
   Platform,
   Vibration,
+  SectionList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { Skeleton } from '../components/Skeleton';
+import { FactorRadarChart } from '../components/FactorRadarChart';
+import type { FactorPercentiles } from '../components/FactorRadarChart';
 import { SectorHeatmap } from '../components/SectorHeatmap';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { LiveIndicator } from '../components/LiveIndicator';
 import { LastUpdated } from '../components/LastUpdated';
 import { RefreshProgressBar } from '../components/RefreshProgressBar';
-import { getScreener, getScreenerTemplates } from '../services/api';
+import { getScreener, getScreenerTemplates, getScreenerSectors } from '../services/api';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { useShallow } from 'zustand/react/shallow';
 import type { ScoreLabel, RootStackParamList } from '../types';
-import { SCORE_COLORS } from '../utils/scoreColors';
+import { SCORE_COLORS, getScoreColor } from '../utils/scoreColors';
 
 // ─── Constants ───
 
@@ -59,7 +62,23 @@ type Grade = (typeof GRADES)[number];
 const MARKET_CAPS = ['Small', 'Mid', 'Large', 'Mega'] as const;
 type MarketCap = (typeof MARKET_CAPS)[number];
 
-const SORT_OPTIONS = ['FII Score', 'Price', 'Price Change', 'Market Cap', 'P/E', 'Ticker', 'Tech Score'] as const;
+// Part C: Extended sort options
+const SORT_OPTIONS = [
+  'FII Score',
+  'Percentile Rank',
+  'Supply Chain \u2191',
+  'Supply Chain \u2193',
+  'Geopolitical',
+  'Monetary',
+  'Correlations',
+  'Performance',
+  'Price',
+  'Price Change',
+  'Market Cap',
+  'P/E',
+  'Ticker',
+  'Tech Score',
+] as const;
 type SortOption = (typeof SORT_OPTIONS)[number];
 
 const SIGNAL_COLORS = SCORE_COLORS;
@@ -71,6 +90,23 @@ const GRADE_COLORS: Record<Grade, string> = {
   D: '#ff7043',
   F: '#ef5350',
 };
+
+// ─── Part A: Factor Filter Chip Definitions ───
+
+interface FactorFilterChip {
+  id: string;
+  label: string;
+  paramKey: string;
+  minValue: number;
+}
+
+const FACTOR_FILTER_CHIPS: FactorFilterChip[] = [
+  { id: 'strong-supply', label: 'Strong Supply Chain', paramKey: 'min_supply_chain', minValue: 70 },
+  { id: 'low-geo', label: 'Low Geo Risk', paramKey: 'min_geopolitical', minValue: 70 },
+  { id: 'rate-resilient', label: 'Rate Resilient', paramKey: 'min_monetary', minValue: 70 },
+  { id: 'momentum', label: 'Momentum', paramKey: 'min_performance', minValue: 80 },
+  { id: 'high-corr', label: 'High Correlation', paramKey: 'min_correlations', minValue: 70 },
+];
 
 // ─── Template Definitions ───
 
@@ -150,6 +186,17 @@ interface ScreenerResult {
   marketCapLabel: string;
   tier: string;
   isETF: boolean;
+  percentileRank: number | null;
+  sectorPercentile: number | null;
+  factorPercentiles: FactorPercentiles | null;
+  scoreDrivers: Array<{ factor: string; direction: string; description: string }> | null;
+}
+
+interface SectorSummary {
+  name: string;
+  stockCount: number;
+  avgScore: number;
+  topStock: { ticker: string; score: number };
 }
 
 const DEFAULT_FILTERS: ScreenerFilters = {
@@ -166,13 +213,166 @@ const DEFAULT_FILTERS: ScreenerFilters = {
 
 // ─── Helpers ───
 
-const getAiScoreColor = (score: number): string => {
-  if (score >= 8) return '#26a69a';
-  if (score >= 6) return '#66bb6a';
-  if (score >= 4) return '#ffa726';
-  if (score >= 2) return '#ff7043';
-  return '#ef5350';
+const getPercentileLabel = (pct: number | null): string => {
+  if (pct == null || pct <= 0) return '';
+  if (pct >= 95) return 'Top 5%';
+  if (pct >= 90) return 'Top 10%';
+  if (pct >= 85) return 'Top 15%';
+  if (pct >= 80) return 'Top 20%';
+  if (pct >= 75) return 'Top 25%';
+  if (pct >= 50) return `Top ${100 - pct}%`;
+  return '';
 };
+
+const DEFAULT_FACTOR_PERCENTILES: FactorPercentiles = {
+  supply_chain_upstream: 50,
+  supply_chain_downstream: 50,
+  geopolitical: 50,
+  monetary: 50,
+  correlations: 50,
+  performance: 50,
+};
+
+// ─── Memoized Row Component (Part D) ───
+
+interface ResultRowProps {
+  item: ScreenerResult;
+  onPress: (item: ScreenerResult) => void;
+  onToggleWatchlist: (ticker: string, companyName: string) => void;
+  isStarred: boolean;
+  showSectorPercentile: boolean;
+}
+
+const ResultRowInner: React.FC<ResultRowProps> = ({
+  item,
+  onPress,
+  onToggleWatchlist,
+  isStarred,
+  showSectorPercentile,
+}) => {
+  const changeColor = (item.changePercent ?? 0) >= 0 ? '#26a69a' : '#ef5350';
+  const changeSign = (item.changePercent ?? 0) >= 0 ? '+' : '';
+  const hasScoreLabel = item.scoreLabel != null;
+  const signalColor = hasScoreLabel ? SIGNAL_COLORS[item.scoreLabel!] : '#8b949e';
+  const hasAiScore = item.aiScore != null;
+  const aiColor = hasAiScore ? getScoreColor(item.aiScore!) : '#8b949e';
+  const pctLabel = getPercentileLabel(
+    showSectorPercentile ? item.sectorPercentile : item.percentileRank,
+  );
+
+  const fp = item.factorPercentiles ?? DEFAULT_FACTOR_PERCENTILES;
+
+  return (
+    <TouchableOpacity
+      style={styles.resultRow}
+      onPress={() => onPress(item)}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasScoreLabel ? item.scoreLabel + ' score' : 'no score'}`}
+    >
+      {/* Radar Thumbnail (72x72 scaled to 40x40) */}
+      <View style={styles.radarThumb}>
+        <View style={{ transform: [{ scale: 40 / 72 }] }}>
+          <FactorRadarChart
+            factorPercentiles={fp}
+            compositeScore={item.aiScore ?? 5}
+            scoreLabel={item.scoreLabel ?? 'Neutral'}
+            size="thumbnail"
+          />
+        </View>
+      </View>
+
+      <View style={styles.resultLeft}>
+        <View style={styles.resultTickerRow}>
+          <Text style={styles.resultTicker}>{item.ticker}</Text>
+          <TouchableOpacity
+            onPress={() => onToggleWatchlist(item.ticker, item.companyName)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={isStarred ? 'Remove from watchlist' : 'Add to watchlist'}
+          >
+            <Ionicons
+              name={isStarred ? 'star' : 'star-outline'}
+              size={14}
+              color={isStarred ? '#ffa726' : '#8b949e'}
+            />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.resultCompany} numberOfLines={1}>
+          {item.companyName}
+        </Text>
+      </View>
+
+      <View style={styles.resultRight}>
+        <View style={[styles.aiScoreBadge, { backgroundColor: signalColor + '20' }]}>
+          <Text style={[styles.aiScoreText, { color: signalColor }]}>
+            {hasAiScore ? item.aiScore!.toFixed(1) : '\u2014'}
+          </Text>
+        </View>
+        <Text style={[styles.scoreLabelText, { color: signalColor }]}>
+          {hasScoreLabel ? item.scoreLabel : ''}
+        </Text>
+        {pctLabel ? (
+          <Text style={styles.percentileText}>{pctLabel}</Text>
+        ) : null}
+        <View style={styles.resultPriceCol}>
+          <Text style={styles.resultPrice}>
+            {item.price ? `$${item.price.toFixed(2)}` : '\u2014'}
+          </Text>
+          <Text style={[styles.resultChange, { color: changeColor }]}>
+            {changeSign}{(item.changePercent ?? 0).toFixed(2)}%
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const ResultRow = React.memo(ResultRowInner, (prev, next) => {
+  return (
+    prev.item.ticker === next.item.ticker &&
+    prev.item.aiScore === next.item.aiScore &&
+    prev.item.price === next.item.price &&
+    prev.item.changePercent === next.item.changePercent &&
+    prev.item.scoreLabel === next.item.scoreLabel &&
+    prev.item.percentileRank === next.item.percentileRank &&
+    prev.item.sectorPercentile === next.item.sectorPercentile &&
+    prev.isStarred === next.isStarred &&
+    prev.showSectorPercentile === next.showSectorPercentile
+  );
+});
+
+// ─── Sector Card Component (Part E) ───
+
+interface SectorCardProps {
+  sector: SectorSummary;
+  onPress: (sectorName: string) => void;
+  isActive: boolean;
+}
+
+const SectorCardInner: React.FC<SectorCardProps> = ({ sector, onPress, isActive }) => {
+  const scoreColor = getScoreColor(sector.avgScore);
+  return (
+    <TouchableOpacity
+      style={[
+        styles.sectorCard,
+        isActive && { borderColor: '#60A5FA', backgroundColor: '#60A5FA10' },
+      ]}
+      onPress={() => onPress(sector.name)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.sectorCardName} numberOfLines={1}>{sector.name}</Text>
+      <View style={styles.sectorCardRow}>
+        <Text style={styles.sectorCardTicker}>{sector.topStock.ticker}</Text>
+        <Text style={[styles.sectorCardScore, { color: scoreColor }]}>
+          {sector.topStock.score.toFixed(1)}
+        </Text>
+      </View>
+      <Text style={styles.sectorCardCount}>{sector.stockCount} stocks</Text>
+    </TouchableOpacity>
+  );
+};
+
+const SectorCard = React.memo(SectorCardInner);
 
 // ─── Component ───
 
@@ -200,6 +400,16 @@ export const ScreenerScreen: React.FC = () => {
   const [screenerLastUpdated, setScreenerLastUpdated] = useState(0);
   const [isPolling, setIsPolling] = useState(false);
 
+  // Part A: Factor filter chips state
+  const [activeFactorChips, setActiveFactorChips] = useState<Set<string>>(new Set());
+
+  // Part B: Sector view toggle state
+  const [sectorViewActive, setSectorViewActive] = useState(false);
+
+  // Part E: Sector summaries
+  const [sectorSummaries, setSectorSummaries] = useState<SectorSummary[]>([]);
+  const [activeSectorCard, setActiveSectorCard] = useState<string | null>(null);
+
   // ─── Data polling: screener refresh every 60s (only when tab is active) ───
   useDataRefresh(
     'screener',
@@ -208,7 +418,7 @@ export const ScreenerScreen: React.FC = () => {
       try {
         const params = _buildParams(filters);
         const data = await getScreener(params);
-        const items: ScreenerResult[] = data?.results ?? [];
+        const items: ScreenerResult[] = _parseItems(data);
         if (items.length > 0) {
           setResults(items);
           setTotalCount(data?.total ?? items.length);
@@ -240,15 +450,41 @@ export const ScreenerScreen: React.FC = () => {
     if (appliedFilters.sectors.length > 0) params.sector = appliedFilters.sectors.join(',');
     if (appliedFilters.grades.length > 0) params.fundamentalGrade = appliedFilters.grades.join(',');
     if (appliedFilters.marketCaps.length > 0) params.marketCap = appliedFilters.marketCaps.join(',');
+
+    // Part C: Extended sort mapping
     const sortMap: Record<string, string> = {
-      'FII Score': 'aiScore', 'Price': 'price', 'Price Change': 'changePercent',
-      'Market Cap': 'marketCap', 'P/E': 'peRatio', 'Ticker': 'ticker',
+      'FII Score': 'aiScore',
+      'Percentile Rank': 'percentileRank',
+      'Supply Chain \u2191': 'supplyChain',
+      'Supply Chain \u2193': 'supplyChain',
+      'Geopolitical': 'geopolitical',
+      'Monetary': 'monetary',
+      'Correlations': 'correlations',
+      'Performance': 'performance',
+      'Price': 'price',
+      'Price Change': 'changePercent',
+      'Market Cap': 'marketCap',
+      'P/E': 'peRatio',
+      'Ticker': 'ticker',
       'Tech Score': 'technicalScore',
     };
     if (appliedFilters.sortBy) params.sortBy = sortMap[appliedFilters.sortBy] || 'changePercent';
     if (appliedFilters.sortBy === 'Ticker') params.sortDir = 'asc';
+    if (appliedFilters.sortBy === 'Supply Chain \u2193') params.sortDir = 'asc';
+
+    // Part A: Factor filter chip params
+    activeFactorChips.forEach((chipId) => {
+      const chip = FACTOR_FILTER_CHIPS.find((c) => c.id === chipId);
+      if (chip) params[chip.paramKey] = String(chip.minValue);
+    });
+
+    // Part E: Sector card filter
+    if (activeSectorCard) {
+      params.sector = activeSectorCard;
+    }
+
     return params;
-  }, []);
+  }, [activeFactorChips, activeSectorCard]);
 
   const _parseItems = (data: any): ScreenerResult[] =>
     (data?.results || data?.items || []).map((item: any) => ({
@@ -260,13 +496,17 @@ export const ScreenerScreen: React.FC = () => {
       aiScore: item.aiScore ?? null,
       technicalScore: item.technicalScore ?? null,
       fundamentalGrade: item.fundamentalGrade ?? null,
-      scoreLabel: item.scoreLabel || null,
+      scoreLabel: item.scoreLabel ?? item.score_label ?? null,
       confidence: item.confidence || null,
       sector: item.sector || '',
       marketCap: item.marketCap ?? null,
       marketCapLabel: item.marketCapLabel || '',
       tier: item.tier || 'TIER_3',
       isETF: item.isETF ?? false,
+      percentileRank: item.percentile_rank ?? item.percentileRank ?? null,
+      sectorPercentile: item.sector_percentile ?? item.sectorPercentile ?? null,
+      factorPercentiles: item.factor_percentiles ?? item.factorPercentiles ?? null,
+      scoreDrivers: item.score_drivers ?? item.scoreDrivers ?? null,
     }));
 
   const fetchResults = useCallback(async (appliedFilters: ScreenerFilters) => {
@@ -312,6 +552,26 @@ export const ScreenerScreen: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Part E: Load sector summaries on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await getScreenerSectors();
+        if (data?.sectors) {
+          setSectorSummaries(data.sectors);
+        }
+      } catch {
+        // Sector cards are optional, fail silently
+      }
+    })();
+  }, []);
+
+  // Refetch when factor chips or sector card change
+  useEffect(() => {
+    fetchResults(filters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFactorChips, activeSectorCard]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchResults(filters);
@@ -323,7 +583,6 @@ export const ScreenerScreen: React.FC = () => {
   const handleTemplatePress = useCallback(
     (template: Template) => {
       if (activeTemplate === template.id) {
-        // Deselect template, reset to defaults
         setActiveTemplate(null);
         const resetFilters = { ...DEFAULT_FILTERS };
         setFilters(resetFilters);
@@ -338,6 +597,32 @@ export const ScreenerScreen: React.FC = () => {
     },
     [activeTemplate],
   );
+
+  // ─── Part A: Factor Chip Toggle ───
+
+  const toggleFactorChip = useCallback((chipId: string) => {
+    setActiveFactorChips((prev) => {
+      const next = new Set(prev);
+      if (next.has(chipId)) {
+        next.delete(chipId);
+      } else {
+        next.add(chipId);
+      }
+      return next;
+    });
+  }, []);
+
+  // ─── Part B: Sector View Toggle ───
+
+  const toggleSectorView = useCallback(() => {
+    setSectorViewActive((prev) => !prev);
+  }, []);
+
+  // ─── Part E: Sector Card Press ───
+
+  const handleSectorCardPress = useCallback((sectorName: string) => {
+    setActiveSectorCard((prev) => (prev === sectorName ? null : sectorName));
+  }, []);
 
   // ─── Filter Modal Actions ───
 
@@ -455,6 +740,7 @@ export const ScreenerScreen: React.FC = () => {
     if (filters.grades.length > 0) count++;
     if (filters.marketCaps.length > 0) count++;
     if (watchlistOnly) count++;
+    if (activeFactorChips.size > 0) count += activeFactorChips.size;
     return count;
   })();
 
@@ -462,12 +748,10 @@ export const ScreenerScreen: React.FC = () => {
 
   const filteredResults = useMemo(() => {
     let data = results;
-    // Watchlist filter
     if (watchlistOnly) {
       const wlSet = new Set(watchlistTickers);
       data = data.filter((r) => wlSet.has(r.ticker));
     }
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       data = data.filter(
@@ -478,6 +762,38 @@ export const ScreenerScreen: React.FC = () => {
     }
     return data;
   }, [results, searchQuery, watchlistOnly, watchlistTickers]);
+
+  // ─── Part B: Sector-grouped sections ───
+
+  const sectorSections = useMemo(() => {
+    if (!sectorViewActive) return [];
+    const sectorMap = new Map<string, { items: ScreenerResult[]; totalScore: number }>();
+
+    filteredResults.forEach((r) => {
+      const sec = r.sector || 'Other';
+      if (!sectorMap.has(sec)) {
+        sectorMap.set(sec, { items: [], totalScore: 0 });
+      }
+      const entry = sectorMap.get(sec)!;
+      entry.items.push(r);
+      entry.totalScore += (r.aiScore ?? 0);
+    });
+
+    const sections = Array.from(sectorMap.entries()).map(([sector, data]) => {
+      const sorted = [...data.items].sort(
+        (a, b) => (b.sectorPercentile ?? 0) - (a.sectorPercentile ?? 0),
+      );
+      return {
+        title: sector,
+        stockCount: data.items.length,
+        avgScore: data.items.length > 0 ? data.totalScore / data.items.length : 0,
+        data: sorted,
+      };
+    });
+
+    sections.sort((a, b) => b.avgScore - a.avgScore);
+    return sections;
+  }, [sectorViewActive, filteredResults]);
 
   // ─── Render: Template Chip ───
 
@@ -510,90 +826,16 @@ export const ScreenerScreen: React.FC = () => {
   // ─── Render: Result Row ───
 
   const renderResultItem = useCallback(
-    ({ item }: { item: ScreenerResult }) => {
-      const changeColor = (item.changePercent ?? 0) >= 0 ? '#26a69a' : '#ef5350';
-      const changeSign = (item.changePercent ?? 0) >= 0 ? '+' : '';
-      const hasScoreLabel = item.scoreLabel != null;
-      const signalColor = hasScoreLabel ? SIGNAL_COLORS[item.scoreLabel!] : '#8b949e';
-      const hasAiScore = item.aiScore != null;
-      const aiColor = hasAiScore ? getAiScoreColor(item.aiScore!) : '#8b949e';
-      const gradeColor =
-        item.fundamentalGrade ? (GRADE_COLORS[item.fundamentalGrade as Grade] || '#8b949e') : '#8b949e';
-      const starred = isInAnyWatchlist(item.ticker);
-
-      return (
-        <TouchableOpacity
-          style={styles.resultRow}
-          onPress={() => handleResultPress(item)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`${item.ticker} ${item.companyName}, ${hasScoreLabel ? item.scoreLabel + ' score' : 'no score'}`}
-        >
-          {/* Star / Watchlist toggle */}
-          <TouchableOpacity
-            style={styles.starBtn}
-            onPress={() => toggleWatchlistItem(item.ticker, item.companyName)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityLabel={starred ? 'Remove from watchlist' : 'Add to watchlist'}
-          >
-            <Ionicons
-              name={starred ? 'star' : 'star-outline'}
-              size={18}
-              color={starred ? '#ffa726' : '#8b949e'}
-            />
-          </TouchableOpacity>
-
-          <View style={styles.resultLeft}>
-            <View style={styles.resultTickerRow}>
-              <Text style={styles.resultTicker}>{item.ticker}</Text>
-              <View style={[styles.signalBadge, { backgroundColor: signalColor + '20' }]}>
-                <Text style={[styles.signalBadgeText, { color: signalColor }]}>
-                  {hasScoreLabel ? item.scoreLabel : '—'}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.resultCompany} numberOfLines={1}>
-              {item.companyName}
-            </Text>
-          </View>
-
-          <View style={styles.resultCenter}>
-            <View style={styles.resultPriceCol}>
-              <Text style={styles.resultPrice}>
-                {item.price ? `$${item.price.toFixed(2)}` : '—'}
-              </Text>
-              <Text style={[styles.resultChange, { color: changeColor }]}>
-                {changeSign}{(item.changePercent ?? 0).toFixed(2)}%
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.resultRight}>
-            <View style={[styles.aiScoreBadge, { backgroundColor: aiColor + '20' }]}>
-              <Text style={[styles.aiScoreText, { color: aiColor }]}>
-                {hasAiScore ? item.aiScore!.toFixed(1) : '—'}
-              </Text>
-            </View>
-            <View style={styles.resultMetaRow}>
-              {item.technicalScore != null && (
-                <>
-                  <Text style={styles.resultMetaLabel}>T:</Text>
-                  <Text style={styles.resultMetaValue}>
-                    {item.technicalScore.toFixed(1)}
-                  </Text>
-                </>
-              )}
-              <View style={[styles.gradeBadgeMini, { backgroundColor: gradeColor + '20' }]}>
-                <Text style={[styles.gradeBadgeMiniText, { color: gradeColor }]}>
-                  {item.fundamentalGrade || '—'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </TouchableOpacity>
-      );
-    },
-    [handleResultPress, isInAnyWatchlist, toggleWatchlistItem],
+    ({ item }: { item: ScreenerResult }) => (
+      <ResultRow
+        item={item}
+        onPress={handleResultPress}
+        onToggleWatchlist={toggleWatchlistItem}
+        isStarred={isInAnyWatchlist(item.ticker)}
+        showSectorPercentile={sectorViewActive}
+      />
+    ),
+    [handleResultPress, isInAnyWatchlist, toggleWatchlistItem, sectorViewActive],
   );
 
   // ─── Render: Loading Skeleton ───
@@ -642,9 +884,11 @@ export const ScreenerScreen: React.FC = () => {
           style={styles.resetButton}
           onPress={() => {
             setActiveTemplate(null);
-            const resetFilters = { ...DEFAULT_FILTERS };
-            setFilters(resetFilters);
-            setPendingFilters(resetFilters);
+            setActiveFactorChips(new Set());
+            setActiveSectorCard(null);
+            const rf = { ...DEFAULT_FILTERS };
+            setFilters(rf);
+            setPendingFilters(rf);
           }}
         >
           <Text style={styles.resetButtonText}>Reset Filters</Text>
@@ -695,6 +939,38 @@ export const ScreenerScreen: React.FC = () => {
       </Text>
     </TouchableOpacity>
   );
+
+  // ─── Render: Sector Section Header (Part B) ───
+
+  const renderSectionHeader = ({ section }: { section: { title: string; stockCount: number; avgScore: number } }) => (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderTitle}>{section.title}</Text>
+      <Text style={styles.sectionHeaderMeta}>
+        {section.stockCount} stocks
+      </Text>
+      <View style={[styles.sectionHeaderScoreBadge, { backgroundColor: getScoreColor(section.avgScore) + '20' }]}>
+        <Text style={[styles.sectionHeaderScore, { color: getScoreColor(section.avgScore) }]}>
+          Avg {section.avgScore.toFixed(1)}
+        </Text>
+      </View>
+    </View>
+  );
+
+  // ─── List Footer ───
+
+  const listFooter = filteredResults.length > 0 ? (
+    <>
+      {!searchQuery.trim() && loadingMore && (
+        <ActivityIndicator size="small" color="#60A5FA" style={{ paddingVertical: 12 }} />
+      )}
+      {!searchQuery.trim() && hasMore && !loadingMore && (
+        <Text style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 8, fontSize: 12 }}>
+          Scroll for more...
+        </Text>
+      )}
+      <DisclaimerBanner />
+    </>
+  ) : null;
 
   // ─── Main Render ───
 
@@ -772,8 +1048,77 @@ export const ScreenerScreen: React.FC = () => {
         </ScrollView>
       </View>
 
+      {/* Part A: Factor Filter Chips */}
+      <View style={styles.factorChipContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.factorChipScroll}
+        >
+          {FACTOR_FILTER_CHIPS.map((chip) => {
+            const isActive = activeFactorChips.has(chip.id);
+            return (
+              <TouchableOpacity
+                key={chip.id}
+                style={[
+                  styles.factorChip,
+                  isActive && styles.factorChipActive,
+                ]}
+                onPress={() => toggleFactorChip(chip.id)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.factorChipText, isActive && styles.factorChipTextActive]}>
+                  {chip.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Part B: Sector View Toggle (inline with sort indicator) */}
+      <View style={styles.viewToggleRow}>
+        <Text style={styles.sortIndicator}>
+          Sort: {filters.sortBy}
+        </Text>
+        <TouchableOpacity
+          style={[styles.sectorToggleBtn, sectorViewActive && styles.sectorToggleBtnActive]}
+          onPress={toggleSectorView}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="grid-outline"
+            size={14}
+            color={sectorViewActive ? '#fff' : '#8b949e'}
+          />
+          <Text style={[styles.sectorToggleText, sectorViewActive && styles.sectorToggleTextActive]}>
+            By Sector
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Part E: Top Stocks by Sector (horizontal scroll) */}
+      {sectorSummaries.length > 0 && (
+        <View style={styles.sectorCardsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.sectorCardsScroll}
+          >
+            {sectorSummaries.map((sec) => (
+              <SectorCard
+                key={sec.name}
+                sector={sec}
+                onPress={handleSectorCardPress}
+                isActive={activeSectorCard === sec.name}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Sector Heatmap */}
-      {results.length > 0 && (
+      {results.length > 0 && !sectorViewActive && (
         <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
           <SectorHeatmap
             sectors={(() => {
@@ -808,6 +1153,32 @@ export const ScreenerScreen: React.FC = () => {
       {/* Results List */}
       {loading && filteredResults.length === 0 ? (
         renderSkeleton()
+      ) : sectorViewActive && sectorSections.length > 0 ? (
+        /* Part B: Sector-grouped SectionList */
+        <SectionList
+          sections={sectorSections}
+          renderItem={renderResultItem}
+          renderSectionHeader={renderSectionHeader}
+          keyExtractor={(item, index) => item.ticker || 'item-' + index}
+          ListHeaderComponent={filteredResults.length > 0 ? renderHeader : null}
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={listFooter}
+          contentContainerStyle={filteredResults.length === 0 ? styles.emptyList : styles.resultList}
+          showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          initialNumToRender={15}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#26a69a"
+              colors={['#26a69a']}
+            />
+          }
+        />
       ) : (
         <FlatList
           data={filteredResults}
@@ -817,19 +1188,7 @@ export const ScreenerScreen: React.FC = () => {
           ListEmptyComponent={renderEmpty}
           onEndReached={searchQuery.trim() ? undefined : loadMore}
           onEndReachedThreshold={0.3}
-          ListFooterComponent={filteredResults.length > 0 ? (
-            <>
-              {!searchQuery.trim() && loadingMore && (
-                <ActivityIndicator size="small" color="#60A5FA" style={{ paddingVertical: 12 }} />
-              )}
-              {!searchQuery.trim() && hasMore && !loadingMore && (
-                <Text style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingVertical: 8, fontSize: 12 }}>
-                  Scroll for more...
-                </Text>
-              )}
-              <DisclaimerBanner />
-            </>
-          ) : null}
+          ListFooterComponent={listFooter}
           contentContainerStyle={filteredResults.length === 0 ? styles.emptyList : styles.resultList}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={true}
@@ -1028,7 +1387,7 @@ export const ScreenerScreen: React.FC = () => {
                 </View>
               </View>
 
-              {/* Sort By */}
+              {/* Part C: Sort By (extended options) */}
               <View style={styles.filterSection}>
                 <Text style={styles.filterLabel}>Sort by</Text>
                 <View style={styles.chipRow}>
@@ -1171,17 +1530,9 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  // Star button on result row
-  starBtn: {
-    paddingRight: 10,
-    paddingVertical: 4,
-  },
-
   // Template Chips
   templateContainer: {
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#21262d',
+    paddingBottom: 8,
   },
   templateScroll: {
     paddingHorizontal: 16,
@@ -1212,6 +1563,162 @@ const styles = StyleSheet.create({
     color: '#26a69a',
   },
 
+  // Part A: Factor Filter Chips
+  factorChipContainer: {
+    paddingBottom: 8,
+  },
+  factorChipScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  factorChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#30363d',
+    backgroundColor: '#0d1117',
+    marginRight: 8,
+  },
+  factorChipActive: {
+    backgroundColor: '#00C9A7',
+    borderColor: '#00C9A7',
+  },
+  factorChipText: {
+    color: '#8b949e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  factorChipTextActive: {
+    color: '#fff',
+  },
+
+  // Part B: View Toggle Row
+  viewToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#21262d',
+  },
+  sortIndicator: {
+    color: '#8b949e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sectorToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#30363d',
+    backgroundColor: '#161b22',
+  },
+  sectorToggleBtnActive: {
+    backgroundColor: '#60A5FA20',
+    borderColor: '#60A5FA',
+  },
+  sectorToggleText: {
+    color: '#8b949e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sectorToggleTextActive: {
+    color: '#60A5FA',
+  },
+
+  // Part E: Sector Cards
+  sectorCardsContainer: {
+    paddingVertical: 8,
+  },
+  sectorCardsScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  sectorCard: {
+    backgroundColor: '#161b22',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#21262d',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minWidth: 120,
+    marginRight: 8,
+  },
+  sectorCardName: {
+    color: '#c9d1d9',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  sectorCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectorCardTicker: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  sectorCardScore: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  sectorCardCount: {
+    color: '#8b949e',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+
+  // Part B: Section Headers
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#0d1117',
+    borderBottomWidth: 1,
+    borderBottomColor: '#21262d',
+    gap: 8,
+  },
+  sectionHeaderTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+    flex: 1,
+  },
+  sectionHeaderMeta: {
+    color: '#8b949e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sectionHeaderScoreBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  sectionHeaderScore: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  // Part D: Radar thumbnail in result row
+  radarThumb: {
+    width: 40,
+    height: 40,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+
   // Result List
   resultList: {
     paddingBottom: 40,
@@ -1231,8 +1738,8 @@ const styles = StyleSheet.create({
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: '#161b22',
     marginHorizontal: 12,
     marginBottom: 6,
@@ -1242,48 +1749,44 @@ const styles = StyleSheet.create({
   },
   resultLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
   },
   resultTickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   resultTicker: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   resultCompany: {
     color: '#8b949e',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  resultCenter: {
-    alignItems: 'flex-end',
-    marginRight: 12,
-  },
-  resultPriceCol: {
-    alignItems: 'flex-end',
-  },
-  resultPrice: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  resultChange: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
     marginTop: 2,
   },
   resultRight: {
-    alignItems: 'center',
-    gap: 4,
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  resultPriceCol: {
+    alignItems: 'flex-end',
+    marginTop: 2,
+  },
+  resultPrice: {
+    color: '#c9d1d9',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  resultChange: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   aiScoreBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderRadius: 8,
     minWidth: 40,
     alignItems: 'center',
@@ -1292,20 +1795,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
-  resultMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  resultMetaLabel: {
-    color: '#8b949e',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  resultMetaValue: {
-    color: '#c9d1d9',
+  scoreLabelText: {
     fontSize: 10,
     fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  percentileText: {
+    color: '#60A5FA',
+    fontSize: 9,
+    fontWeight: '600',
   },
 
   // Signal Badge
@@ -1519,5 +2017,32 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+
+  // Result meta (kept for backwards compat)
+  resultCenter: {
+    alignItems: 'flex-end',
+    marginRight: 12,
+  },
+  resultMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  resultMetaLabel: {
+    color: '#8b949e',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  resultMetaValue: {
+    color: '#c9d1d9',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // Star button
+  starBtn: {
+    paddingRight: 10,
+    paddingVertical: 4,
   },
 });

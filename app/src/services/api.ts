@@ -193,6 +193,10 @@ export const getScreenerTemplates = async () => {
   return _deduplicatedGet('/screener/templates');
 };
 
+export const getScreenerSectors = async () => {
+  return _deduplicatedGet('/screener/sectors');
+};
+
 // ─── Search ───
 
 export const searchTickers = async (query: string) => {
