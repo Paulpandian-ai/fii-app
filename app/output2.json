@@ -1,0 +1,1 @@
+{"statusCode": 500, "body": "{\"error\": \"An error occurred (ValidationException) when calling the BatchGetItem operation: 1 validation error detected: Value at 'RequestItems.fii-table.member.Keys' failed to satisfy constraint: Member must have length less than or equal to 100\"}"}
