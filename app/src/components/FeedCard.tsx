@@ -258,15 +258,15 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       if (dims && typeof dims === 'object' && Object.keys(dims).length > 0) { setDimensionScores(dims); ed.dimensionScores = dims; }
 
       // ── Factor Percentiles: signal → factors endpoint ──
-      const fp = sig?.factor_percentiles ?? factors?.factor_percentiles ?? factorsRaw?.factor_percentiles;
-      if (fp && typeof fp === 'object') {
+      const fpctls = sig?.factor_percentiles ?? factors?.factor_percentiles ?? factorsRaw?.factor_percentiles;
+      if (fpctls && typeof fpctls === 'object') {
         const parsed: FactorPercentiles = {
-          supply_chain_upstream: safeNum(fp.supply_chain_upstream ?? 50),
-          supply_chain_downstream: safeNum(fp.supply_chain_downstream ?? 50),
-          geopolitical: safeNum(fp.geopolitical ?? 50),
-          monetary: safeNum(fp.monetary ?? 50),
-          correlations: safeNum(fp.correlations ?? 50),
-          performance: safeNum(fp.performance ?? 50),
+          supply_chain_upstream: safeNum(fpctls.supply_chain_upstream ?? 50),
+          supply_chain_downstream: safeNum(fpctls.supply_chain_downstream ?? 50),
+          geopolitical: safeNum(fpctls.geopolitical ?? 50),
+          monetary: safeNum(fpctls.monetary ?? 50),
+          correlations: safeNum(fpctls.correlations ?? 50),
+          performance: safeNum(fpctls.performance ?? 50),
         };
         setFactorPercentiles(parsed);
         (ed as any).factorPercentiles = parsed;
