@@ -191,11 +191,17 @@ def lambda_handler(event, context):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
-        elif path.startswith("/stocks/") and "/financials" in path:
-            ticker = path.split("/stocks/")[-1].split("/financials")[0].strip("/").upper()
-            return _handle_stock_financials(http_method, ticker)
-        elif path.startswith("/stocks/") and "/factors" in path:
-            return _handle_stock_factors(http_method, path)
+        elif path.startswith("/stocks/"):
+            parts = path.strip("/").split("/")
+            # /stocks/{ticker}/factors or /stocks/{ticker}/factors/{dimension}
+            if len(parts) >= 3 and parts[2] == "factors":
+                return _handle_stock_factors(http_method, path)
+            # /stocks/{ticker}/financials
+            elif len(parts) >= 3 and parts[2] == "financials":
+                ticker = parts[1].upper()
+                return _handle_stock_financials(http_method, ticker)
+            else:
+                return _response(404, {"error": "Unknown stocks endpoint"})
         elif path.startswith("/stock/") and "/stress-test" in path:
             return _handle_stress_test(http_method, path, query_params)
         elif path.startswith("/insights"):
