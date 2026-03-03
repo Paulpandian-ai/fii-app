@@ -539,3 +539,256 @@ def _extract_entities_from_text(text: str, ticker: str) -> list[dict]:
                 "revenue_pct": pct,
                 "source": "10-K geographic disclosure",
             })
+
+    return entities
+
+
+# ─── Financial Ratios ───
+
+
+def get_financial_ratios(ticker: str) -> dict:
+    """Compute comprehensive financial ratios from XBRL facts.
+
+    Computes: pe_ratio, debt_to_equity, current_ratio, gross_margin,
+    operating_margin, net_margin, roe, roa, revenue_growth_yoy,
+    eps_growth_yoy. Falls back to yfinance if EDGAR data is incomplete.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., "NVDA").
+
+    Returns:
+        Dict with all ratios + source ("edgar", "yfinance", or "mixed").
+    """
+    # Check DynamoDB cache (daily refresh)
+    cache_pk = f"FINANCIALS#{ticker.upper()}"
+    cache_sk = "RATIOS"
+    try:
+        import db
+        cached = db.get_item(cache_pk, cache_sk)
+        if cached:
+            cached_at = cached.get("cachedAt", "")
+            if cached_at:
+                cached_dt = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - cached_dt).total_seconds() / 3600
+                if age_hours < 24:
+                    logger.info(f"[EDGAR] Ratios cache hit for {ticker}")
+                    return cached
+    except Exception:
+        pass
+
+    # Try EDGAR first
+    ratios = _compute_ratios_from_edgar(ticker)
+
+    # Fall back to yfinance for missing values
+    if _has_missing_ratios(ratios):
+        yf_ratios = _get_ratios_from_yfinance(ticker)
+        ratios = _merge_ratios(ratios, yf_ratios)
+
+    # Get market cap for P/E calculation
+    if ratios.get("net_income") and not ratios.get("pe_ratio"):
+        market_cap = _get_market_cap(ticker)
+        if market_cap and ratios["net_income"] != 0:
+            ratios["pe_ratio"] = round(market_cap / ratios["net_income"], 2)
+            ratios["market_cap"] = market_cap
+
+    # Add metadata
+    ratios["ticker"] = ticker.upper()
+    ratios["data_freshness"] = datetime.now(timezone.utc).isoformat()
+
+    # Cache in DynamoDB
+    try:
+        import db
+        from decimal import Decimal
+
+        # Convert floats to Decimal for DynamoDB
+        cache_item = {"PK": cache_pk, "SK": cache_sk}
+        for k, v in ratios.items():
+            if isinstance(v, float):
+                cache_item[k] = Decimal(str(round(v, 6)))
+            else:
+                cache_item[k] = v
+        cache_item["cachedAt"] = datetime.now(timezone.utc).isoformat()
+        db.put_item(cache_item)
+    except Exception as e:
+        logger.debug(f"[EDGAR] Failed to cache ratios: {e}")
+
+    return ratios
+
+
+def _compute_ratios_from_edgar(ticker: str) -> dict:
+    """Compute financial ratios from EDGAR XBRL facts."""
+    facts = get_company_facts(ticker)
+    if not facts:
+        return {"source": "edgar", "error": "No EDGAR data available"}
+
+    # Extract key financial values
+    revenue = _get_latest_fact_value(facts, "RevenueFromContractWithCustomerExcludingAssessedTax")
+    if revenue is None:
+        revenue = _get_latest_fact_value(facts, "Revenues")
+    if revenue is None:
+        revenue = _get_latest_fact_value(facts, "SalesRevenueNet")
+
+    net_income = _get_latest_fact_value(facts, "NetIncomeLoss")
+    total_assets = _get_latest_fact_value(facts, "Assets")
+    total_liabilities = _get_latest_fact_value(facts, "Liabilities")
+    stockholders_equity = _get_latest_fact_value(facts, "StockholdersEquity")
+    operating_income = _get_latest_fact_value(facts, "OperatingIncomeLoss")
+    gross_profit = _get_latest_fact_value(facts, "GrossProfit")
+    current_assets = _get_latest_fact_value(facts, "AssetsCurrent")
+    current_liabilities = _get_latest_fact_value(facts, "LiabilitiesCurrent")
+    cash = _get_latest_fact_value(facts, "CashAndCashEquivalentsAtCarryingValue")
+    eps = _get_latest_fact_value(facts, "EarningsPerShareBasic", unit="USD/shares")
+
+    # YoY growth calculations
+    revenue_history = _get_fact_values_by_year(
+        facts, "RevenueFromContractWithCustomerExcludingAssessedTax", years=2,
+    )
+    if len(revenue_history) < 2:
+        revenue_history = _get_fact_values_by_year(facts, "Revenues", years=2)
+    if len(revenue_history) < 2:
+        revenue_history = _get_fact_values_by_year(facts, "SalesRevenueNet", years=2)
+
+    eps_history = _get_fact_values_by_year(
+        facts, "EarningsPerShareBasic", unit="USD/shares", years=2,
+    )
+
+    revenue_growth = None
+    if len(revenue_history) >= 2:
+        curr = revenue_history[0]["value"]
+        prev = revenue_history[1]["value"]
+        if prev and prev != 0:
+            revenue_growth = round((curr - prev) / abs(prev) * 100, 2)
+
+    eps_growth = None
+    if len(eps_history) >= 2:
+        curr = eps_history[0]["value"]
+        prev = eps_history[1]["value"]
+        if prev and prev != 0:
+            eps_growth = round((curr - prev) / abs(prev) * 100, 2)
+
+    # Compute ratios
+    ratios = {
+        "source": "edgar",
+        "pe_ratio": None,  # Needs market cap from yfinance
+        "debt_to_equity": _safe_ratio(total_liabilities, stockholders_equity),
+        "current_ratio": _safe_ratio(current_assets, current_liabilities),
+        "gross_margin": _safe_ratio(gross_profit, revenue, pct=True),
+        "operating_margin": _safe_ratio(operating_income, revenue, pct=True),
+        "net_margin": _safe_ratio(net_income, revenue, pct=True),
+        "roe": _safe_ratio(net_income, stockholders_equity, pct=True),
+        "roa": _safe_ratio(net_income, total_assets, pct=True),
+        "revenue_growth_yoy": revenue_growth,
+        "eps_growth_yoy": eps_growth,
+        # Raw values for reference
+        "revenue": revenue,
+        "net_income": net_income,
+        "total_assets": total_assets,
+        "total_liabilities": total_liabilities,
+        "stockholders_equity": stockholders_equity,
+        "operating_income": operating_income,
+        "gross_profit": gross_profit,
+        "current_assets": current_assets,
+        "current_liabilities": current_liabilities,
+        "cash": cash,
+        "eps": eps,
+    }
+
+    return ratios
+
+
+def _safe_ratio(numerator, denominator, pct: bool = False) -> Optional[float]:
+    """Compute ratio safely, returning None on division by zero."""
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    result = numerator / denominator
+    if pct:
+        result *= 100
+    return round(result, 2)
+
+
+def _has_missing_ratios(ratios: dict) -> bool:
+    """Check if key ratios are missing from EDGAR data."""
+    key_fields = ["debt_to_equity", "current_ratio", "net_margin", "roe", "revenue_growth_yoy"]
+    return any(ratios.get(f) is None for f in key_fields)
+
+
+def _get_market_cap(ticker: str) -> Optional[float]:
+    """Get market cap for P/E calculation, using yfinance."""
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        return info.get("marketCap")
+    except Exception as e:
+        logger.debug(f"[EDGAR] Failed to get market cap for {ticker}: {e}")
+
+    # Fallback: try Finnhub
+    try:
+        import finnhub_client
+        profile = finnhub_client.get_profile(ticker)
+        if profile and profile.get("marketCapitalization"):
+            # Finnhub returns market cap in millions
+            return profile["marketCapitalization"] * 1_000_000
+    except Exception:
+        pass
+
+    return None
+
+
+def _get_ratios_from_yfinance(ticker: str) -> dict:
+    """Fetch financial ratios from yfinance as fallback."""
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        return {
+            "source": "yfinance",
+            "pe_ratio": info.get("trailingPE"),
+            "debt_to_equity": info.get("debtToEquity"),
+            "current_ratio": info.get("currentRatio"),
+            "gross_margin": _pct_or_none(info.get("grossMargins")),
+            "operating_margin": _pct_or_none(info.get("operatingMargins")),
+            "net_margin": _pct_or_none(info.get("profitMargins")),
+            "roe": _pct_or_none(info.get("returnOnEquity")),
+            "roa": _pct_or_none(info.get("returnOnAssets")),
+            "revenue_growth_yoy": _pct_or_none(info.get("revenueGrowth")),
+            "eps_growth_yoy": _pct_or_none(info.get("earningsGrowth")),
+            "revenue": info.get("totalRevenue"),
+            "net_income": info.get("netIncomeToCommon"),
+            "total_assets": None,
+            "total_liabilities": info.get("totalDebt"),
+            "stockholders_equity": None,
+            "operating_income": info.get("operatingCashflow"),
+            "gross_profit": info.get("grossProfits"),
+            "current_assets": None,
+            "current_liabilities": None,
+            "cash": info.get("totalCash"),
+            "eps": info.get("trailingEps"),
+            "market_cap": info.get("marketCap"),
+        }
+    except Exception as e:
+        logger.warning(f"[EDGAR] yfinance fallback failed for {ticker}: {e}")
+        return {"source": "yfinance", "error": str(e)}
+
+
+def _pct_or_none(val) -> Optional[float]:
+    """Convert yfinance ratio (0.xx) to percentage, or None."""
+    if val is None:
+        return None
+    return round(val * 100, 2)
+
+
+def _merge_ratios(edgar: dict, yfinance: dict) -> dict:
+    """Merge EDGAR and yfinance ratios, preferring EDGAR values."""
+    merged = dict(edgar)
+    merged["source"] = "mixed" if edgar.get("source") == "edgar" else edgar.get("source", "unknown")
+
+    for key, yf_val in yfinance.items():
+        if key in ("source", "error"):
+            continue
+        if merged.get(key) is None and yf_val is not None:
+            merged[key] = yf_val
+            merged["source"] = "mixed"
+
+    return merged
