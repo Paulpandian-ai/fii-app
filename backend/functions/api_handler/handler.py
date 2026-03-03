@@ -88,7 +88,6 @@ import patent_engine
 import contract_engine
 import fda_engine
 import stress_engine
-import claude_client
 
 
 def lambda_handler(event, context):
