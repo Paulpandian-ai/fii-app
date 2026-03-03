@@ -810,16 +810,69 @@ def _normalize_signals() -> None:
     logger.info(f"[SignalEngine] Forced distribution applied to {updated} stocks: {dist_str}")
 
 
+def _score_drivers_from_top_factors(top_factors: list) -> list:
+    """Build score_drivers from topFactors when dimension-based approach fails.
+
+    Maps factor names (e.g. "Trade Barriers") to their parent dimension
+    (e.g. "geopolitical"), deduplicates by dimension, and returns the
+    top 3 by absolute score magnitude.
+    """
+    if not top_factors:
+        return []
+
+    # Build reverse map: factor display name → dimension name
+    _name_to_dim = {}
+    for dim_name, factor_ids in DIMENSION_FACTOR_MAP.items():
+        for fid in factor_ids:
+            fname = FACTOR_NAMES.get(fid)
+            if fname:
+                _name_to_dim[fname] = dim_name
+
+    # Sort by absolute score descending
+    sorted_factors = sorted(
+        top_factors,
+        key=lambda f: abs(f.get("score", 0)),
+        reverse=True,
+    )
+
+    seen_dims = set()
+    drivers = []
+    for f in sorted_factors:
+        name = f.get("name", "")
+        score = f.get("score", 0)
+        dim = _name_to_dim.get(name)
+        if not dim or dim in seen_dims:
+            continue
+        seen_dims.add(dim)
+
+        direction = "positive" if score >= 0 else "negative"
+        sign = "+" if score > 0 else ""
+        description = f"{name} impact: {sign}{score}"
+
+        drivers.append({
+            "factor": dim,
+            "direction": direction,
+            "description": description,
+            "score": score,
+        })
+
+        if len(drivers) >= 3:
+            break
+
+    return drivers
+
+
 def _compute_score_drivers(result: dict) -> list:
     """Compute top-3 score drivers from dimension scores and sub-factor data.
 
     Uses actual sub-factor names/values to build specific, data-driven
-    descriptions. Falls back to template-based descriptions when
-    sub-factor detail is unavailable.
+    descriptions. Falls back to topFactors data when dimension scores
+    are unavailable (e.g. single-stock runs with missing dimensionScores).
     """
     factor_details = result.get("factorDetails", {})
     if not factor_details:
-        return []
+        # No factor details at all — fall back to topFactors
+        return _score_drivers_from_top_factors(result.get("topFactors", []))
 
     factor_scores = {fid: d["score"] for fid, d in factor_details.items()}
     dim_scores = compute_dimension_scores(factor_scores)
@@ -908,6 +961,10 @@ def _compute_score_drivers(result: dict) -> list:
             "score": round(dim_val, 2),
         })
 
+    # If dimension-based approach yielded nothing, fall back to topFactors
+    if not drivers:
+        drivers = _score_drivers_from_top_factors(result.get("topFactors", []))
+
     return drivers
 
 
@@ -940,6 +997,13 @@ def _store_signal(ticker: str, result: dict) -> None:
     prev_item = db.get_item(pk, "LATEST")
     previous_score = prev_item.get("previous_score", "") if prev_item else ""
 
+    # Default factor_percentiles (50th for all dimensions).
+    # Real percentiles are computed in _normalize_signals during batch runs.
+    default_fp = {dk: 50 for dk in [
+        "supply_chain_upstream", "supply_chain_downstream",
+        "geopolitical", "monetary", "correlations", "risk_performance",
+    ]}
+
     # DynamoDB: LATEST summary
     db.put_item({
         "PK": pk,
@@ -957,6 +1021,7 @@ def _store_signal(ticker: str, result: dict) -> None:
         "topFactors": json.dumps(result.get("topFactors", [])),
         "score_drivers": json.dumps(score_drivers),
         "dimensionScores": json.dumps(dim_scores),
+        "factor_percentiles": json.dumps(default_fp),
         "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
         "tier": result.get("tier", "TIER_1"),
         "isETF": result.get("isETF", False),
@@ -978,6 +1043,7 @@ def _store_signal(ticker: str, result: dict) -> None:
     result["score_label"] = label
     result["score_drivers"] = score_drivers
     result["dimensionScores"] = dim_scores
+    result["factor_percentiles"] = default_fp
 
     # S3: Full signal JSON
     s3.write_json(f"signals/{ticker}.json", result)
