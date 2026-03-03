@@ -491,30 +491,191 @@ def _score_supply_chain_factors(signal_data):
 # ─── Macro & Geopolitical Factor Scoring ───
 
 
-def _score_macro_factors(signal_data):
-    """Score 5 macro/geopolitical sub-factors from existing signal data."""
-    factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+def _score_macro_factors(signal_data, ticker=None, macro_snapshot=None, monetary_score=None,
+                         rate_sensitivity=None, geo_score=None):
+    """Score 5 macro/geopolitical sub-factors.
 
-    mappings = [
-        ("MG1", "D1", "Fed Rate Sensitivity"),
-        ("MG2", "D2", "CPI Impact Direction"),
-        ("MG3", "C2", "Trade Barrier Exposure"),
-        ("MG4", "C1", "Geographic Conflict Risk"),
-        ("MG5", "D3", "Regulatory Risk"),
-    ]
+    Uses real FRED data and GPR index when available, falls back to
+    existing signal factor details when macro data modules are unavailable.
 
+    Args:
+        signal_data: Full signal from S3/DynamoDB (with factorDetails).
+        ticker: Stock ticker symbol (for rate sensitivity).
+        macro_snapshot: Output from fred_data.get_macro_snapshot().
+        monetary_score: Output from fred_data.compute_monetary_score().
+        rate_sensitivity: Output from fred_data.compute_stock_rate_sensitivity().
+        geo_score: Output from geopolitical_data.compute_geopolitical_score().
+    """
     results = []
-    for new_id, old_id, name in mappings:
-        old_factor = factor_details.get(old_id, {})
-        score = _clamp(old_factor.get("score", 0))
-        reason = old_factor.get("reason", "No data available")
-        results.append({
-            "factorId": new_id, "rawValue": score,
-            "normalizedScore": round(score, 2),
-            "direction": "positive" if score > 0.3 else "negative" if score < -0.3 else "neutral",
-            "dataSource": "Claude AI + FRED",
-            "explanation": reason[:120] if reason else "No data available",
-        })
+
+    # MG1: Fed Rate Sensitivity
+    mg1_score = 0.0
+    mg1_explanation = "No data available"
+    mg1_source = "N/A"
+
+    if monetary_score and monetary_score.get("components"):
+        # Use the fed_policy component from monetary score
+        fed_comp = next((c for c in monetary_score["components"] if c["factor"] == "fed_policy"), None)
+        if fed_comp:
+            mg1_score = _clamp(fed_comp["score"])
+            mg1_explanation = fed_comp["rationale"][:120]
+            mg1_source = fed_comp.get("source", "FRED DFF series")
+
+        # Adjust for stock-specific rate sensitivity
+        if rate_sensitivity:
+            sens = rate_sensitivity.get("sensitivity", "MODERATE")
+            direction = rate_sensitivity.get("direction", "neutral")
+            if sens == "HIGH" and direction == "negative":
+                # High-growth stocks are more impacted by rate changes
+                mg1_score *= 1.3
+                mg1_explanation += f" ({ticker}: HIGH negative rate sensitivity)"
+            elif sens == "HIGH" and direction == "positive":
+                # Financials benefit from higher rates
+                mg1_score *= -0.8  # Reverse the sign partially
+                mg1_explanation += f" ({ticker}: financials benefit from higher rates)"
+            mg1_score = _clamp(mg1_score)
+    else:
+        # Fallback to signal_data
+        factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+        old = factor_details.get("D1", {})
+        mg1_score = _clamp(old.get("score", 0))
+        mg1_explanation = old.get("reason", "No data available")[:120]
+        mg1_source = "Claude AI + FRED"
+
+    results.append({
+        "factorId": "MG1", "rawValue": mg1_score,
+        "normalizedScore": round(mg1_score, 2),
+        "direction": "positive" if mg1_score > 0.3 else "negative" if mg1_score < -0.3 else "neutral",
+        "dataSource": mg1_source,
+        "explanation": mg1_explanation,
+    })
+
+    # MG2: CPI Impact Direction
+    mg2_score = 0.0
+    mg2_explanation = "No data available"
+    mg2_source = "N/A"
+
+    if monetary_score and monetary_score.get("components"):
+        cpi_comp = next((c for c in monetary_score["components"] if c["factor"] == "inflation"), None)
+        if cpi_comp:
+            mg2_score = _clamp(cpi_comp["score"])
+            mg2_explanation = cpi_comp["rationale"][:120]
+            mg2_source = cpi_comp.get("source", "FRED CPIAUCSL series")
+    else:
+        factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+        old = factor_details.get("D2", {})
+        mg2_score = _clamp(old.get("score", 0))
+        mg2_explanation = old.get("reason", "No data available")[:120]
+        mg2_source = "Claude AI + FRED"
+
+    results.append({
+        "factorId": "MG2", "rawValue": mg2_score,
+        "normalizedScore": round(mg2_score, 2),
+        "direction": "positive" if mg2_score > 0.3 else "negative" if mg2_score < -0.3 else "neutral",
+        "dataSource": mg2_source,
+        "explanation": mg2_explanation,
+    })
+
+    # MG3: Trade Barrier Exposure (from geopolitical score)
+    mg3_score = 0.0
+    mg3_explanation = "No data available"
+    mg3_source = "N/A"
+
+    if geo_score and geo_score.get("components"):
+        trade_comp = next((c for c in geo_score["components"] if c["factor"] == "trade_restrictions"), None)
+        if trade_comp:
+            mg3_score = _clamp(trade_comp["score"])
+            mg3_explanation = trade_comp["rationale"][:120]
+            mg3_source = trade_comp.get("source", "Trade restriction analysis")
+    else:
+        factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+        old = factor_details.get("C2", {})
+        mg3_score = _clamp(old.get("score", 0))
+        mg3_explanation = old.get("reason", "No data available")[:120]
+        mg3_source = "Claude AI"
+
+    results.append({
+        "factorId": "MG3", "rawValue": mg3_score,
+        "normalizedScore": round(mg3_score, 2),
+        "direction": "positive" if mg3_score > 0.3 else "negative" if mg3_score < -0.3 else "neutral",
+        "dataSource": mg3_source,
+        "explanation": mg3_explanation,
+    })
+
+    # MG4: Geographic Conflict Risk (from geopolitical score)
+    mg4_score = 0.0
+    mg4_explanation = "No data available"
+    mg4_source = "N/A"
+
+    if geo_score and geo_score.get("components"):
+        # Combine revenue_geography + supply_chain_geography + global_gpr
+        rev_comp = next((c for c in geo_score["components"] if c["factor"] == "revenue_geography"), None)
+        sc_comp = next((c for c in geo_score["components"] if c["factor"] == "supply_chain_geography"), None)
+        gpr_comp = next((c for c in geo_score["components"] if c["factor"] == "global_gpr"), None)
+
+        # Weighted combination for geographic conflict risk
+        if rev_comp:
+            mg4_score += rev_comp["score"] * 0.4
+        if sc_comp:
+            mg4_score += sc_comp["score"] * 0.3
+        if gpr_comp:
+            mg4_score += gpr_comp["score"] * 0.3
+
+        mg4_score = _clamp(mg4_score)
+        parts = []
+        if rev_comp:
+            parts.append(rev_comp["rationale"][:60])
+        if gpr_comp:
+            parts.append(gpr_comp["rationale"][:60])
+        mg4_explanation = "; ".join(parts)[:120] if parts else "Geopolitical risk assessed"
+        mg4_source = "GPR Index + SEC EDGAR"
+    else:
+        factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+        old = factor_details.get("C1", {})
+        mg4_score = _clamp(old.get("score", 0))
+        mg4_explanation = old.get("reason", "No data available")[:120]
+        mg4_source = "Claude AI"
+
+    results.append({
+        "factorId": "MG4", "rawValue": mg4_score,
+        "normalizedScore": round(mg4_score, 2),
+        "direction": "positive" if mg4_score > 0.3 else "negative" if mg4_score < -0.3 else "neutral",
+        "dataSource": mg4_source,
+        "explanation": mg4_explanation,
+    })
+
+    # MG5: Regulatory Risk (from monetary yield curve + credit spreads)
+    mg5_score = 0.0
+    mg5_explanation = "No data available"
+    mg5_source = "N/A"
+
+    if monetary_score and monetary_score.get("components"):
+        # Use yield curve and credit spread components as proxy for regulatory/macro environment
+        yc_comp = next((c for c in monetary_score["components"] if c["factor"] == "yield_curve"), None)
+        cs_comp = next((c for c in monetary_score["components"] if c["factor"] == "credit_spreads"), None)
+        if yc_comp and cs_comp:
+            mg5_score = _clamp((yc_comp["score"] + cs_comp["score"]) / 2)
+            mg5_explanation = f"Yield curve: {yc_comp['rationale'][:50]}; Credit: {cs_comp['rationale'][:50]}"[:120]
+            mg5_source = "FRED T10Y2Y + BAMLH0A0HYM2"
+        elif yc_comp:
+            mg5_score = _clamp(yc_comp["score"])
+            mg5_explanation = yc_comp["rationale"][:120]
+            mg5_source = "FRED T10Y2Y"
+    else:
+        factor_details = signal_data.get("factorDetails", {}) if signal_data else {}
+        old = factor_details.get("D3", {})
+        mg5_score = _clamp(old.get("score", 0))
+        mg5_explanation = old.get("reason", "No data available")[:120]
+        mg5_source = "Claude AI + FRED"
+
+    results.append({
+        "factorId": "MG5", "rawValue": mg5_score,
+        "normalizedScore": round(mg5_score, 2),
+        "direction": "positive" if mg5_score > 0.3 else "negative" if mg5_score < -0.3 else "neutral",
+        "dataSource": mg5_source,
+        "explanation": mg5_explanation,
+    })
+
     return results
 
 
@@ -658,6 +819,111 @@ def _dim_score_to_10(contributions, dimension_key):
     return round(max(0, min(10, score_10)), 1)
 
 
+# ─── FACTOR_DETAIL Writers ───
+
+
+def _write_macro_geo_factor_details(ticker, dimension_scores, mg_factors,
+                                     monetary_score=None, geo_score=None,
+                                     rate_sensitivity=None):
+    """Write FACTOR_DETAIL records to DynamoDB for monetary and geopolitical dimensions.
+
+    Maps factor_engine dimension scores to the 6-dimension factor_details schema:
+      - macroGeo → monetary + geopolitical dimensions
+    """
+    try:
+        import factor_details
+    except Exception as e:
+        logger.warning(f"[FACTORS] Cannot import factor_details module: {e}")
+        return
+
+    mg_dim_score = dimension_scores.get("macroGeo", 5.0)
+
+    # Build monetary findings from fred_data components
+    monetary_findings = []
+    monetary_sources = ["FRED"]
+    monetary_summary = "Monetary policy analysis based on FRED macro data."
+    monetary_beginner = "We look at interest rates, inflation, and market conditions to understand the economic environment."
+
+    if monetary_score and monetary_score.get("components"):
+        for comp in monetary_score["components"]:
+            monetary_findings.append({
+                "claim": comp.get("rationale", ""),
+                "source": comp.get("source", "FRED"),
+                "source_type": "FRED",
+                "source_url": "",
+                "impact": "positive" if comp.get("score", 0) > 0 else "negative" if comp.get("score", 0) < 0 else "neutral",
+                "data_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            })
+        monetary_summary = f"Monetary environment score: {monetary_score.get('score', 5.0)}/10. "
+        monetary_summary += "; ".join(c["rationale"][:80] for c in monetary_score["components"][:3])
+
+    if rate_sensitivity:
+        monetary_findings.append({
+            "claim": rate_sensitivity.get("rationale", ""),
+            "source": "yfinance + FRED",
+            "source_type": "computed",
+            "source_url": "",
+            "impact": "negative" if rate_sensitivity.get("direction") == "negative" else "positive" if rate_sensitivity.get("direction") == "positive" else "neutral",
+            "data_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        })
+        monetary_sources.append("yfinance")
+        monetary_beginner += f" {ticker} has {rate_sensitivity.get('sensitivity', 'moderate')} sensitivity to interest rate changes."
+
+    # Write monetary dimension FACTOR_DETAIL
+    try:
+        factor_details.write_factor_detail(
+            ticker=ticker,
+            dimension="monetary",
+            score=monetary_score.get("score", mg_dim_score) if monetary_score else mg_dim_score,
+            percentile=50,  # TODO: compute real percentile across universe
+            findings=monetary_findings,
+            summary=monetary_summary[:500],
+            beginner_summary=monetary_beginner[:300],
+            confidence="High" if monetary_score else "Low",
+            data_sources_used=monetary_sources,
+        )
+    except Exception as e:
+        logger.warning(f"[FACTORS] Failed to write monetary FACTOR_DETAIL for {ticker}: {e}")
+
+    # Build geopolitical findings from geo_score components
+    geo_findings = []
+    geo_sources = []
+    geo_summary = "Geopolitical risk analysis for stock."
+    geo_beginner = "We check how world events, trade policies, and geographic risks affect this stock."
+    geo_confidence = "Low"
+
+    if geo_score and geo_score.get("components"):
+        geo_confidence = "High"
+        for comp in geo_score["components"]:
+            geo_findings.append({
+                "claim": comp.get("rationale", ""),
+                "source": comp.get("source", "GPR Index"),
+                "source_type": "GPR" if "GPR" in comp.get("source", "") else "SEC",
+                "source_url": "",
+                "impact": "positive" if comp.get("score", 0) > 0 else "negative" if comp.get("score", 0) < 0 else "neutral",
+                "data_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            })
+        geo_sources = list(set(c.get("source", "")[:30] for c in geo_score["components"]))
+        geo_summary = f"Geopolitical risk score: {geo_score.get('score', 5.0)}/10 (GPR={geo_score.get('gpr_value', 'N/A')}, trend={geo_score.get('gpr_trend', 'N/A')}). "
+        geo_summary += "; ".join(c["rationale"][:80] for c in geo_score["components"][:3])
+
+    # Write geopolitical dimension FACTOR_DETAIL
+    try:
+        factor_details.write_factor_detail(
+            ticker=ticker,
+            dimension="geopolitical",
+            score=geo_score.get("score", mg_dim_score) if geo_score else mg_dim_score,
+            percentile=50,  # TODO: compute real percentile across universe
+            findings=geo_findings,
+            summary=geo_summary[:500],
+            beginner_summary=geo_beginner[:300],
+            confidence=geo_confidence,
+            data_sources_used=geo_sources,
+        )
+    except Exception as e:
+        logger.warning(f"[FACTORS] Failed to write geopolitical FACTOR_DETAIL for {ticker}: {e}")
+
+
 # ─── Main Entry Point ───
 
 
@@ -677,9 +943,36 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
     """
     all_contributions = []
 
+    # Fetch macro and geopolitical data for enhanced scoring
+    macro_snapshot = None
+    monetary_score = None
+    rate_sensitivity = None
+    geo_score = None
+
+    try:
+        import fred_data
+        macro_snapshot = fred_data.get_macro_snapshot()
+        if macro_snapshot:
+            monetary_score = fred_data.compute_monetary_score(macro_snapshot)
+            rate_sensitivity = fred_data.compute_stock_rate_sensitivity(ticker, macro_snapshot)
+    except Exception as e:
+        logger.warning(f"[FACTORS] FRED data unavailable for {ticker}: {e}")
+
+    try:
+        import geopolitical_data
+        gpr_data = geopolitical_data.get_geopolitical_risk_index()
+        if gpr_data:
+            geo_score = geopolitical_data.compute_geopolitical_score(ticker, gpr_data)
+    except Exception as e:
+        logger.warning(f"[FACTORS] Geopolitical data unavailable for {ticker}: {e}")
+
     # Score each dimension
     sc_factors = _score_supply_chain_factors(signal_data)
-    mg_factors = _score_macro_factors(signal_data)
+    mg_factors = _score_macro_factors(
+        signal_data, ticker=ticker, macro_snapshot=macro_snapshot,
+        monetary_score=monetary_score, rate_sensitivity=rate_sensitivity,
+        geo_score=geo_score,
+    )
     te_factors = _score_technical_factors(technicals)
     fd_factors = _score_fundamental_factors(fundamentals)
     se_factors = _score_sentiment_factors(signal_data)
@@ -756,6 +1049,13 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
     factor_count = len(all_contributions)
     dim_count = 6 if has_alt_data else 5
 
+    # Write FACTOR_DETAIL records for monetary and geopolitical dimensions
+    _write_macro_geo_factor_details(
+        ticker, dimension_scores, mg_factors,
+        monetary_score=monetary_score, geo_score=geo_score,
+        rate_sensitivity=rate_sensitivity,
+    )
+
     return {
         "ticker": ticker,
         "dimensionScores": dimension_scores,
@@ -770,7 +1070,7 @@ def compute_factors(ticker, signal_data=None, technicals=None, fundamentals=None
             if alt_data and alt_data.get(k) and alt_data[k].get("score")
         ] if alt_data else [],
         "scoringMethodology": {
-            "version": "3.0",
+            "version": "3.1",
             "factorCount": factor_count,
             "dimensions": dim_count,
             "lastUpdated": datetime.now(timezone.utc).isoformat(),
