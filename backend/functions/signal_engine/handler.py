@@ -562,8 +562,9 @@ def _normalize_signals() -> None:
     """Apply forced distribution across all stocks.
 
     Ranks all stocks by composite score, assigns FII Score 1-10
-    using forced percentile buckets, and writes score_label +
-    percentile_rank to each SIGNAL#LATEST record.
+    using forced percentile buckets, and writes score_label,
+    percentile_rank, score_drivers, and factor_percentiles
+    to each SIGNAL#LATEST record.
     """
     signal_items = []
     for ticker in ALL_SECURITIES:
@@ -621,6 +622,89 @@ def _normalize_signals() -> None:
             pct = int(100 * (1 - rank / max(len(stocks), 1)))
             sector_percentiles[ticker] = pct
 
+    # ── Compute per-dimension factor percentiles across all stocks ──
+    dimension_keys = [
+        "supply_chain_upstream", "supply_chain_downstream",
+        "geopolitical", "monetary", "correlations", "risk_performance",
+    ]
+
+    # Parse dimensionScores for each stock (stored as JSON string)
+    parsed_dim_scores = {}  # ticker -> {dim_key: float}
+    for ticker, item, _score in signal_items:
+        raw_dim = item.get("dimensionScores", {})
+        if isinstance(raw_dim, str):
+            try:
+                raw_dim = json.loads(raw_dim)
+            except (json.JSONDecodeError, TypeError):
+                raw_dim = {}
+        parsed_dim_scores[ticker] = raw_dim
+
+    # For each dimension, rank all stocks that have a score for it
+    factor_percentiles_map = {}  # ticker -> {dim_key: percentile}
+    for dim_key in dimension_keys:
+        dim_entries = []
+        for ticker, item, _score in signal_items:
+            dim_val = parsed_dim_scores.get(ticker, {}).get(dim_key)
+            if dim_val is not None:
+                try:
+                    dim_entries.append((ticker, float(dim_val)))
+                except (ValueError, TypeError):
+                    pass
+
+        if not dim_entries:
+            continue
+
+        # Sort by score descending (higher = better percentile)
+        dim_entries.sort(key=lambda x: x[1], reverse=True)
+        dim_total = len(dim_entries)
+        for rank, (tk, _val) in enumerate(dim_entries):
+            percentile = int(((dim_total - rank) / dim_total) * 100)
+            factor_percentiles_map.setdefault(tk, {})[dim_key] = percentile
+
+    # For stocks missing a dimension, default to 50
+    for ticker, item, _score in signal_items:
+        fp = factor_percentiles_map.get(ticker, {})
+        for dk in dimension_keys:
+            if dk not in fp:
+                fp[dk] = 50
+        factor_percentiles_map[ticker] = fp
+
+    logger.info(f"[SignalEngine] Computed factor percentiles for {len(factor_percentiles_map)} stocks")
+
+    # ── Score driver templates for normalization pass ──
+    _NORM_TEMPLATES = {
+        "supply_chain_upstream": {
+            "pos": "Supplier health is strong — key suppliers reporting stable operations",
+            "neg": "Supply chain risk detected — supplier disruptions or financial stress",
+            "mid": "Supply chain conditions are mixed — monitoring supplier stability",
+        },
+        "supply_chain_downstream": {
+            "pos": "Customer demand is healthy — major customers showing strength",
+            "neg": "Customer risk elevated — key customers showing weakness",
+            "mid": "Customer conditions are balanced — demand signals are mixed",
+        },
+        "geopolitical": {
+            "pos": "Low geopolitical exposure — minimal trade barrier or conflict risk",
+            "neg": "Elevated geopolitical risk — trade restrictions or regional instability",
+            "mid": "Moderate geopolitical exposure — some trade or regulatory sensitivity",
+        },
+        "monetary": {
+            "pos": "Favorable rate environment — monetary conditions support valuation",
+            "neg": "Rate headwinds — tightening conditions pressuring valuation",
+            "mid": "Neutral monetary impact — current rate environment is balanced",
+        },
+        "correlations": {
+            "pos": "Strong sector positioning — outperforming correlated peers",
+            "neg": "Weak relative performance — lagging sector and correlated assets",
+            "mid": "In-line with sector — moving with broader market trends",
+        },
+        "risk_performance": {
+            "pos": "Strong fundamentals — earnings beat and positive guidance",
+            "neg": "Performance concerns — earnings miss or negative guidance",
+            "mid": "Mixed performance signals — earnings and guidance are neutral",
+        },
+    }
+
     updated = 0
     distribution = {}
 
@@ -639,25 +723,56 @@ def _normalize_signals() -> None:
         score_label = SCORE_LABELS[fii_score]
         sect_pct = sector_percentiles.get(ticker, 50)
 
-        # Build score drivers from dimension scores
-        score_drivers = []
-        dim_scores = item.get("dimensionScores", {})
-        if dim_scores:
-            dims = []
-            for dim_name, dim_val in dim_scores.items():
-                try:
-                    val = float(dim_val) if isinstance(dim_val, str) else float(dim_val)
-                except (ValueError, TypeError):
-                    val = 5.0
-                dims.append((dim_name, val))
-            dims.sort(key=lambda x: abs(x[1] - 5.0), reverse=True)
-            for dim_name, val in dims[:3]:
-                direction = "positive" if val >= 5.0 else "negative"
-                score_drivers.append({
-                    "factor": dim_name,
-                    "direction": direction,
-                    "value": val
-                })
+        # Build score drivers from dimension scores with descriptions
+        # First try existing score_drivers (written by _store_signal with rich descriptions)
+        existing_drivers = item.get("score_drivers", "[]")
+        if isinstance(existing_drivers, str):
+            try:
+                existing_drivers = json.loads(existing_drivers)
+            except (json.JSONDecodeError, TypeError):
+                existing_drivers = []
+
+        # If existing drivers have descriptions, keep them
+        if existing_drivers and isinstance(existing_drivers, list) and len(existing_drivers) > 0:
+            has_desc = any(d.get("description") for d in existing_drivers if isinstance(d, dict))
+            if has_desc:
+                score_drivers = existing_drivers
+            else:
+                score_drivers = []
+        else:
+            score_drivers = []
+
+        # If no rich drivers, compute from dimension scores
+        if not score_drivers:
+            dim_scores = parsed_dim_scores.get(ticker, {})
+            if dim_scores:
+                dims = []
+                for dim_name, dim_val in dim_scores.items():
+                    try:
+                        val = float(dim_val)
+                    except (ValueError, TypeError):
+                        val = 0.0
+                    dims.append((dim_name, val))
+                # Sort by absolute deviation from neutral (0.0 on -2..+2 scale)
+                dims.sort(key=lambda x: abs(x[1]), reverse=True)
+                for dim_name, val in dims[:3]:
+                    direction = "positive" if val >= 0 else "negative"
+                    templates = _NORM_TEMPLATES.get(dim_name, {})
+                    if val > 0.5:
+                        desc = templates.get("pos", "Trending positively")
+                    elif val < -0.5:
+                        desc = templates.get("neg", "Showing headwinds")
+                    else:
+                        desc = templates.get("mid", "Mixed signals")
+                    score_drivers.append({
+                        "factor": dim_name,
+                        "direction": direction,
+                        "description": desc,
+                        "score": round(val, 2),
+                    })
+
+        # Get factor percentiles for this stock
+        fp = factor_percentiles_map.get(ticker, {})
 
         # Track distribution
         distribution[fii_score] = distribution.get(fii_score, 0) + 1
@@ -669,7 +784,8 @@ def _normalize_signals() -> None:
             "fii_score": str(fii_score),
             "percentile_rank": percentile_rank,
             "sector_percentile": sect_pct,
-            "score_drivers": score_drivers,
+            "score_drivers": json.dumps(score_drivers),
+            "factor_percentiles": json.dumps(fp),
         }
 
         db.update_item(f"SIGNAL#{ticker}", "LATEST", update_fields)
@@ -685,12 +801,114 @@ def _normalize_signals() -> None:
                 s3_data["percentile_rank"] = percentile_rank
                 s3_data["sector_percentile"] = sect_pct
                 s3_data["score_drivers"] = score_drivers
+                s3_data["factor_percentiles"] = fp
                 s3.write_json(f"signals/{ticker}.json", s3_data)
         except Exception:
             pass
 
     dist_str = " | ".join(f"Score {k}: {v}" for k, v in sorted(distribution.items(), reverse=True))
     logger.info(f"[SignalEngine] Forced distribution applied to {updated} stocks: {dist_str}")
+
+
+def _compute_score_drivers(result: dict) -> list:
+    """Compute top-3 score drivers from dimension scores and sub-factor data.
+
+    Uses actual sub-factor names/values to build specific, data-driven
+    descriptions. Falls back to template-based descriptions when
+    sub-factor detail is unavailable.
+    """
+    factor_details = result.get("factorDetails", {})
+    if not factor_details:
+        return []
+
+    factor_scores = {fid: d["score"] for fid, d in factor_details.items()}
+    dim_scores = compute_dimension_scores(factor_scores)
+
+    # Template descriptions keyed by dimension name
+    _TEMPLATES = {
+        "supply_chain_upstream": {
+            "high": "Supplier health is strong — key suppliers reporting stable operations",
+            "low": "Supply chain risk detected — supplier disruptions or financial stress",
+            "mid": "Supply chain conditions are mixed — monitoring supplier stability",
+        },
+        "supply_chain_downstream": {
+            "high": "Customer demand is healthy — major customers showing strength",
+            "low": "Customer risk elevated — key customers showing weakness",
+            "mid": "Customer conditions are balanced — demand signals are mixed",
+        },
+        "geopolitical": {
+            "high": "Low geopolitical exposure — minimal trade barrier or conflict risk",
+            "low": "Elevated geopolitical risk — trade restrictions or regional instability",
+            "mid": "Moderate geopolitical exposure — some trade or regulatory sensitivity",
+        },
+        "monetary": {
+            "high": "Favorable rate environment — monetary conditions support valuation",
+            "low": "Rate headwinds — tightening conditions pressuring valuation",
+            "mid": "Neutral monetary impact — current rate environment is balanced",
+        },
+        "correlations": {
+            "high": "Strong sector positioning — outperforming correlated peers",
+            "low": "Weak relative performance — lagging sector and correlated assets",
+            "mid": "In-line with sector — moving with broader market trends",
+        },
+        "risk_performance": {
+            "high": "Strong fundamentals — earnings beat and positive guidance",
+            "low": "Performance concerns — earnings miss or negative guidance",
+            "mid": "Mixed performance signals — earnings and guidance are neutral",
+        },
+    }
+
+    # Map dimension names to their sub-factor IDs
+    _DIM_SUBFACTORS = {
+        "supply_chain_upstream": ["A1", "A2", "A3"],
+        "supply_chain_downstream": ["B1", "B2", "B3"],
+        "geopolitical": ["C1", "C2", "C3"],
+        "monetary": ["D1", "D2", "D3"],
+        "correlations": ["E1", "E2", "E3"],
+        "risk_performance": ["F1", "F2", "F3"],
+    }
+
+    # Neutral point is 0.0 on the -2 to +2 scale
+    sorted_dims = sorted(dim_scores.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    drivers = []
+    for dim_name, dim_val in sorted_dims[:3]:
+        direction = "positive" if dim_val >= 0 else "negative"
+
+        # Try to build a specific description from sub-factor data
+        sub_ids = _DIM_SUBFACTORS.get(dim_name, [])
+        sub_parts = []
+        for sid in sub_ids:
+            if sid in factor_details:
+                sf = factor_details[sid]
+                sf_score = sf.get("score", 0)
+                sf_name = FACTOR_NAMES.get(sid, sid)
+                if abs(sf_score) >= 0.3:
+                    sign = "+" if sf_score > 0 else ""
+                    sub_parts.append(f"{sf_name} {sign}{sf_score:.1f}")
+
+        if sub_parts:
+            description = "; ".join(sub_parts[:2])
+        else:
+            # Fall back to template
+            # Dimension score is -2 to +2; map to high/low/mid
+            # Use 0.5 thresholds (on -2..+2 scale)
+            templates = _TEMPLATES.get(dim_name, {})
+            if dim_val > 0.5:
+                description = templates.get("high", "Trending positively")
+            elif dim_val < -0.5:
+                description = templates.get("low", "Showing headwinds")
+            else:
+                description = templates.get("mid", "Mixed signals")
+
+        drivers.append({
+            "factor": dim_name,
+            "direction": direction,
+            "description": description,
+            "score": round(dim_val, 2),
+        })
+
+    return drivers
 
 
 def _store_signal(ticker: str, result: dict) -> None:
@@ -711,30 +929,12 @@ def _store_signal(ticker: str, result: dict) -> None:
     label = score_to_label(round(raw_score))
 
     # Compute initial score_drivers from factor_details
-    score_drivers = []
+    score_drivers = _compute_score_drivers(result)
+    dim_scores = {}
     if result.get("factorDetails"):
         dim_scores = compute_dimension_scores(
             {fid: d["score"] for fid, d in result["factorDetails"].items()}
         )
-        # Sort dimensions by absolute value
-        sorted_dims = sorted(dim_scores.items(), key=lambda x: abs(x[1]), reverse=True)
-        dim_labels = {
-            "supply_chain_upstream": "Upstream supply chain factors",
-            "supply_chain_downstream": "Downstream customer demand factors",
-            "geopolitical": "Geopolitical risk exposure",
-            "monetary": "Monetary policy and interest rate sensitivity",
-            "correlations": "Market correlation and sector dynamics",
-            "risk_performance": "Risk-adjusted performance metrics",
-        }
-        for dim_name, dim_val in sorted_dims[:3]:
-            direction = "positive" if dim_val >= 0 else "negative"
-            label_text = dim_labels.get(dim_name, dim_name)
-            desc = f"{label_text} trending favorably" if direction == "positive" else f"{label_text} showing headwinds"
-            score_drivers.append({
-                "factor": dim_name,
-                "direction": direction,
-                "description": desc,
-            })
 
     # Get previous score for stability buffer
     prev_item = db.get_item(pk, "LATEST")
@@ -756,6 +956,7 @@ def _store_signal(ticker: str, result: dict) -> None:
         "reasoning": result.get("reasoning", ""),
         "topFactors": json.dumps(result.get("topFactors", [])),
         "score_drivers": json.dumps(score_drivers),
+        "dimensionScores": json.dumps(dim_scores),
         "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
         "tier": result.get("tier", "TIER_1"),
         "isETF": result.get("isETF", False),
@@ -776,6 +977,7 @@ def _store_signal(ticker: str, result: dict) -> None:
     result["signal"] = label
     result["score_label"] = label
     result["score_drivers"] = score_drivers
+    result["dimensionScores"] = dim_scores
 
     # S3: Full signal JSON
     s3.write_json(f"signals/{ticker}.json", result)

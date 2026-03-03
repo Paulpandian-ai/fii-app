@@ -271,7 +271,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           geopolitical: Number(fp.geopolitical ?? 50),
           monetary: Number(fp.monetary ?? 50),
           correlations: Number(fp.correlations ?? 50),
-          performance: Number(fp.performance ?? 50),
+          performance: Number(fp.risk_performance ?? fp.performance ?? 50),
         });
       }
 
@@ -491,13 +491,22 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         {scoreDrivers.length > 0 ? (
           scoreDrivers.slice(0, 3).map((driver, idx) => {
             const isUp = driver.direction === 'positive' || driver.direction === 'up';
+            const factorDisplayName: Record<string, string> = {
+              supply_chain_upstream: 'Supply Chain (Upstream)',
+              supply_chain_downstream: 'Supply Chain (Downstream)',
+              geopolitical: 'Geopolitical',
+              monetary: 'Monetary Policy',
+              correlations: 'Correlations',
+              risk_performance: 'Risk & Performance',
+            };
+            const factorLabel = factorDisplayName[driver.factor] || driver.factor;
             return (
               <View key={`driver-${idx}`} style={styles.driverRow}>
                 <Text style={[styles.driverArrow, { color: isUp ? '#00C9A7' : '#F5A623' }]}>
                   {isUp ? '\u2191' : '\u2193'}
                 </Text>
                 <View style={styles.driverContent}>
-                  <Text style={styles.driverFactor}>{driver.factor}</Text>
+                  <Text style={styles.driverFactor}>{factorLabel}</Text>
                   <Text style={styles.driverDesc}>{driver.description}</Text>
                 </View>
               </View>

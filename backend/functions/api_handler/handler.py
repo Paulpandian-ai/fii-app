@@ -517,6 +517,12 @@ def _handle_signal(method, ticker, user_id):
             # Fallback: return DynamoDB summary
             raw_factors = summary.get("topFactors", "[]")
             top_factors = json.loads(raw_factors) if isinstance(raw_factors, str) else (raw_factors if isinstance(raw_factors, list) else [])
+            # Parse score_drivers from DynamoDB
+            raw_drivers = summary.get("score_drivers", "[]")
+            score_drivers = json.loads(raw_drivers) if isinstance(raw_drivers, str) else (raw_drivers if isinstance(raw_drivers, list) else [])
+            # Parse factor_percentiles from DynamoDB
+            raw_fp = summary.get("factor_percentiles", "{}")
+            factor_pcts = json.loads(raw_fp) if isinstance(raw_fp, str) else (raw_fp if isinstance(raw_fp, dict) else {})
             result = {
                 "ticker": summary["ticker"],
                 "companyName": summary.get("companyName", ticker),
@@ -527,6 +533,11 @@ def _handle_signal(method, ticker, user_id):
                 "reasoning": summary.get("reasoning", ""),
                 "topFactors": top_factors,
                 "lastUpdated": summary.get("lastUpdated", ""),
+                "score_drivers": score_drivers,
+                "factor_percentiles": factor_pcts,
+                "percentile_rank": summary.get("percentile_rank"),
+                "sector_percentile": summary.get("sector_percentile"),
+                "score_label": summary.get("score_label", summary.get("signal", "Neutral")),
             }
 
         # DynamoDB signal is the source of truth (updated by normalization),
@@ -540,6 +551,33 @@ def _handle_signal(method, ticker, user_id):
                 result["compositeScore"] = float(db_score)
             except (ValueError, TypeError):
                 pass
+
+        # Overlay score_drivers and factor_percentiles from DynamoDB
+        # (normalization updates these as source of truth)
+        db_drivers = summary.get("score_drivers")
+        if db_drivers:
+            try:
+                parsed = json.loads(db_drivers) if isinstance(db_drivers, str) else db_drivers
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    result["score_drivers"] = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        db_fp = summary.get("factor_percentiles")
+        if db_fp:
+            try:
+                parsed = json.loads(db_fp) if isinstance(db_fp, str) else db_fp
+                if isinstance(parsed, dict) and len(parsed) > 0:
+                    result["factor_percentiles"] = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Overlay percentile ranks
+        if summary.get("percentile_rank") is not None:
+            result["percentile_rank"] = summary.get("percentile_rank")
+        if summary.get("sector_percentile") is not None:
+            result["sector_percentile"] = summary.get("sector_percentile")
+        db_label = summary.get("score_label")
+        if db_label:
+            result["score_label"] = db_label
 
     # ── Cache staleness check (skip for on-demand signals) ──
     last_updated = result.get("lastUpdated") or result.get("analyzedAt") or ""
@@ -1494,6 +1532,17 @@ def _handle_factors(method, ticker):
                 "cachedAt": datetime.now(timezone.utc).isoformat(),
             }
             db.put_item(cache_item)
+        except Exception:
+            pass
+
+        # Enrich with factor_percentiles from SIGNAL# record
+        try:
+            sig_item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if sig_item:
+                raw_fp = sig_item.get("factor_percentiles", "{}")
+                fp = json.loads(raw_fp) if isinstance(raw_fp, str) else (raw_fp if isinstance(raw_fp, dict) else {})
+                if fp:
+                    result["factor_percentiles"] = fp
         except Exception:
             pass
 
