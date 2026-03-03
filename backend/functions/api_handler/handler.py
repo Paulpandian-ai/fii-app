@@ -191,14 +191,19 @@ def lambda_handler(event, context):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
-        elif path.startswith("/stocks/"):
+        elif path.startswith("/stocks/") and len(path.strip("/").split("/")) >= 3:
             parts = path.strip("/").split("/")
-            # /stocks/{ticker}/factors or /stocks/{ticker}/factors/{dimension}
-            if len(parts) >= 3 and parts[2] == "factors":
-                return _handle_stock_factors(http_method, path)
-            # /stocks/{ticker}/financials
-            elif len(parts) >= 3 and parts[2] == "financials":
-                ticker = parts[1].upper()
+            ticker = parts[1].upper()
+            sub = parts[2] if len(parts) >= 3 else ""
+            if sub == "factors":
+                if len(parts) == 4:
+                    # /stocks/{ticker}/factors/{dimension}
+                    dimension = parts[3]
+                    return _handle_stock_factor_detail(http_method, ticker, dimension)
+                else:
+                    # /stocks/{ticker}/factors
+                    return _handle_stock_factor_summary(http_method, ticker)
+            elif sub == "financials":
                 return _handle_stock_financials(http_method, ticker)
             else:
                 return _response(404, {"error": "Unknown stocks endpoint"})
@@ -1576,6 +1581,51 @@ def _handle_factors(method, ticker):
             "dimensionScores": {},
             "factorContributions": [],
         })
+
+
+def _handle_stock_factor_summary(method, ticker):
+    """GET /stocks/{ticker}/factors — All 6 factor dimensions summary."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    try:
+        from factor_details import get_factor_summary
+        summary = get_factor_summary(ticker)
+        if summary:
+            return _response(200, summary)
+        return _response(200, {"status": "pending",
+            "message": "Factor analysis in progress. Available after next scoring cycle."})
+    except Exception as e:
+        return _response(200, {"status": "pending", "message": str(e)})
+
+
+def _handle_stock_factor_detail(method, ticker, dimension):
+    """GET /stocks/{ticker}/factors/{dimension} — Detailed factor with findings."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    try:
+        from factor_details import get_factor_detail
+        detail = get_factor_detail(ticker, dimension)
+        if detail:
+            return _response(200, detail)
+        return _response(200, {"status": "pending",
+            "message": f"Factor analysis for {dimension} in progress."})
+    except Exception as e:
+        return _response(200, {"status": "pending", "message": str(e)})
+
+
+def _handle_stock_financials(method, ticker):
+    """GET /stocks/{ticker}/financials — Financial ratios with sector benchmarks."""
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    try:
+        from edgar_data import get_financial_ratios
+        ratios = get_financial_ratios(ticker)
+        if ratios:
+            return _response(200, ratios)
+        return _response(200, {"status": "pending",
+            "message": "Financial data being compiled."})
+    except Exception as e:
+        return _response(200, {"status": "pending", "message": str(e)})
 
 
 # ─── Fair Price Endpoint ───
@@ -6173,151 +6223,6 @@ def _handle_user_sync_status(user_id):
         "coachProgress": coach.get("updatedAt") if coach else None,
         "synced": True,
     })
-
-
-# ─── Factor Detail & Financials Endpoints ───
-
-
-def _handle_stock_factors(method, path):
-    """Handle GET /stocks/{ticker}/factors and /stocks/{ticker}/factors/{dimension}.
-
-    GET /stocks/{ticker}/factors
-        Returns compact FACTOR_SUMMARY record for all 6 dimensions.
-
-    GET /stocks/{ticker}/factors/{dimension}
-        Returns full FACTOR_DETAIL record for a specific dimension.
-    """
-    if method != "GET":
-        return _response(405, {"error": "Method not allowed"})
-
-    parts = path.strip("/").split("/")
-    # Expected: stocks/{ticker}/factors or stocks/{ticker}/factors/{dimension}
-    if len(parts) < 3:
-        return _response(400, {"error": "Invalid path"})
-
-    ticker = parts[1].upper()
-
-    if len(parts) == 3:
-        # GET /stocks/{ticker}/factors — return summary
-        try:
-            import factor_details
-            summary = factor_details.get_factor_summary(ticker)
-            if summary:
-                # Remove DynamoDB internal keys
-                summary.pop("PK", None)
-                summary.pop("SK", None)
-                return _response(200, summary)
-            else:
-                return _response(200, {
-                    "status": "pending",
-                    "message": "Factor analysis in progress. Available after next scoring cycle.",
-                    "ticker": ticker,
-                })
-        except Exception as e:
-            print(f"[FactorDetail] Error fetching summary for {ticker}: {e}")
-            return _response(200, {
-                "status": "pending",
-                "message": "Factor analysis in progress. Available after next scoring cycle.",
-                "ticker": ticker,
-            })
-
-    elif len(parts) >= 4:
-        # GET /stocks/{ticker}/factors/{dimension}
-        dimension = parts[3]
-        valid_dimensions = [
-            "supply_chain_upstream", "supply_chain_downstream",
-            "geopolitical", "monetary", "correlations", "risk_performance",
-        ]
-        if dimension not in valid_dimensions:
-            return _response(400, {
-                "error": f"Invalid dimension: {dimension}",
-                "valid_dimensions": valid_dimensions,
-            })
-
-        try:
-            import factor_details
-            detail = factor_details.get_factor_detail(ticker, dimension)
-            if detail:
-                detail.pop("PK", None)
-                detail.pop("SK", None)
-                detail.pop("TTL", None)
-                return _response(200, detail)
-            else:
-                return _response(200, {
-                    "status": "pending",
-                    "message": "Factor analysis in progress. Available after next scoring cycle.",
-                    "ticker": ticker,
-                    "dimension": dimension,
-                })
-        except Exception as e:
-            print(f"[FactorDetail] Error fetching {dimension} for {ticker}: {e}")
-            return _response(200, {
-                "status": "pending",
-                "message": "Factor analysis in progress. Available after next scoring cycle.",
-                "ticker": ticker,
-                "dimension": dimension,
-            })
-
-    return _response(400, {"error": "Invalid path"})
-
-
-def _handle_stock_financials(method, ticker):
-    """Handle GET /stocks/{ticker}/financials.
-
-    Returns comprehensive financial ratios from get_financial_ratios()
-    with sector benchmarks for each ratio (median, p25, p75).
-    """
-    if method != "GET":
-        return _response(405, {"error": "Method not allowed"})
-
-    try:
-        import edgar_data
-
-        # Get financial ratios
-        ratios = edgar_data.get_financial_ratios(ticker)
-
-        # Get sector benchmarks for key metrics
-        benchmark_mapping = {
-            "revenue": "RevenueFromContractWithCustomerExcludingAssessedTax",
-            "net_income": "NetIncomeLoss",
-            "eps": "EarningsPerShareBasic",
-            "total_assets": "Assets",
-            "total_liabilities": "Liabilities",
-            "stockholders_equity": "StockholdersEquity",
-            "operating_income": "OperatingIncomeLoss",
-            "cash": "CashAndCashEquivalentsAtCarryingValue",
-        }
-
-        benchmarks = {}
-        for ratio_key, xbrl_metric in benchmark_mapping.items():
-            try:
-                bench = edgar_data.get_sector_benchmarks(xbrl_metric)
-                if not bench.get("error"):
-                    benchmarks[ratio_key] = {
-                        "median": bench.get("median"),
-                        "p25": bench.get("p25"),
-                        "p75": bench.get("p75"),
-                    }
-            except Exception:
-                pass
-
-        result = {
-            "ticker": ticker,
-            "ratios": ratios,
-            "benchmarks": benchmarks,
-            "data_freshness": ratios.get("data_freshness"),
-        }
-
-        return _response(200, result)
-
-    except Exception as e:
-        print(f"[Financials] Error for {ticker}: {e}")
-        return _response(200, {
-            "ticker": ticker,
-            "ratios": {"error": str(e)},
-            "benchmarks": {},
-            "data_freshness": None,
-        })
 
 
 # ─── Response Helper ───
