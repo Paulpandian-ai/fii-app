@@ -44,6 +44,11 @@ Routes:
   POST /admin/agents/<id>/run        — Manually trigger an agent
   GET  /admin/agents/<id>/history    — View agent run history
 
+  # ── Factor Details & Financials ──
+  GET  /stocks/<ticker>/factors                — Compact factor summary (all 6 dimensions)
+  GET  /stocks/<ticker>/factors/<dimension>    — Full factor detail with findings
+  GET  /stocks/<ticker>/financials             — Financial ratios + sector benchmarks
+
   # ── User Data (DynamoDB sync) ──
   GET    /user/portfolio              — List holdings (raw, no price enrichment)
   PUT    /user/portfolio/<ticker>     — Add/update a single holding
@@ -186,6 +191,11 @@ def lambda_handler(event, context):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
+        elif path.startswith("/stocks/") and "/financials" in path:
+            ticker = path.split("/stocks/")[-1].split("/financials")[0].strip("/").upper()
+            return _handle_stock_financials(http_method, ticker)
+        elif path.startswith("/stocks/") and "/factors" in path:
+            return _handle_stock_factors(http_method, path)
         elif path.startswith("/stock/") and "/stress-test" in path:
             return _handle_stress_test(http_method, path, query_params)
         elif path.startswith("/insights"):
@@ -6157,6 +6167,151 @@ def _handle_user_sync_status(user_id):
         "coachProgress": coach.get("updatedAt") if coach else None,
         "synced": True,
     })
+
+
+# ─── Factor Detail & Financials Endpoints ───
+
+
+def _handle_stock_factors(method, path):
+    """Handle GET /stocks/{ticker}/factors and /stocks/{ticker}/factors/{dimension}.
+
+    GET /stocks/{ticker}/factors
+        Returns compact FACTOR_SUMMARY record for all 6 dimensions.
+
+    GET /stocks/{ticker}/factors/{dimension}
+        Returns full FACTOR_DETAIL record for a specific dimension.
+    """
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    parts = path.strip("/").split("/")
+    # Expected: stocks/{ticker}/factors or stocks/{ticker}/factors/{dimension}
+    if len(parts) < 3:
+        return _response(400, {"error": "Invalid path"})
+
+    ticker = parts[1].upper()
+
+    if len(parts) == 3:
+        # GET /stocks/{ticker}/factors — return summary
+        try:
+            import factor_details
+            summary = factor_details.get_factor_summary(ticker)
+            if summary:
+                # Remove DynamoDB internal keys
+                summary.pop("PK", None)
+                summary.pop("SK", None)
+                return _response(200, summary)
+            else:
+                return _response(200, {
+                    "status": "pending",
+                    "message": "Factor analysis in progress. Available after next scoring cycle.",
+                    "ticker": ticker,
+                })
+        except Exception as e:
+            print(f"[FactorDetail] Error fetching summary for {ticker}: {e}")
+            return _response(200, {
+                "status": "pending",
+                "message": "Factor analysis in progress. Available after next scoring cycle.",
+                "ticker": ticker,
+            })
+
+    elif len(parts) >= 4:
+        # GET /stocks/{ticker}/factors/{dimension}
+        dimension = parts[3]
+        valid_dimensions = [
+            "supply_chain_upstream", "supply_chain_downstream",
+            "geopolitical", "monetary", "correlations", "risk_performance",
+        ]
+        if dimension not in valid_dimensions:
+            return _response(400, {
+                "error": f"Invalid dimension: {dimension}",
+                "valid_dimensions": valid_dimensions,
+            })
+
+        try:
+            import factor_details
+            detail = factor_details.get_factor_detail(ticker, dimension)
+            if detail:
+                detail.pop("PK", None)
+                detail.pop("SK", None)
+                detail.pop("TTL", None)
+                return _response(200, detail)
+            else:
+                return _response(200, {
+                    "status": "pending",
+                    "message": "Factor analysis in progress. Available after next scoring cycle.",
+                    "ticker": ticker,
+                    "dimension": dimension,
+                })
+        except Exception as e:
+            print(f"[FactorDetail] Error fetching {dimension} for {ticker}: {e}")
+            return _response(200, {
+                "status": "pending",
+                "message": "Factor analysis in progress. Available after next scoring cycle.",
+                "ticker": ticker,
+                "dimension": dimension,
+            })
+
+    return _response(400, {"error": "Invalid path"})
+
+
+def _handle_stock_financials(method, ticker):
+    """Handle GET /stocks/{ticker}/financials.
+
+    Returns comprehensive financial ratios from get_financial_ratios()
+    with sector benchmarks for each ratio (median, p25, p75).
+    """
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    try:
+        import edgar_data
+
+        # Get financial ratios
+        ratios = edgar_data.get_financial_ratios(ticker)
+
+        # Get sector benchmarks for key metrics
+        benchmark_mapping = {
+            "revenue": "RevenueFromContractWithCustomerExcludingAssessedTax",
+            "net_income": "NetIncomeLoss",
+            "eps": "EarningsPerShareBasic",
+            "total_assets": "Assets",
+            "total_liabilities": "Liabilities",
+            "stockholders_equity": "StockholdersEquity",
+            "operating_income": "OperatingIncomeLoss",
+            "cash": "CashAndCashEquivalentsAtCarryingValue",
+        }
+
+        benchmarks = {}
+        for ratio_key, xbrl_metric in benchmark_mapping.items():
+            try:
+                bench = edgar_data.get_sector_benchmarks(xbrl_metric)
+                if not bench.get("error"):
+                    benchmarks[ratio_key] = {
+                        "median": bench.get("median"),
+                        "p25": bench.get("p25"),
+                        "p75": bench.get("p75"),
+                    }
+            except Exception:
+                pass
+
+        result = {
+            "ticker": ticker,
+            "ratios": ratios,
+            "benchmarks": benchmarks,
+            "data_freshness": ratios.get("data_freshness"),
+        }
+
+        return _response(200, result)
+
+    except Exception as e:
+        print(f"[Financials] Error for {ticker}: {e}")
+        return _response(200, {
+            "ticker": ticker,
+            "ratios": {"error": str(e)},
+            "benchmarks": {},
+            "data_freshness": None,
+        })
 
 
 # ─── Response Helper ───
