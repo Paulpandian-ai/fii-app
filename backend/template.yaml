@@ -670,6 +670,31 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Stock factor & financial endpoints
+        GetStockFactors:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stocks/{ticker}/factors
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetStockFactorsDimension:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stocks/{ticker}/factors/{dimension}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetStockFinancials:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stocks/{ticker}/financials
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
