@@ -167,6 +167,10 @@ export const getFactors = async (ticker: string) => {
   return _deduplicatedGet(`/factors/${ticker}`);
 };
 
+export const getFactorSummaries = async (ticker: string) => {
+  return _deduplicatedGet(`/stocks/${ticker}/factors`);
+};
+
 export const getAltData = async (ticker: string) => {
   return _deduplicatedGet(`/altdata/${ticker}`);
 };

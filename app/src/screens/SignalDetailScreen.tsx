@@ -38,6 +38,7 @@ import {
   getSignalDetail,
   getPrice,
   getTechnicals,
+  getFactorSummaries,
   getFundamentals,
   getFactors,
   getAltData,
@@ -75,17 +76,17 @@ const CATEGORIES: { id: string; name: string; icon: string; factorIds: string[] 
 ];
 
 const FACTOR_GAUGE_AXES = [
-  { key: 'supply_chain_upstream', label: 'Supply Chain (Upstream)', matchKey: 'upstream', icon: 'cube-outline',
+  { key: 'supply_chain_upstream', dimKey: 'supply_chain_upstream', label: 'Supply Chain (Upstream)', matchKey: 'upstream', icon: 'cube-outline',
     tooltip: 'How healthy are this company\'s key suppliers? Disruptions can directly affect production.' },
-  { key: 'supply_chain_downstream', label: 'Supply Chain (Downstream)', matchKey: 'downstream', icon: 'people-outline',
+  { key: 'supply_chain_downstream', dimKey: 'supply_chain_downstream', label: 'Supply Chain (Downstream)', matchKey: 'downstream', icon: 'people-outline',
     tooltip: 'How strong is demand from this company\'s major customers?' },
-  { key: 'geopolitical', label: 'Geopolitical', matchKey: 'geopolitical', icon: 'globe-outline',
+  { key: 'geopolitical', dimKey: 'geopolitical', label: 'Geopolitical', matchKey: 'geopolitical', icon: 'globe-outline',
     tooltip: 'How exposed is this company to trade barriers, conflicts, or political instability?' },
-  { key: 'monetary', label: 'Monetary Policy', matchKey: 'monetary', icon: 'cash-outline',
+  { key: 'monetary', dimKey: 'monetary', label: 'Monetary Policy', matchKey: 'monetary', icon: 'cash-outline',
     tooltip: 'How sensitive is this stock to interest rates, inflation, and Federal Reserve decisions?' },
-  { key: 'correlations', label: 'Correlations', matchKey: 'correlation', icon: 'git-compare-outline',
+  { key: 'correlations', dimKey: 'correlations', label: 'Correlations', matchKey: 'correlation', icon: 'git-compare-outline',
     tooltip: 'How does this stock move relative to its sector, commodities, and market sentiment?' },
-  { key: 'performance', label: 'Risk & Performance', matchKey: 'performance', icon: 'trending-up-outline',
+  { key: 'performance', dimKey: 'risk_performance', label: 'Risk & Performance', matchKey: 'performance', icon: 'trending-up-outline',
     tooltip: 'How has this company performed on earnings, guidance, and overall volatility?' },
 ];
 
@@ -219,6 +220,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [signalHistory, setSignalHistory] = useState<SignalHistoryPoint[]>([]);
   const [stressData, setStressData] = useState<any[] | null>(null);
   const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(null);
+  const [factorSummaries, setFactorSummaries] = useState<Record<string, { summary: string; score: number; score_label: string; confidence: string }>>({});
   const [scoreDrivers, setScoreDrivers] = useState<Array<{ factor: string; direction: string; description: string }>>([]);
   const [percentileRank, setPercentileRank] = useState<number | null>(null);
   const [sectorPercentile, setSectorPercentile] = useState<number | null>(null);
@@ -227,7 +229,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   // ── UI State ──
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [showAllFactors, setShowAllFactors] = useState(false);
-  const [expandedFactorBar, setExpandedFactorBar] = useState<string | null>(null);
+  const [expandedFactorBar, setExpandedFactorBar] = useState<string | null>('supply_chain_upstream');
   const [tooltipVisible, setTooltipVisible] = useState<string | null>(null);
   const [stressExpanded, setStressExpanded] = useState(false);
   const [factorDeepDiveExpanded, setFactorDeepDiveExpanded] = useState(true);
@@ -305,6 +307,24 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         .catch(() => {});
       getStressTestAll(ticker)
         .then((d) => setStressData(d.scenarios || []))
+        .catch(() => {});
+      getFactorSummaries(ticker)
+        .then((d: any) => {
+          if (d?.dimensions && typeof d.dimensions === 'object') {
+            const summaries: Record<string, { summary: string; score: number; score_label: string; confidence: string }> = {};
+            for (const [key, val] of Object.entries(d.dimensions) as any) {
+              if (val && typeof val === 'object') {
+                summaries[key] = {
+                  summary: val.summary || '',
+                  score: val.score ?? 0,
+                  score_label: val.score_label || '',
+                  confidence: val.confidence || 'Medium',
+                };
+              }
+            }
+            setFactorSummaries(summaries);
+          }
+        })
         .catch(() => {});
 
       // Load sector peers
@@ -577,11 +597,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             (d) => d.factor.toLowerCase().includes(axis.matchKey),
           );
           const isExpanded = expandedFactorBar === axis.key;
-          const isTooltipOpen = tooltipVisible === axis.key;
+          const dimData = factorSummaries[axis.dimKey];
+          const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
           return (
             <TouchableOpacity
               key={axis.key}
-              style={styles.gaugeRow}
+              style={[styles.gaugeRow, isExpanded && styles.gaugeRowExpanded]}
               onPress={() => setExpandedFactorBar(isExpanded ? null : axis.key)}
               activeOpacity={0.7}
             >
@@ -589,25 +610,52 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 <View style={styles.gaugeLeft}>
                   <Ionicons name={axis.icon as any} size={14} color={barColor} />
                   <Text style={styles.gaugeName}>{axis.label}</Text>
-                  <TouchableOpacity
-                    onPress={() => setTooltipVisible(isTooltipOpen ? null : axis.key)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.25)" />
-                  </TouchableOpacity>
                 </View>
-                <Text style={[styles.gaugeValue, { color: barColor }]}>{Math.round(val)}th</Text>
+                <View style={styles.gaugeRight}>
+                  <Text style={[styles.gaugeValue, { color: barColor }]}>{Math.round(val)}th</Text>
+                  <Ionicons
+                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color="rgba(255,255,255,0.3)"
+                  />
+                </View>
               </View>
-              {isTooltipOpen && (
-                <View style={styles.eduTooltip}>
-                  <Text style={styles.eduTooltipText}>{axis.tooltip}</Text>
-                </View>
-              )}
               <View style={styles.gaugeTrack}>
                 <View style={[styles.gaugeFill, { width: `${Math.min(100, Math.max(2, val))}%`, backgroundColor: barColor }]} />
               </View>
-              {isExpanded && driverMatch && (
-                <Text style={styles.gaugeDriverText}>{driverMatch.description}</Text>
+              {isExpanded && (
+                <View style={styles.factorSummaryCard}>
+                  {hasSummary ? (
+                    <>
+                      <Text style={styles.factorSummaryText}>{dimData.summary}</Text>
+                      <View style={styles.factorMetaRow}>
+                        <View style={[styles.factorScoreBadge, { backgroundColor: barColor + '20', borderColor: barColor + '40' }]}>
+                          <Text style={[styles.factorScoreBadgeText, { color: barColor }]}>
+                            {dimData.score}/10 {dimData.score_label}
+                          </Text>
+                        </View>
+                        <View style={[styles.factorConfidenceBadge, {
+                          backgroundColor: (CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93') + '20',
+                        }]}>
+                          <Ionicons
+                            name="shield-checkmark-outline"
+                            size={11}
+                            color={CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93'}
+                          />
+                          <Text style={[styles.factorConfidenceText, {
+                            color: CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93',
+                          }]}>
+                            {dimData.confidence} confidence
+                          </Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.factorSummaryFallback}>
+                      {driverMatch?.description || axis.tooltip}
+                    </Text>
+                  )}
+                </View>
               )}
             </TouchableOpacity>
           );
@@ -1299,10 +1347,15 @@ const styles = StyleSheet.create({
 
   // ── Factor Gauges (Analysis tab) ──
   gaugeRow: {
-    marginBottom: 12,
+    marginBottom: 10,
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: 10,
-    padding: 10,
+    padding: 12,
+  },
+  gaugeRowExpanded: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   gaugeHeader: {
     flexDirection: 'row',
@@ -1315,6 +1368,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flex: 1,
+  },
+  gaugeRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   gaugeName: {
     color: 'rgba(255,255,255,0.7)',
@@ -1335,22 +1393,53 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-  gaugeDriverText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 11,
-    marginTop: 6,
-    lineHeight: 15,
-  },
-  eduTooltip: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
+  factorSummaryCard: {
+    marginTop: 10,
+    backgroundColor: 'rgba(10, 15, 40, 0.6)',
     borderRadius: 8,
-    padding: 8,
-    marginBottom: 6,
+    padding: 12,
   },
-  eduTooltipText: {
-    color: 'rgba(255,255,255,0.8)',
+  factorSummaryText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  factorSummaryFallback: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+  factorMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  factorScoreBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  factorScoreBadgeText: {
     fontSize: 11,
-    lineHeight: 16,
+    fontWeight: '700',
+  },
+  factorConfidenceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  factorConfidenceText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   // ── Stress Test (Analysis tab) ──
