@@ -18,6 +18,8 @@ import { SignalBadge } from '../components/SignalBadge';
 import { Skeleton } from '../components/Skeleton';
 import { ErrorState } from '../components/ErrorState';
 import { StockChart } from '../components/StockChart';
+import { FactorDetailCard } from '../components/FactorDetailCard';
+import { FinancialStatsGrid } from '../components/FinancialStatsGrid';
 import type { ChartData } from '../components/StockChart';
 import type { StockEvent, SignalHistoryPoint } from '../types';
 import type {
@@ -39,6 +41,7 @@ import {
   getPrice,
   getTechnicals,
   getFactorSummaries,
+  getFactorDetail,
   getFundamentals,
   getFactors,
   getAltData,
@@ -336,6 +339,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [factorDeepDiveExpanded, setFactorDeepDiveExpanded] = useState(true);
   const [factorDeepDiveMode, setFactorDeepDiveMode] = useState<'simple' | 'advanced'>('simple');
   const [expandedFinancialCats, setExpandedFinancialCats] = useState<Set<string>>(new Set(['valuation']));
+  const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
 
   // ═══════════════════════════════════════════════════════════
   // Data Loading (fetch once, share across all tabs)
@@ -403,11 +407,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       // Non-blocking secondary loads
       getFinancials(ticker)
         .then((d: any) => {
-          console.log('financials raw:', JSON.stringify(d));
           if (d && typeof d === 'object') {
-            // API returns { ticker, sector, computed_at, categories: { valuation: { ... }, ... } }
             const cats = d.categories || d;
-            console.log('financials categories keys:', Object.keys(cats));
             setFinancials(cats);
           }
         })
@@ -634,7 +635,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             };
             const factorLabel = factorDisplayName[driver.factor] || driver.factor;
             return (
-              <View key={`driver-${idx}`} style={styles.driverRow}>
+              <TouchableOpacity
+                key={`driver-${idx}`}
+                style={styles.driverRow}
+                onPress={() => setSelectedDimension(driver.factor)}
+                activeOpacity={0.7}
+              >
                 <Text style={[styles.driverArrow, { color: isUp ? '#00C9A7' : '#F5A623' }]}>
                   {isUp ? '\u2191' : '\u2193'}
                 </Text>
@@ -642,7 +648,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                   <Text style={styles.driverFactor}>{factorLabel}</Text>
                   <Text style={styles.driverDesc}>{driver.description}</Text>
                 </View>
-              </View>
+                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
             );
           })
         ) : (
@@ -716,7 +723,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             <TouchableOpacity
               key={axis.key}
               style={[styles.gaugeRow, isExpanded && styles.gaugeRowExpanded]}
-              onPress={() => setExpandedFactorBar(isExpanded ? null : axis.key)}
+              onPress={() => setSelectedDimension(axis.dimKey)}
+              onLongPress={() => setExpandedFactorBar(isExpanded ? null : axis.key)}
               activeOpacity={0.7}
             >
               <View style={styles.gaugeHeader}>
@@ -727,7 +735,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 <View style={styles.gaugeRight}>
                   <Text style={[styles.gaugeValue, { color: barColor }]}>{Math.round(val)}th</Text>
                   <Ionicons
-                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                    name="chevron-forward"
                     size={14}
                     color="rgba(255,255,255,0.3)"
                   />
@@ -855,68 +863,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         </View>
       )}
 
-      {/* SECTION 5: FINANCIAL HEALTH */}
-      {fundamentals && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Financial Health</Text>
-          <TouchableOpacity
-            style={styles.healthRow}
-            onPress={() => navigation.push('FinancialHealth', { ticker })}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.healthGradeBadge, {
-              borderColor: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
-            }]}>
-              <Text style={[styles.healthGradeText, {
-                color: fundamentals.grade.startsWith('A') || fundamentals.grade.startsWith('B')
-                  ? '#00C9A7' : fundamentals.grade.startsWith('C') ? '#8E8E93' : '#F5A623',
-              }]}>
-                {fundamentals.grade}
-              </Text>
-            </View>
-            <Text style={styles.healthMetrics}>
-              {fundamentals.zScore ? `Z-Score: ${safeNum(fundamentals.zScore.value).toFixed(2)}` : ''}
-              {fundamentals.zScore && fundamentals.fScore ? ' \u00B7 ' : ''}
-              {fundamentals.fScore ? `F-Score: ${safeNum(fundamentals.fScore.value)}/9` : ''}
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* SECTION 6: KEY DATA */}
-      {priceData && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Key Data</Text>
-          <View style={styles.keyDataGrid}>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>Market Cap</Text>
-              <Text style={styles.keyDataValue}>{formatLargeNumber(priceData.marketCap)}</Text>
-            </View>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>Sector</Text>
-              <Text style={styles.keyDataValue} numberOfLines={1}>{priceData.sector || 'N/A'}</Text>
-            </View>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>P/E (TTM)</Text>
-              <Text style={styles.keyDataValue}>{priceData.trailingPE ? safeNum(priceData.trailingPE).toFixed(1) : 'N/A'}</Text>
-            </View>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>Beta</Text>
-              <Text style={styles.keyDataValue}>{priceData.beta != null ? safeNum(priceData.beta).toFixed(2) : 'N/A'}</Text>
-            </View>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>52W Low</Text>
-              <Text style={styles.keyDataValue}>{priceData.fiftyTwoWeekLow != null ? `$${safeNum(priceData.fiftyTwoWeekLow).toFixed(2)}` : 'N/A'}</Text>
-            </View>
-            <View style={styles.keyDataCell}>
-              <Text style={styles.keyDataLabel}>52W High</Text>
-              <Text style={styles.keyDataValue}>{priceData.fiftyTwoWeekHigh != null ? `$${safeNum(priceData.fiftyTwoWeekHigh).toFixed(2)}` : 'N/A'}</Text>
-            </View>
-          </View>
-        </View>
-      )}
+      {/* SECTION 5: FINANCIAL STATISTICS */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Financial Statistics</Text>
+        <FinancialStatsGrid ticker={ticker} />
+      </View>
     </ScrollView>
   );
 
@@ -1123,10 +1074,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       {financials && Object.keys(financials).length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Financial Metrics</Text>
-          {(() => { console.log('financials render keys:', Object.keys(financials)); return null; })()}
           {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([catKey, catMeta]) => {
             const catData = financials[catKey];
-            console.log(`financials[${catKey}]:`, catData ? Object.keys(catData).length + ' metrics' : 'missing');
             if (!catData || typeof catData !== 'object') return null;
             // Filter out null values
             const metrics = Object.entries(catData).filter(
@@ -1270,6 +1219,15 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           {renderDeepDiveTab()}
         </View>
       </PagerView>
+
+      {/* Factor Detail Bottom Sheet */}
+      {selectedDimension && (
+        <FactorDetailCard
+          ticker={ticker}
+          dimension={selectedDimension}
+          onClose={() => setSelectedDimension(null)}
+        />
+      )}
     </LinearGradient>
   );
 };
