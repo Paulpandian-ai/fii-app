@@ -403,9 +403,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       // Non-blocking secondary loads
       getFinancials(ticker)
         .then((d: any) => {
+          console.log('financials raw:', JSON.stringify(d));
           if (d && typeof d === 'object') {
-            // API returns { valuation: { trailing_pe: { value, source, ... }, ... }, ... }
-            setFinancials(d);
+            // API returns { ticker, sector, computed_at, categories: { valuation: { ... }, ... } }
+            const cats = d.categories || d;
+            console.log('financials categories keys:', Object.keys(cats));
+            setFinancials(cats);
           }
         })
         .catch(() => {});
@@ -1120,8 +1123,10 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       {financials && Object.keys(financials).length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Financial Metrics</Text>
+          {(() => { console.log('financials render keys:', Object.keys(financials)); return null; })()}
           {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([catKey, catMeta]) => {
             const catData = financials[catKey];
+            console.log(`financials[${catKey}]:`, catData ? Object.keys(catData).length + ' metrics' : 'missing');
             if (!catData || typeof catData !== 'object') return null;
             // Filter out null values
             const metrics = Object.entries(catData).filter(
