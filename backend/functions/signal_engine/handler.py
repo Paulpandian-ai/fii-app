@@ -27,6 +27,7 @@ import market_data
 import finnhub_client
 import technical_engine
 import sec_edgar
+import batch_scorer
 from models import (
     ALL_SECURITIES,
     COMPANY_NAMES,
@@ -80,6 +81,9 @@ def lambda_handler(event, context):
 
             # Normalize signal distribution across all stocks
             _normalize_signals()
+
+            # Enhanced Claude batch scoring with sourced rationales
+            _run_batch_scoring(event, tickers)
 
             return {
                 "statusCode": 200,
@@ -1049,3 +1053,42 @@ def _store_signal(ticker: str, result: dict) -> None:
     s3.write_json(f"signals/{ticker}.json", result)
 
     logger.info(f"[{ticker}] Stored signal in DynamoDB + S3")
+
+
+def _run_batch_scoring(event: dict, tickers: list) -> None:
+    """Run enhanced Claude batch scoring with sourced rationales.
+
+    For weekly runs (Saturday 6AM): scores ALL tickers with Haiku,
+    re-scores flagged stocks (>2pt change) with Sonnet.
+
+    For daily runs: only scores stocks with material changes.
+
+    Args:
+        event: Lambda event payload.
+        tickers: List of tickers being processed.
+    """
+    try:
+        if batch_scorer.is_weekly_run(event):
+            logger.info("[SignalEngine] Saturday weekly run — full batch scoring")
+            # Get all stock tickers (exclude ETFs for cost savings)
+            all_tickers = [t for t in ALL_SECURITIES if t not in ETF_SET]
+            summary = batch_scorer.score_batch(all_tickers, run_type="weekly")
+            logger.info(
+                f"[SignalEngine] Weekly batch complete: "
+                f"{summary.get('scored', 0)} scored, "
+                f"{summary.get('errors', 0)} errors, "
+                f"~${summary.get('cost_estimate', 0):.4f}"
+            )
+        else:
+            logger.info("[SignalEngine] Daily run — delta batch scoring")
+            # Only score tickers that were just analyzed or have changes
+            changed_tickers = [t for t in tickers if t in TIER_1_SET]
+            if changed_tickers:
+                summary = batch_scorer.score_batch(changed_tickers, run_type="daily")
+                logger.info(
+                    f"[SignalEngine] Daily batch complete: "
+                    f"{summary.get('scored', 0)} scored, "
+                    f"{summary.get('errors', 0)} errors"
+                )
+    except Exception as e:
+        logger.error(f"[SignalEngine] Batch scoring failed: {e}", exc_info=True)
