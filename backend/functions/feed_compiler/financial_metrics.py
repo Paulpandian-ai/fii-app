@@ -239,12 +239,14 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     metrics["market_cap"] = mcap
 
     # ─── PROFITABILITY (9) ───
-    metrics["gross_margin"] = _pct(_safe_get(m, "grossMarginTTM") or _safe_get(m, "grossMarginAnnual"))
-    metrics["operating_margin"] = _pct(_safe_get(m, "operatingMarginTTM") or _safe_get(m, "operatingMarginAnnual"))
-    metrics["net_margin"] = _pct(_safe_get(m, "netProfitMarginTTM") or _safe_get(m, "netProfitMarginAnnual"))
-    metrics["roe"] = _pct(_safe_get(m, "roeTTM") or _safe_get(m, "roeRfy"))
-    metrics["roa"] = _pct(_safe_get(m, "roaTTM") or _safe_get(m, "roaRfy"))
-    metrics["roic"] = _pct(_safe_get(m, "roicTTM") or _safe_get(m, "roicAnnual"))
+    # Finnhub returns margins/ratios already as percentages (e.g. 83.04 = 83.04%)
+    # Do NOT apply _pct() which would multiply by 100 again.
+    metrics["gross_margin"] = _safe_get(m, "grossMarginTTM") or _safe_get(m, "grossMarginAnnual")
+    metrics["operating_margin"] = _safe_get(m, "operatingMarginTTM") or _safe_get(m, "operatingMarginAnnual")
+    metrics["net_margin"] = _safe_get(m, "netProfitMarginTTM") or _safe_get(m, "netProfitMarginAnnual")
+    metrics["roe"] = _safe_get(m, "roeTTM") or _safe_get(m, "roeRfy")
+    metrics["roa"] = _safe_get(m, "roaTTM") or _safe_get(m, "roaRfy")
+    metrics["roic"] = _safe_get(m, "roicTTM") or _safe_get(m, "roicAnnual")
     metrics["ebitda"] = _safe_get(m, "ebitdTTM")  # Finnhub uses "ebitdTTM" (not ebitda)
     if metrics["ebitda"] is None:
         metrics["ebitda"] = _safe_get(m, "ebitdaPerShareTTM")  # Fallback to per-share * shares
@@ -288,7 +290,7 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     metrics["dividend_yield"] = _safe_get(m, "dividendYieldIndicatedAnnual")
     if metrics["dividend_yield"] is not None:
         metrics["dividend_yield"] = round(metrics["dividend_yield"] * 100, 2) if metrics["dividend_yield"] < 1 else round(metrics["dividend_yield"], 2)
-    metrics["payout_ratio"] = _pct(_safe_get(m, "payoutRatioTTM") or _safe_get(m, "payoutRatioAnnual"))
+    metrics["payout_ratio"] = _safe_get(m, "payoutRatioTTM") or _safe_get(m, "payoutRatioAnnual")
     metrics["dividend_growth_5y"] = _safe_get(m, "dividendGrowthRate5Y")
     metrics["ex_dividend_date"] = None  # Not in /stock/metric
     metrics["dividend_per_share"] = _safe_get(m, "dividendPerShareAnnual") or _safe_get(m, "dividendPerShareTTM")
