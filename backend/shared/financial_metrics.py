@@ -8,7 +8,8 @@ Data source priority:
   1. PRIMARY: Finnhub (/stock/metric, /stock/profile2, /stock/recommendation,
      /stock/price-target) — works reliably in Lambda.
   2. FALLBACK: EDGAR DynamoDB cache (FINANCIALS#{ticker} | RATIOS).
-  3. THIRD: yfinance — kept but not relied upon (fails silently in Lambda).
+
+NO yfinance dependency — it does not work in Lambda (missing curl_cffi).
 
 Results are cached in DynamoDB (PK: FINANCIALS#{ticker}, SK: LATEST, 7-day TTL).
 """
@@ -133,33 +134,49 @@ def _fetch_finnhub_metrics(ticker: str) -> dict:
 
     Returns dict with raw Finnhub data keyed by endpoint.
     """
-    import finnhub_client
+    try:
+        import finnhub_client
+    except ImportError as e:
+        logger.error(f"[FinancialMetrics] FAILED to import finnhub_client: {e}")
+        raise
 
     result = {"metrics": {}, "profile": {}, "recommendations": [], "price_target": {}}
 
     # 1) Basic financials — the main payload
+    logger.info(f"[FinancialMetrics] Calling Finnhub /stock/metric for {ticker}")
     data = finnhub_client._request("stock/metric", {"symbol": ticker, "metric": "all"})
     if data and data.get("metric"):
         result["metrics"] = data["metric"]
         logger.info(f"[FinancialMetrics] Finnhub /stock/metric returned {len(data['metric'])} keys for {ticker}")
     else:
-        logger.warning(f"[FinancialMetrics] Finnhub /stock/metric empty for {ticker}")
+        logger.warning(f"[FinancialMetrics] Finnhub /stock/metric returned empty for {ticker}")
 
     # 2) Company profile
+    logger.info(f"[FinancialMetrics] Calling Finnhub get_company_profile for {ticker}")
     profile = finnhub_client.get_company_profile(ticker)
     if profile:
         result["profile"] = profile
+        logger.info(f"[FinancialMetrics] Finnhub get_company_profile returned data for {ticker}")
+    else:
+        logger.warning(f"[FinancialMetrics] Finnhub get_company_profile returned empty for {ticker}")
 
     # 3) Analyst recommendations
+    logger.info(f"[FinancialMetrics] Calling Finnhub /stock/recommendation for {ticker}")
     recs = finnhub_client._request("stock/recommendation", {"symbol": ticker})
     if recs and isinstance(recs, list) and len(recs) > 0:
         result["recommendations"] = recs
-        logger.info(f"[FinancialMetrics] Finnhub recommendations: {len(recs)} periods for {ticker}")
+        logger.info(f"[FinancialMetrics] Finnhub /stock/recommendation returned {len(recs)} periods for {ticker}")
+    else:
+        logger.warning(f"[FinancialMetrics] Finnhub /stock/recommendation returned empty for {ticker}")
 
     # 4) Price targets
+    logger.info(f"[FinancialMetrics] Calling Finnhub /stock/price-target for {ticker}")
     pt = finnhub_client._request("stock/price-target", {"symbol": ticker})
     if pt and pt.get("targetMean"):
         result["price_target"] = pt
+        logger.info(f"[FinancialMetrics] Finnhub /stock/price-target returned data for {ticker}")
+    else:
+        logger.warning(f"[FinancialMetrics] Finnhub /stock/price-target returned empty for {ticker}")
 
     return result
 
@@ -194,10 +211,7 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
 
     # FCF yield = FCF / EV (or market cap)
     fcf_per_share = _safe_get(m, "fcfPerShareTTM")
-    price_for_yield = _safe_get(m, "marketCapitalization")
-    shares = _safe_get(m, "sharesOutstanding") or (profile.get("marketCap", 0) / max(_safe_get(m, "marketCapitalization") or 1, 1) if profile.get("marketCap") else None)
     if fcf_per_share is not None and metrics.get("trailing_pe") is not None:
-        # FCF yield ≈ (FCF per share / price) * 100
         eps = _safe_get(m, "epsBasicExclExtraItemsTTM")
         if eps and metrics["trailing_pe"]:
             price_est = eps * metrics["trailing_pe"]
@@ -260,7 +274,6 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     metrics["total_cash"] = _safe_get(m, "cashAndShortTermInvestmentsQuarterly")
     metrics["total_debt"] = _safe_get(m, "totalDebtQuarterly") or _safe_get(m, "totalDebtAnnual")
     metrics["book_value_per_share"] = _safe_get(m, "bookValuePerShareQuarterly") or _safe_get(m, "bookValuePerShareAnnual")
-    bvps = metrics.get("book_value_per_share")
     shares_out_val = _safe_get(m, "sharesOutstanding")
     cash_val = metrics.get("total_cash")
     if cash_val is not None and shares_out_val and shares_out_val > 0:
@@ -277,8 +290,7 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
         metrics["dividend_yield"] = round(metrics["dividend_yield"] * 100, 2) if metrics["dividend_yield"] < 1 else round(metrics["dividend_yield"], 2)
     metrics["payout_ratio"] = _pct(_safe_get(m, "payoutRatioTTM") or _safe_get(m, "payoutRatioAnnual"))
     metrics["dividend_growth_5y"] = _safe_get(m, "dividendGrowthRate5Y")
-    # Ex-dividend date not in /stock/metric — leave None (EDGAR/yfinance can fill)
-    metrics["ex_dividend_date"] = None
+    metrics["ex_dividend_date"] = None  # Not in /stock/metric
     metrics["dividend_per_share"] = _safe_get(m, "dividendPerShareAnnual") or _safe_get(m, "dividendPerShareTTM")
     metrics["years_of_consecutive_dividends"] = None  # Not in Finnhub
 
@@ -339,11 +351,7 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     metrics["insider_pct"] = None
     metrics["short_pct_float"] = None
     metrics["short_ratio"] = None
-    shares_outstanding = _safe_get(m, "sharesOutstanding")
-    if shares_outstanding is None and profile.get("marketCap") and metrics.get("trailing_pe") and metrics.get("eps_ttm"):
-        # Estimate shares from market cap / (EPS * PE / EPS) = market cap / price
-        pass
-    metrics["shares_outstanding"] = shares_outstanding
+    metrics["shares_outstanding"] = _safe_get(m, "sharesOutstanding")
     metrics["float_shares"] = None  # Not in Finnhub free tier
     metrics["insider_buys_6m"] = None  # Would need /stock/insider-transactions
     metrics["insider_sells_6m"] = None
@@ -402,7 +410,9 @@ def _fill_technicals_from_candles(metrics: dict, ticker: str) -> None:
     """
     try:
         import finnhub_client
+        logger.info(f"[FinancialMetrics] Calling Finnhub get_candles for {ticker} (technicals)")
         candles = finnhub_client.get_candles(ticker, resolution="D")
+        logger.info(f"[FinancialMetrics] Finnhub get_candles returned {len(candles) if candles else 0} candles for {ticker}")
         if not candles or len(candles) < 20:
             logger.info(f"[FinancialMetrics] Not enough candle data for technicals ({len(candles) if candles else 0} candles)")
             return
@@ -543,9 +553,10 @@ def _fetch_edgar_ratios_from_dynamo(ticker: str) -> dict:
     """
     try:
         import db
+        logger.info(f"[FinancialMetrics] Reading EDGAR ratios from DynamoDB for {ticker}")
         item = db.get_item(f"FINANCIALS#{ticker.upper()}", "RATIOS")
         if item:
-            logger.info(f"[FinancialMetrics] EDGAR ratios found in DynamoDB for {ticker}")
+            logger.info(f"[FinancialMetrics] EDGAR ratios found in DynamoDB for {ticker} ({len(item)} keys)")
             return item
         else:
             logger.info(f"[FinancialMetrics] No EDGAR ratios in DynamoDB for {ticker}")
@@ -615,180 +626,6 @@ def _map_edgar_ratios_to_metrics(edgar: dict) -> dict:
             pass
 
     return metrics
-
-
-# ─── Source 3: yfinance (THIRD FALLBACK) ───
-
-
-def _fetch_yfinance_data(ticker: str) -> dict:
-    """Fetch data from yfinance. Kept as third fallback — often fails in Lambda."""
-    try:
-        import yfinance as yf
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-        logger.info(f"[FinancialMetrics] yfinance info fetched for {ticker}: {len(info)} keys")
-
-        if not info or len(info) <= 1:
-            logger.warning(f"[FinancialMetrics] yfinance returned empty/minimal info for {ticker}")
-
-        hist_1y = None
-        try:
-            hist_1y = stock.history(period="1y")
-        except Exception as e:
-            logger.warning(f"[FinancialMetrics] yfinance history failed for {ticker}: {e}")
-
-        insider_transactions = None
-        try:
-            insider_transactions = stock.insider_transactions
-        except Exception:
-            pass
-
-        return {
-            "info": info,
-            "hist_1y": hist_1y,
-            "insider_transactions": insider_transactions,
-            "source": "yfinance",
-        }
-    except Exception as e:
-        logger.warning(f"[FinancialMetrics] yfinance fetch failed for {ticker}: {e}")
-        return {"info": {}, "source": "yfinance", "error": str(e)}
-
-
-def _map_yfinance_to_metrics(data: dict) -> dict:
-    """Extract metrics from yfinance data (third fallback)."""
-    info = data.get("info", {})
-    hist = data.get("hist_1y")
-    insider_tx = data.get("insider_transactions")
-
-    if not info or len(info) <= 1:
-        return {}
-
-    metrics = {}
-
-    # Valuation
-    metrics["trailing_pe"] = _safe_get(info, "trailingPE")
-    metrics["forward_pe"] = _safe_get(info, "forwardPE")
-    metrics["peg_ratio"] = _safe_get(info, "pegRatio")
-    metrics["price_to_sales"] = _safe_get(info, "priceToSalesTrailing12Months")
-    metrics["price_to_book"] = _safe_get(info, "priceToBook")
-    metrics["ev_to_ebitda"] = _safe_get(info, "enterpriseToEbitda")
-    metrics["ev_to_revenue"] = _safe_get(info, "enterpriseToRevenue")
-    metrics["enterprise_value"] = _safe_get(info, "enterpriseValue")
-    fcf = _safe_get(info, "freeCashflow")
-    mcap = _safe_get(info, "marketCap")
-    metrics["fcf_yield"] = round(_safe_divide(fcf, mcap) * 100, 2) if _safe_divide(fcf, mcap) is not None else None
-    eps = _safe_get(info, "trailingEps")
-    price = _safe_get(info, "currentPrice") or _safe_get(info, "regularMarketPrice")
-    metrics["earnings_yield"] = round(_safe_divide(eps, price) * 100, 2) if _safe_divide(eps, price) is not None else None
-    metrics["market_cap"] = mcap
-
-    # Profitability
-    metrics["gross_margin"] = _pct(_safe_get(info, "grossMargins"))
-    metrics["operating_margin"] = _pct(_safe_get(info, "operatingMargins"))
-    metrics["net_margin"] = _pct(_safe_get(info, "profitMargins"))
-    metrics["roe"] = _pct(_safe_get(info, "returnOnEquity"))
-    metrics["roa"] = _pct(_safe_get(info, "returnOnAssets"))
-    metrics["roic"] = None
-    metrics["ebitda"] = _safe_get(info, "ebitda")
-    metrics["eps_ttm"] = eps
-    metrics["revenue_per_share"] = _safe_get(info, "revenuePerShare")
-
-    # Growth
-    metrics["revenue_growth_yoy"] = _pct(_safe_get(info, "revenueGrowth"))
-    metrics["eps_growth_yoy"] = _pct(_safe_get(info, "earningsGrowth"))
-    metrics["revenue_growth_qoq"] = _pct(_safe_get(info, "revenueGrowth"))
-    metrics["earnings_growth_qoq"] = _pct(_safe_get(info, "earningsQuarterlyGrowth"))
-
-    # Financial health
-    metrics["debt_to_equity"] = _safe_get(info, "debtToEquity")
-    metrics["current_ratio"] = _safe_get(info, "currentRatio")
-    metrics["quick_ratio"] = _safe_get(info, "quickRatio")
-    metrics["total_cash"] = _safe_get(info, "totalCash")
-    metrics["total_debt"] = _safe_get(info, "totalDebt")
-    metrics["book_value_per_share"] = _safe_get(info, "bookValue")
-    shares_out = _safe_get(info, "sharesOutstanding")
-    total_cash_val = _safe_get(info, "totalCash")
-    metrics["cash_per_share"] = round(_safe_divide(total_cash_val, shares_out), 2) if _safe_divide(total_cash_val, shares_out) is not None else None
-
-    # Dividends
-    metrics["dividend_yield"] = _pct(_safe_get(info, "dividendYield"))
-    metrics["payout_ratio"] = _pct(_safe_get(info, "payoutRatio"))
-    metrics["dividend_per_share"] = _safe_get(info, "dividendRate")
-    ex_div = info.get("exDividendDate")
-    if ex_div:
-        try:
-            if isinstance(ex_div, (int, float)):
-                metrics["ex_dividend_date"] = datetime.fromtimestamp(ex_div, tz=timezone.utc).strftime("%Y-%m-%d")
-            else:
-                metrics["ex_dividend_date"] = str(ex_div)
-        except Exception:
-            metrics["ex_dividend_date"] = None
-    else:
-        metrics["ex_dividend_date"] = None
-
-    # Analyst
-    metrics["target_price_low"] = _safe_get(info, "targetLowPrice")
-    metrics["target_price_mean"] = _safe_get(info, "targetMeanPrice")
-    metrics["target_price_high"] = _safe_get(info, "targetHighPrice")
-    metrics["recommendation_score"] = _safe_get(info, "recommendationMean")
-    metrics["num_analysts"] = _safe_get(info, "numberOfAnalystOpinions")
-
-    # Momentum from history
-    if hist is not None and len(hist) >= 21:
-        closes = hist["Close"].values
-        current = float(closes[-1])
-        if len(closes) >= 21:
-            past = float(closes[-21])
-            if past > 0:
-                metrics["price_change_1m"] = round(((current - past) / past) * 100, 2)
-        if len(closes) >= 63:
-            past = float(closes[-63])
-            if past > 0:
-                metrics["price_change_3m"] = round(((current - past) / past) * 100, 2)
-        if len(closes) >= 126:
-            past = float(closes[-126])
-            if past > 0:
-                metrics["price_change_6m"] = round(((current - past) / past) * 100, 2)
-        if len(closes) >= 252:
-            past = float(closes[-min(252, len(closes))])
-            if past > 0:
-                metrics["price_change_1y"] = round(((current - past) / past) * 100, 2)
-
-    metrics["beta"] = _safe_get(info, "beta")
-
-    # Ownership
-    metrics["institutional_pct"] = _pct(_safe_get(info, "heldPercentInstitutions"))
-    metrics["insider_pct"] = _pct(_safe_get(info, "heldPercentInsiders"))
-    metrics["short_pct_float"] = _pct(_safe_get(info, "shortPercentOfFloat"))
-    metrics["short_ratio"] = _safe_get(info, "shortRatio")
-    metrics["shares_outstanding"] = shares_out
-    metrics["float_shares"] = _safe_get(info, "floatShares")
-
-    # Insider transactions
-    if insider_tx is not None:
-        metrics["insider_buys_6m"] = _count_insider_transactions(insider_tx, "buy")
-        metrics["insider_sells_6m"] = _count_insider_transactions(insider_tx, "sell")
-
-    return metrics
-
-
-def _count_insider_transactions(insider_df, tx_type: str) -> Optional[int]:
-    """Count insider buy/sell transactions in last 6 months."""
-    if insider_df is None:
-        return None
-    try:
-        if hasattr(insider_df, "empty") and insider_df.empty:
-            return 0
-        count = 0
-        for _, row in insider_df.iterrows():
-            text = str(row.get("Text", "") or row.get("Transaction", "")).lower()
-            if tx_type == "buy" and ("purchase" in text or "buy" in text):
-                count += 1
-            elif tx_type == "sell" and ("sale" in text or "sell" in text):
-                count += 1
-        return count
-    except Exception:
-        return None
 
 
 # ─── Sector benchmarks ───
@@ -930,11 +767,10 @@ def _compute_percentile_rank(value: float, sorted_sector_values: list) -> int:
 def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dict:
     """Compute all 69 financial metrics for a ticker with sector benchmarks.
 
-    Uses a 3-source strategy:
+    Uses a 2-source strategy:
     1. PRIMARY: Finnhub (/stock/metric, /stock/profile2, /stock/recommendation,
        /stock/price-target) — works reliably in Lambda.
     2. FALLBACK: EDGAR DynamoDB cache (FINANCIALS#{ticker} | RATIOS).
-    3. THIRD: yfinance — kept but not relied upon.
 
     Args:
         ticker: Stock ticker symbol.
@@ -955,12 +791,13 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
         }
     """
     # Track which source provided each metric
-    source_map = {}  # metric_key -> "finnhub" | "edgar" | "yfinance"
+    source_map = {}  # metric_key -> "finnhub" | "edgar"
 
     # ─── Source 1: Finnhub (PRIMARY) ───
     finnhub_raw = {}
     finnhub_metrics = {}
     try:
+        logger.info(f"[FinancialMetrics] Starting Finnhub data fetch for {ticker}")
         finnhub_raw = _fetch_finnhub_metrics(ticker)
         finnhub_metrics = _map_finnhub_to_metrics(finnhub_raw)
         # Fill technicals from candle data
@@ -971,7 +808,7 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
             if val is not None:
                 source_map[key] = "finnhub"
     except Exception as e:
-        logger.warning(f"[FinancialMetrics] Finnhub fetch failed for {ticker}: {e}")
+        logger.error(f"[FinancialMetrics] Finnhub fetch failed for {ticker}: {e}")
 
     # ─── Source 2: EDGAR fallback ───
     edgar_ratios = _fetch_edgar_ratios_from_dynamo(ticker)
@@ -985,27 +822,12 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
                 edgar_filled += 1
         logger.info(f"[FinancialMetrics] EDGAR filled {edgar_filled} additional metrics for {ticker}")
 
-    # ─── Source 3: yfinance (third fallback) ───
-    yf_filled = 0
-    try:
-        yf_data = _fetch_yfinance_data(ticker)
-        yf_metrics = _map_yfinance_to_metrics(yf_data)
-        for key, val in yf_metrics.items():
-            if finnhub_metrics.get(key) is None and val is not None:
-                finnhub_metrics[key] = val
-                source_map[key] = "yfinance"
-                yf_filled += 1
-        if yf_filled:
-            logger.info(f"[FinancialMetrics] yfinance filled {yf_filled} additional metrics for {ticker}")
-    except Exception as e:
-        logger.warning(f"[FinancialMetrics] yfinance fallback failed for {ticker}: {e}")
-
     raw_metrics = finnhub_metrics
     total_non_null = sum(1 for v in raw_metrics.values() if v is not None)
+    finnhub_count = sum(1 for s in source_map.values() if s == "finnhub")
+    edgar_count = sum(1 for s in source_map.values() if s == "edgar")
     logger.info(f"[FinancialMetrics] Final: {total_non_null}/69 non-null metrics for {ticker} "
-                f"(sources: finnhub={sum(1 for s in source_map.values() if s == 'finnhub')}, "
-                f"edgar={sum(1 for s in source_map.values() if s == 'edgar')}, "
-                f"yfinance={sum(1 for s in source_map.values() if s == 'yfinance')})")
+                f"(sources: finnhub={finnhub_count}, edgar={edgar_count})")
 
     # Get sector
     sector = _get_sector_for_ticker(ticker)
