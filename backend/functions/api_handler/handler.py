@@ -43,6 +43,7 @@ Routes:
   GET  /admin/agents                 — List agents with schedules & last run
   POST /admin/agents/<id>/run        — Manually trigger an agent
   GET  /admin/agents/<id>/history    — View agent run history
+  GET  /admin/costs?month=YYYY-MM   — Claude API cost tracking summary
 
   # ── Factor Details & Financials ──
   GET  /stocks/<ticker>/factors                — Compact factor summary (all 6 dimensions)
@@ -5707,6 +5708,16 @@ def _handle_admin(method, path, body, query_params):
             current["customSchedule"] = body["customSchedule"]
         _save_agent_config(agent_id, current)
         return _response(200, {"agentId": agent_id, **current, "message": "Config updated"})
+
+    # GET /admin/costs?month=2026-03 — Claude API cost tracking
+    if len(parts) == 2 and parts[1] == "costs" and method == "GET":
+        month = query_params.get("month")
+        try:
+            import batch_scorer
+            summary = batch_scorer.get_cost_summary(month)
+            return _response(200, summary)
+        except Exception as e:
+            return _response(500, {"error": f"Cost tracking error: {e}"})
 
     return _response(404, {"error": "Admin route not found"})
 
