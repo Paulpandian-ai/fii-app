@@ -12,6 +12,7 @@ Functions:
 import asyncio
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -395,10 +396,32 @@ def _call_claude_with_retry(
                 messages=[{"role": "user", "content": user_message}],
             )
 
+            # Check if response was truncated due to max_tokens
+            if message.stop_reason == "max_tokens":
+                logger.warning(
+                    f"[BatchScorer] Response truncated (stop_reason=max_tokens) "
+                    f"with max_tokens={max_tokens}, retrying with max_tokens=6000"
+                )
+                message = client.messages.create(
+                    model=model_id,
+                    max_tokens=6000,
+                    system=[{
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                    messages=[{"role": "user", "content": user_message}],
+                )
+                if message.stop_reason == "max_tokens":
+                    logger.warning(
+                        "[BatchScorer] Response still truncated after retry with max_tokens=6000"
+                    )
+
             return {
                 "text": message.content[0].text,
                 "input_tokens": message.usage.input_tokens,
                 "output_tokens": message.usage.output_tokens,
+                "stop_reason": message.stop_reason,
             }
 
         except Exception as e:
@@ -438,7 +461,10 @@ def _parse_scoring_response(text: str) -> dict:
     try:
         parsed = _parse_json_response(text)
     except (json.JSONDecodeError, Exception) as e:
-        return {"error": f"JSON parse failed: {e}"}
+        logger.warning(f"[BatchScorer] Initial JSON parse failed, attempting truncated JSON recovery: {e}")
+        parsed = _try_recover_truncated_json(text)
+        if parsed is None:
+            return {"error": f"JSON parse failed: {e}"}
 
     # Validate required top-level fields
     if "dimensions" not in parsed:
@@ -514,6 +540,113 @@ def _parse_scoring_response(text: str) -> dict:
         parsed["risk_flags"] = []
 
     return parsed
+
+
+def _try_recover_truncated_json(text: str) -> Optional[dict]:
+    """Attempt to recover a valid JSON object from truncated Claude response.
+
+    Tries two strategies:
+    1. Find the last complete JSON object in the text.
+    2. Close any open braces/brackets to salvage partial results.
+    """
+    # Strip markdown code fences if present
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+
+    # Strategy 1: Try to find the start of JSON and close open braces/brackets
+    json_start = None
+    for i, ch in enumerate(cleaned):
+        if ch == '{':
+            json_start = i
+            break
+
+    if json_start is None:
+        return None
+
+    fragment = cleaned[json_start:]
+
+    # Count open braces and brackets, close them
+    open_braces = 0
+    open_brackets = 0
+    in_string = False
+    escape_next = False
+
+    for ch in fragment:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            open_braces += 1
+        elif ch == '}':
+            open_braces -= 1
+        elif ch == '[':
+            open_brackets += 1
+        elif ch == ']':
+            open_brackets -= 1
+
+    # If we're inside a string, close it first
+    if in_string:
+        fragment += '"'
+
+    # Close any open brackets then braces
+    fragment += ']' * max(0, open_brackets)
+    fragment += '}' * max(0, open_braces)
+
+    try:
+        result = json.loads(fragment)
+        if isinstance(result, dict):
+            logger.info("[BatchScorer] Successfully recovered truncated JSON response")
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Try progressively trimming from the end to find last valid object
+    for trim in range(1, min(500, len(fragment))):
+        candidate = fragment[:-trim]
+        # Count and close
+        ob, obrk = 0, 0
+        ins, esc = False, False
+        for ch in candidate:
+            if esc:
+                esc = False
+                continue
+            if ch == '\\' and ins:
+                esc = True
+                continue
+            if ch == '"' and not esc:
+                ins = not ins
+                continue
+            if ins:
+                continue
+            if ch == '{': ob += 1
+            elif ch == '}': ob -= 1
+            elif ch == '[': obrk += 1
+            elif ch == ']': obrk -= 1
+        if ins:
+            candidate += '"'
+        candidate += ']' * max(0, obrk)
+        candidate += '}' * max(0, ob)
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, dict):
+                logger.info(
+                    f"[BatchScorer] Recovered truncated JSON by trimming {trim} chars"
+                )
+                return result
+        except json.JSONDecodeError:
+            continue
+
+    return None
 
 
 def _compute_composite_from_dimensions(dimensions: list) -> float:
