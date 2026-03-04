@@ -47,6 +47,7 @@ import {
   getSignalHistory,
   getStressTestAll,
   getScreener,
+  getFinancials,
 } from '../services/api';
 
 // ═══════════════════════════════════════════════════════════════
@@ -94,6 +95,105 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   HIGH: '#4A90D9',
   MEDIUM: '#8E8E93',
   LOW: '#F5A623',
+};
+
+// ── Financial Metrics: Human-readable names ──
+const METRIC_LABELS: Record<string, string> = {
+  // Valuation
+  trailing_pe: 'P/E (TTM)', forward_pe: 'P/E (Forward)', peg_ratio: 'PEG Ratio',
+  price_to_sales: 'P/S Ratio', price_to_book: 'P/B Ratio', ev_to_ebitda: 'EV/EBITDA',
+  ev_to_revenue: 'EV/Revenue', market_cap: 'Market Cap', enterprise_value: 'Enterprise Value',
+  // Profitability
+  gross_margin: 'Gross Margin', operating_margin: 'Operating Margin', net_margin: 'Net Margin',
+  roe: 'Return on Equity', roa: 'Return on Assets', roic: 'Return on Invested Capital',
+  ebitda: 'EBITDA', ebitda_margin: 'EBITDA Margin', free_cash_flow_margin: 'FCF Margin',
+  // Growth
+  revenue_growth_yoy: 'Revenue Growth (YoY)', eps_growth_yoy: 'EPS Growth (YoY)',
+  revenue_growth_qoq: 'Revenue Growth (QoQ)', eps_growth_qoq: 'EPS Growth (QoQ)',
+  revenue_cagr_3y: 'Revenue CAGR (3Y)', eps_cagr_3y: 'EPS CAGR (3Y)',
+  free_cash_flow_growth: 'FCF Growth', book_value_growth: 'Book Value Growth',
+  // Financial Health
+  current_ratio: 'Current Ratio', quick_ratio: 'Quick Ratio', debt_to_equity: 'Debt/Equity',
+  debt_to_assets: 'Debt/Assets', interest_coverage: 'Interest Coverage',
+  total_debt: 'Total Debt', total_cash: 'Total Cash', net_debt: 'Net Debt',
+  altman_z_score: 'Altman Z-Score',
+  // Dividends
+  dividend_yield: 'Dividend Yield', payout_ratio: 'Payout Ratio',
+  dividend_per_share: 'Dividend/Share', dividend_growth_5y: 'Dividend Growth (5Y)',
+  ex_dividend_date: 'Ex-Dividend Date', years_of_growth: 'Years of Growth',
+  // Analyst Estimates
+  target_price: 'Price Target', target_upside: 'Target Upside',
+  analyst_rating: 'Analyst Rating', num_analysts: 'Analysts Covering',
+  eps_estimate_current: 'EPS Est. (Current Q)', eps_estimate_next: 'EPS Est. (Next Q)',
+  revenue_estimate_current: 'Rev Est. (Current Q)', revenue_estimate_next: 'Rev Est. (Next Q)',
+  // Momentum & Technicals
+  beta: 'Beta', fifty_two_week_high: '52-Week High', fifty_two_week_low: '52-Week Low',
+  fifty_day_ma: '50-Day MA', two_hundred_day_ma: '200-Day MA',
+  relative_strength_index: 'RSI (14)', avg_volume: 'Avg Volume',
+  price_to_52w_high: 'Price vs 52W High', short_interest: 'Short Interest',
+  // Ownership
+  insider_ownership: 'Insider Ownership', institutional_ownership: 'Institutional Ownership',
+  insider_transactions: 'Insider Transactions', shares_outstanding: 'Shares Outstanding',
+  float_shares: 'Float', shares_short: 'Shares Short',
+};
+
+// Keys that represent percentages
+const PCT_METRICS = new Set([
+  'gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa', 'roic',
+  'ebitda_margin', 'free_cash_flow_margin', 'revenue_growth_yoy', 'eps_growth_yoy',
+  'revenue_growth_qoq', 'eps_growth_qoq', 'revenue_cagr_3y', 'eps_cagr_3y',
+  'free_cash_flow_growth', 'book_value_growth', 'dividend_yield', 'payout_ratio',
+  'dividend_growth_5y', 'target_upside', 'insider_ownership', 'institutional_ownership',
+  'short_interest', 'price_to_52w_high',
+]);
+
+// Keys that represent large currency amounts
+const CURRENCY_LARGE_METRICS = new Set([
+  'market_cap', 'enterprise_value', 'ebitda', 'total_debt', 'total_cash', 'net_debt',
+  'revenue_estimate_current', 'revenue_estimate_next',
+]);
+
+// Keys that represent per-share dollar values
+const PER_SHARE_METRICS = new Set([
+  'dividend_per_share', 'eps_estimate_current', 'eps_estimate_next', 'target_price',
+  'fifty_two_week_high', 'fifty_two_week_low', 'fifty_day_ma', 'two_hundred_day_ma',
+]);
+
+const FINANCIAL_CATEGORY_LABELS: Record<string, { label: string; icon: string }> = {
+  valuation: { label: 'Valuation', icon: 'analytics-outline' },
+  profitability: { label: 'Profitability', icon: 'trending-up-outline' },
+  growth: { label: 'Growth', icon: 'rocket-outline' },
+  financial_health: { label: 'Financial Health', icon: 'shield-checkmark-outline' },
+  dividends: { label: 'Dividends', icon: 'cash-outline' },
+  analyst_estimates: { label: 'Analyst Estimates', icon: 'people-outline' },
+  momentum_technicals: { label: 'Momentum & Technicals', icon: 'pulse-outline' },
+  ownership: { label: 'Ownership', icon: 'pie-chart-outline' },
+};
+
+const formatMetricValue = (key: string, value: unknown): string => {
+  if (value == null) return 'N/A';
+  if (typeof value === 'string') return value;
+  const num = safeNum(value);
+  if (!Number.isFinite(num)) return 'N/A';
+  if (PCT_METRICS.has(key)) {
+    // If value looks like a decimal (e.g. 0.25 for 25%), multiply by 100
+    const pct = Math.abs(num) < 1 && Math.abs(num) > 0 ? num * 100 : num;
+    return `${pct >= 0 ? '' : ''}${pct.toFixed(2)}%`;
+  }
+  if (CURRENCY_LARGE_METRICS.has(key)) {
+    if (Math.abs(num) >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
+    if (Math.abs(num) >= 1e9) return `$${(num / 1e9).toFixed(1)}B`;
+    if (Math.abs(num) >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
+    return `$${num.toLocaleString()}`;
+  }
+  if (PER_SHARE_METRICS.has(key)) return `$${num.toFixed(2)}`;
+  if (key === 'avg_volume' || key === 'shares_outstanding' || key === 'float_shares' || key === 'shares_short') {
+    if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+    if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
+    if (num >= 1e3) return `${(num / 1e3).toFixed(0)}K`;
+    return num.toLocaleString();
+  }
+  return num.toFixed(2);
 };
 
 const safeNum = (v: unknown): number => {
@@ -225,6 +325,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [percentileRank, setPercentileRank] = useState<number | null>(null);
   const [sectorPercentile, setSectorPercentile] = useState<number | null>(null);
   const [peerStocks, setPeerStocks] = useState<Array<{ ticker: string; companyName: string; score: number; scoreLabel: string }>>([]);
+  const [financials, setFinancials] = useState<Record<string, Record<string, { value: any; source?: string; sector_median?: any; percentile?: number }>> | null>(null);
 
   // ── UI State ──
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -234,6 +335,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [stressExpanded, setStressExpanded] = useState(false);
   const [factorDeepDiveExpanded, setFactorDeepDiveExpanded] = useState(true);
   const [factorDeepDiveMode, setFactorDeepDiveMode] = useState<'simple' | 'advanced'>('simple');
+  const [expandedFinancialCats, setExpandedFinancialCats] = useState<Set<string>>(new Set(['valuation']));
 
   // ═══════════════════════════════════════════════════════════
   // Data Loading (fetch once, share across all tabs)
@@ -299,6 +401,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       }
 
       // Non-blocking secondary loads
+      getFinancials(ticker)
+        .then((d: any) => {
+          if (d && typeof d === 'object') {
+            // API returns { valuation: { trailing_pe: { value, source, ... }, ... }, ... }
+            setFinancials(d);
+          }
+        })
+        .catch(() => {});
       getEventsForTicker(ticker, { limit: '5' })
         .then((d) => setRecentEvents(d.events || []))
         .catch(() => {});
@@ -1006,7 +1116,76 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         </View>
       )}
 
-      {/* SECTION 5: COMMUNITY */}
+      {/* SECTION 5: FINANCIAL METRICS */}
+      {financials && Object.keys(financials).length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Financial Metrics</Text>
+          {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([catKey, catMeta]) => {
+            const catData = financials[catKey];
+            if (!catData || typeof catData !== 'object') return null;
+            // Filter out null values
+            const metrics = Object.entries(catData).filter(
+              ([, m]) => m && m.value != null,
+            );
+            if (metrics.length === 0) return null;
+            const isExpanded = expandedFinancialCats.has(catKey);
+            return (
+              <TouchableOpacity
+                key={catKey}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setExpandedFinancialCats((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(catKey)) next.delete(catKey);
+                    else next.add(catKey);
+                    return next;
+                  });
+                }}
+              >
+                <View style={styles.finCategoryCard}>
+                  <View style={styles.finCategoryHeader}>
+                    <View style={styles.finCategoryLeft}>
+                      <Ionicons name={catMeta.icon as any} size={18} color="#60A5FA" />
+                      <Text style={styles.finCategoryName}>{catMeta.label}</Text>
+                      <View style={styles.finCategoryBadge}>
+                        <Text style={styles.finCategoryBadgeText}>{metrics.length}</Text>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color="rgba(255,255,255,0.4)"
+                    />
+                  </View>
+                  {isExpanded && (
+                    <View style={styles.finMetricsList}>
+                      {metrics.map(([metricKey, metric]) => (
+                        <View key={metricKey} style={styles.finMetricRow}>
+                          <Text style={styles.finMetricName} numberOfLines={1}>
+                            {METRIC_LABELS[metricKey] || metricKey.replace(/_/g, ' ')}
+                          </Text>
+                          <View style={styles.finMetricRight}>
+                            <Text style={styles.finMetricValue}>
+                              {formatMetricValue(metricKey, metric.value)}
+                            </Text>
+                            {metric.source ? (
+                              <View style={styles.finSourceBadge}>
+                                <Text style={styles.finSourceText}>{metric.source}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {/* SECTION 6: COMMUNITY */}
       <View style={styles.section}>
         <View style={styles.sectionTitleRow}>
           <Text style={styles.sectionTitle}>Community</Text>
@@ -1778,6 +1957,83 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     fontSize: 12,
     marginTop: 2,
+  },
+
+  // ── Financial Metrics ──
+  finCategoryCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+  },
+  finCategoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  finCategoryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  finCategoryName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  finCategoryBadge: {
+    backgroundColor: 'rgba(96,165,250,0.15)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  finCategoryBadgeText: {
+    color: '#60A5FA',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  finMetricsList: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: 10,
+  },
+  finMetricRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.03)',
+  },
+  finMetricName: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 8,
+  },
+  finMetricRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  finMetricValue: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  finSourceBadge: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  finSourceText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
 
   // ── Empty state ──

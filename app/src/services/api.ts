@@ -179,6 +179,12 @@ export const getFairPrice = async (ticker: string) => {
   return _deduplicatedGet(`/fair-price/${ticker}`);
 };
 
+// ─── Financials ───
+
+export const getFinancials = async (ticker: string) => {
+  return _deduplicatedGet(`/stocks/${ticker}/financials`);
+};
+
 // ─── Charts ───
 
 export const getChartData = async (ticker: string, resolution: string = 'D', range: string = '6M') => {
