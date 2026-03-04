@@ -54,7 +54,11 @@ EDUCATIONAL_CARDS = [
 
 
 def lambda_handler(event, context):
-    """Compile the daily feed from the latest signal results."""
+    """Compile the daily feed from the latest signal results.
+
+    Also runs financial metrics batch precompute (daily staleness check,
+    full refresh weekly).
+    """
     try:
         logger.info(f"[FeedCompiler] Starting at {datetime.now(timezone.utc).isoformat()}")
 
@@ -70,10 +74,14 @@ def lambda_handler(event, context):
 
         logger.info(f"[FeedCompiler] Compiled {len(feed_items)} items (wrote to S3)")
 
+        # Precompute financial metrics (after feed compilation)
+        metrics_result = _precompute_financial_metrics()
+
         return {
             "statusCode": 200,
             "body": json.dumps({
                 "compiled": len(feed_items),
+                "metrics_precompute": metrics_result,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }),
         }
@@ -178,3 +186,34 @@ def _compile_feed() -> list[dict]:
             edu_idx += 1
 
     return feed
+
+
+def _precompute_financial_metrics() -> dict:
+    """Batch precompute 69 financial metrics for the full stock universe.
+
+    Runs after feed compilation (daily at 6:30AM ET).
+    Steps:
+        1. Compute sector medians for all GICS sectors
+        2. For each stock, compute_all_metrics() with rate limiting
+        3. Store results in DynamoDB (FINANCIALS#{ticker} | LATEST)
+        4. Log completion stats
+
+    Rate limiting: max 5 concurrent yfinance fetches, 1s delay per 50-stock batch.
+    Expected duration: ~30 minutes for 503 stocks.
+    """
+    try:
+        from financial_metrics import batch_compute_all
+
+        logger.info("[FeedCompiler] Starting financial metrics precompute...")
+        result = batch_compute_all()
+        logger.info(
+            f"[FeedCompiler] Financial metrics precompute complete: "
+            f"{result.get('computed', 0)}/{result.get('total', 0)} computed, "
+            f"{result.get('failed', 0)} failed, "
+            f"{result.get('duration_seconds', 0)}s elapsed"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"[FeedCompiler] Financial metrics precompute failed: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}

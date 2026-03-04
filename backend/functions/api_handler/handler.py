@@ -48,7 +48,8 @@ Routes:
   # ── Factor Details & Financials ──
   GET  /stocks/<ticker>/factors                — Compact factor summary (all 6 dimensions)
   GET  /stocks/<ticker>/factors/<dimension>    — Full factor detail with findings
-  GET  /stocks/<ticker>/financials             — Financial ratios + sector benchmarks
+  GET  /stocks/<ticker>/financials             — 69 financial metrics + sector benchmarks
+  GET  /stocks/<ticker>/financials/<category>  — Single category metrics (e.g., valuation)
 
   # ── User Data (DynamoDB sync) ──
   GET    /user/portfolio              — List holdings (raw, no price enrichment)
@@ -205,7 +206,8 @@ def lambda_handler(event, context):
                     # /stocks/{ticker}/factors
                     return _handle_stock_factor_summary(http_method, ticker)
             elif sub == "financials":
-                return _handle_stock_financials(http_method, ticker)
+                category = parts[3] if len(parts) == 4 else None
+                return _handle_stock_financials(http_method, ticker, query_params, category)
             else:
                 return _response(404, {"error": "Unknown stocks endpoint"})
         elif path.startswith("/stock/") and "/stress-test" in path:
@@ -1614,18 +1616,36 @@ def _handle_stock_factor_detail(method, ticker, dimension):
         return _response(200, {"status": "pending", "message": str(e)})
 
 
-def _handle_stock_financials(method, ticker):
-    """GET /stocks/{ticker}/financials — Financial ratios with sector benchmarks."""
+def _handle_stock_financials(method, ticker, query_params=None, category=None):
+    """GET /stocks/{ticker}/financials[/{category}] — 69 financial metrics with sector benchmarks.
+
+    Query params:
+        include_sparklines: "true" to include quarterly sparkline data (default: false)
+    """
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    query_params = query_params or {}
+    include_sparklines = query_params.get("include_sparklines", "").lower() == "true"
+
     try:
-        from edgar_data import get_financial_ratios
-        ratios = get_financial_ratios(ticker)
-        if ratios:
-            return _response(200, ratios)
-        return _response(200, {"status": "pending",
-            "message": "Financial data being compiled."})
+        from financial_metrics import get_metrics
+        result = get_metrics(ticker, category=category,
+                             include_sparklines=include_sparklines)
+        if result.get("error"):
+            return _response(400, result)
+        return _response(200, result)
     except Exception as e:
+        # Fallback to legacy edgar_data ratios
+        try:
+            from edgar_data import get_financial_ratios
+            ratios = get_financial_ratios(ticker)
+            if ratios:
+                return _response(200, ratios)
+        except Exception:
+            pass
         return _response(200, {"status": "pending", "message": str(e)})
 
 
