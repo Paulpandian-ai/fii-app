@@ -995,7 +995,9 @@ def get_metrics(ticker: str, category: Optional[str] = None,
 def precompute_sector_medians() -> dict:
     """Precompute sector median stats for all GICS sectors.
 
-    Should run before per-stock computation so sector benchmarks are available.
+    Requires FINANCIALS#{ticker} | LATEST records to already exist in DynamoDB.
+    Called by bootstrap_sector_stats() after batch per-stock computation.
+
     Returns: {sector: stats_dict, ...}
     """
     try:
@@ -1016,8 +1018,97 @@ def precompute_sector_medians() -> dict:
     return all_sector_stats
 
 
+def bootstrap_sector_stats() -> dict:
+    """Precompute and cache sector stats from existing FINANCIALS# records.
+
+    Must be called AFTER per-stock metrics have been computed and stored,
+    so that FINANCIALS#{ticker} | LATEST records exist in DynamoDB.
+
+    Returns: {sector: stats_dict, ...}
+    """
+    logger.info("[FinancialMetrics] Bootstrapping sector stats from stored metrics...")
+    all_sector_stats = precompute_sector_medians()
+    total_metrics = sum(len(s) for s in all_sector_stats.values())
+    logger.info(f"[FinancialMetrics] Sector stats bootstrapped: "
+                f"{len(all_sector_stats)} sectors, {total_metrics} metric stats")
+    return all_sector_stats
+
+
+def _update_stored_metrics_with_sector_stats(tickers: list[str],
+                                              all_sector_stats: dict) -> int:
+    """Update already-stored FINANCIALS# records with sector benchmarks.
+
+    Reads each stored record, fills in sector_median and percentile,
+    then writes it back. Returns count of updated records.
+    """
+    import json
+    import db
+
+    updated = 0
+    for ticker in tickers:
+        try:
+            item = db.get_item(f"FINANCIALS#{ticker}", "LATEST")
+            if not item:
+                continue
+
+            sector = item.get("sector", "")
+            sector_stats = all_sector_stats.get(sector, {})
+            if not sector_stats:
+                continue
+
+            categories = item.get("categories")
+            if not categories:
+                continue
+            if isinstance(categories, str):
+                categories = json.loads(categories)
+
+            changed = False
+            for cat_name, cat_data in categories.items():
+                if not isinstance(cat_data, dict):
+                    continue
+                for metric_key, metric_info in cat_data.items():
+                    if not isinstance(metric_info, dict):
+                        continue
+                    value = metric_info.get("value")
+                    ss = sector_stats.get(metric_key)
+                    if ss and value is not None and isinstance(value, (int, float)):
+                        metric_info["sector_median"] = ss.get("median")
+                        p25 = ss.get("p25", 0)
+                        p75 = ss.get("p75", 0)
+                        median = ss.get("median", 0)
+                        if p75 != p25:
+                            if value <= p25:
+                                metric_info["percentile"] = max(0, int(25 * value / p25)) if p25 != 0 else 10
+                            elif value <= median:
+                                metric_info["percentile"] = 25 + int(25 * (value - p25) / (median - p25))
+                            elif value <= p75:
+                                metric_info["percentile"] = 50 + int(25 * (value - median) / (p75 - median))
+                            else:
+                                metric_info["percentile"] = min(99, 75 + int(25 * min((value - p75) / max(p75, 1), 1)))
+                        else:
+                            metric_info["percentile"] = 50
+                        changed = True
+                    elif metric_info.get("sector_median") is None:
+                        metric_info["sector_median"] = None
+                        metric_info["percentile"] = None
+
+            if changed:
+                item["categories"] = json.dumps(categories, default=str)
+                db.put_item(item)
+                updated += 1
+
+        except Exception as e:
+            logger.warning(f"[FinancialMetrics] Failed to update sector stats for {ticker}: {e}")
+
+    return updated
+
+
 def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
     """Batch compute financial metrics for all stocks in the universe.
+
+    Uses a 2-pass approach:
+      Pass 1: Compute and store per-stock metrics (sector_median=null).
+      Pass 2: Compute sector stats from stored data, then update records.
 
     Rate-limited: max 5 concurrent fetches, 1s delay between batches of 50.
 
@@ -1037,11 +1128,8 @@ def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
     logger.info(f"[FinancialMetrics] Starting batch compute for {len(tickers)} stocks")
     start_time = time.time()
 
-    # Step 1: Precompute sector medians
-    logger.info("[FinancialMetrics] Step 1: Computing sector medians...")
-    all_sector_stats = precompute_sector_medians()
-
-    # Step 2: Compute per-stock metrics in rate-limited batches
+    # Pass 1: Compute per-stock metrics WITHOUT sector benchmarks
+    logger.info("[FinancialMetrics] Pass 1: Computing per-stock metrics...")
     computed = 0
     failed = 0
     errors = []
@@ -1054,9 +1142,8 @@ def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_FETCHES) as executor:
             futures = {}
             for t in batch:
-                sector = _get_sector_for_ticker(t)
-                sector_stats = all_sector_stats.get(sector, {})
-                futures[executor.submit(_compute_and_store_single, t, sector_stats)] = t
+                # Pass empty sector_stats so metrics are stored with null benchmarks
+                futures[executor.submit(_compute_and_store_single, t, {})] = t
 
             for future in as_completed(futures):
                 t = futures[future]
@@ -1074,6 +1161,14 @@ def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
         if batch_start + BATCH_SIZE < len(tickers):
             time.sleep(BATCH_DELAY_SECONDS)
 
+    # Pass 2: Compute sector stats from stored data, then backfill
+    logger.info("[FinancialMetrics] Pass 2: Computing sector stats from stored metrics...")
+    all_sector_stats = bootstrap_sector_stats()
+
+    logger.info("[FinancialMetrics] Pass 2b: Updating stored metrics with sector benchmarks...")
+    updated = _update_stored_metrics_with_sector_stats(tickers, all_sector_stats)
+    logger.info(f"[FinancialMetrics] Updated {updated}/{computed} records with sector benchmarks")
+
     duration = round(time.time() - start_time, 1)
     logger.info(f"[FinancialMetrics] Batch complete: {computed} computed, {failed} failed, "
                 f"{duration}s elapsed")
@@ -1082,6 +1177,7 @@ def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
         "computed": computed,
         "failed": failed,
         "total": len(tickers),
+        "sector_updated": updated,
         "duration_seconds": duration,
         "errors": errors[:10],  # First 10 errors only
     }
