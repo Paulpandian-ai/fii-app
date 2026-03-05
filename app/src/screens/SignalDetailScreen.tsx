@@ -822,6 +822,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <View style={styles.gaugeTrack}>
                 <View style={[styles.gaugeFill, { width: `${Math.min(100, Math.max(2, val))}%`, backgroundColor: barColor }]} />
               </View>
+              {!isExpanded && hasSummary && (
+                <Text style={styles.factorPreviewText} numberOfLines={1}>
+                  {dimData.summary.length > 80 ? dimData.summary.substring(0, 80) + '...' : dimData.summary}
+                </Text>
+              )}
               {isExpanded && (
                 <View style={styles.factorSummaryCard}>
                   {hasSummary ? (
@@ -1618,6 +1623,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10, 15, 40, 0.6)',
     borderRadius: 8,
     padding: 12,
+  },
+  factorPreviewText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 4,
   },
   factorSummaryText: {
     color: 'rgba(255,255,255,0.85)',
