@@ -35,7 +35,7 @@ const DIMENSION_ICONS: Record<string, string> = {
 };
 
 interface Finding {
-  direction: 'positive' | 'negative' | 'up' | 'down';
+  direction: 'positive' | 'negative' | 'neutral' | 'up' | 'down';
   text: string;
   source?: string;
   source_url?: string;
@@ -72,6 +72,11 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   useEffect(() => {
+    // Reset state when dimension changes so stale data doesn't linger
+    setData(null);
+    setLoading(true);
+    setError(false);
+
     // Animate in
     Animated.spring(slideAnim, {
       toValue: 0,
@@ -89,24 +94,41 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
       return;
     }
 
+    let cancelled = false;
+
     // Fetch from API
     getFactorDetail(ticker, dimension)
       .then((result: any) => {
+        if (cancelled) return;
+        // Map API fields: claim → text, impact → direction
+        const rawFindings = Array.isArray(result.findings) ? result.findings : [];
+        const mappedFindings: Finding[] = rawFindings.map((f: any) => ({
+          text: f.text || f.claim || '',
+          direction: f.direction || f.impact || 'neutral',
+          source: f.source || f.source_type || '',
+          source_url: f.source_url || f.url || '',
+        }));
         const parsed: FactorDetailData = {
           dimension: result.dimension || dimension,
           score: result.score ?? 0,
           score_label: result.score_label || '',
           confidence: result.confidence || 'Medium',
           percentile: result.percentile ?? 50,
-          findings: Array.isArray(result.findings) ? result.findings : [],
+          findings: mappedFindings,
           beginner_summary: result.beginner_summary || result.summary || '',
           updated_at: result.updated_at || result.computed_at || '',
         };
         _factorDetailCache.set(cacheKey, parsed);
         setData(parsed);
       })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [ticker, dimension]);
 
   const handleClose = () => {

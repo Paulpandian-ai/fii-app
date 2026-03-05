@@ -342,36 +342,67 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
 
   // ═══════════════════════════════════════════════════════════
-  // Data Loading (fetch once, share across all tabs)
+  // Data Loading — phased for fast initial render
+  // Phase 1: Signal + Price (renders Overview immediately)
+  // Phase 2: Factor summaries, stress test, technicals, chart (parallel)
+  // Phase 3: Financials (lazy — only when Deep Dive tab tapped)
   // ═══════════════════════════════════════════════════════════
 
+  const [financialsLoaded, setFinancialsLoaded] = useState(false);
+
+  // Helper: fetch with AbortController + 10s timeout
+  const fetchWithTimeout = useCallback(<T,>(
+    fetcher: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T | null> => {
+    return new Promise<T | null>((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 10_000);
+      if (signal?.aborted) { clearTimeout(timeout); resolve(null); return; }
+      signal?.addEventListener('abort', () => { clearTimeout(timeout); resolve(null); });
+      fetcher()
+        .then((result) => { clearTimeout(timeout); resolve(result); })
+        .catch(() => { clearTimeout(timeout); resolve(null); });
+    });
+  }, []);
+
   useEffect(() => {
-    loadData();
+    const controller = new AbortController();
+    loadData(controller);
+    return () => controller.abort();
   }, [ticker]);
 
-  const loadData = async () => {
+  // Lazy-load financials when Deep Dive tab is first tapped
+  useEffect(() => {
+    if (activeTab === 2 && !financialsLoaded && !financials) {
+      setFinancialsLoaded(true);
+      fetchWithTimeout(() => getFinancials(ticker))
+        .then((d: any) => {
+          if (d && typeof d === 'object') {
+            setFinancials(d.categories || d);
+          }
+        });
+    }
+  }, [activeTab, financialsLoaded, ticker]);
+
+  const loadData = async (controller: AbortController) => {
     setLoading(true);
+    setFinancialsLoaded(false);
+
     try {
-      const [signalData, price, techData, fundData, factorData, altResult, chartResult] = await Promise.all([
-        getSignalDetail(ticker).catch(() => null),
-        getPrice(ticker).catch(() => null),
-        getTechnicals(ticker).catch(() => null),
-        getFundamentals(ticker).catch(() => null),
-        getFactors(ticker).catch(() => null),
-        getAltData(ticker).catch(() => null),
-        getChartData(ticker, 'D', '6M').catch(() => null),
+      // ── Phase 1: Signal + Price (critical path for Overview) ──
+      const [signalData, price] = await Promise.all([
+        fetchWithTimeout(() => getSignalDetail(ticker), controller.signal),
+        fetchWithTimeout(() => getPrice(ticker), controller.signal),
       ]);
+
       if (signalData) setAnalysis(signalData);
       if (price) setPriceData(price);
-      if (techData && techData.indicatorCount > 0) setTechnicals(techData);
-      if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData);
-      if (factorData && factorData.dimensionScores) setFactors(factorData);
-      if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult);
-      if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult);
+
+      // Extract data from signal response
+      const sigRaw = signalData as any;
 
       // Extract factor_percentiles
-      const sigRaw = signalData as any;
-      const fp = sigRaw?.factor_percentiles ?? factorData?.factor_percentiles;
+      const fp = sigRaw?.factor_percentiles;
       if (fp && typeof fp === 'object') {
         setFactorPercentiles({
           supply_chain_upstream: Number(fp.supply_chain_upstream ?? 50),
@@ -404,62 +435,85 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         } catch {}
       }
 
-      // Non-blocking secondary loads
-      getFinancials(ticker)
-        .then((d: any) => {
-          if (d && typeof d === 'object') {
-            const cats = d.categories || d;
-            setFinancials(cats);
-          }
-        })
-        .catch(() => {});
-      getEventsForTicker(ticker, { limit: '5' })
-        .then((d) => setRecentEvents(d.events || []))
-        .catch(() => {});
-      getSignalHistory(ticker, 30)
-        .then((d) => setSignalHistory(d.history || []))
-        .catch(() => {});
-      getStressTestAll(ticker)
-        .then((d) => setStressData(d.scenarios || []))
-        .catch(() => {});
-      getFactorSummaries(ticker)
-        .then((d: any) => {
-          if (d?.dimensions && typeof d.dimensions === 'object') {
-            const summaries: Record<string, { summary: string; score: number; score_label: string; confidence: string }> = {};
-            for (const [key, val] of Object.entries(d.dimensions) as any) {
-              if (val && typeof val === 'object') {
-                summaries[key] = {
-                  summary: val.summary || '',
-                  score: val.score ?? 0,
-                  score_label: val.score_label || '',
-                  confidence: val.confidence || 'Medium',
-                };
+      // ── Render Overview now — mark loading done ──
+      setLoading(false);
+
+      // ── Phase 2: Secondary data in parallel (non-blocking) ──
+      const phase2 = [
+        fetchWithTimeout(() => getFactorSummaries(ticker), controller.signal)
+          .then((d: any) => {
+            if (d?.dimensions && typeof d.dimensions === 'object') {
+              const summaries: Record<string, { summary: string; score: number; score_label: string; confidence: string }> = {};
+              for (const [key, val] of Object.entries(d.dimensions) as any) {
+                if (val && typeof val === 'object') {
+                  summaries[key] = {
+                    summary: val.summary || '',
+                    score: val.score ?? 0,
+                    score_label: val.score_label || '',
+                    confidence: val.confidence || 'Medium',
+                  };
+                }
               }
+              setFactorSummaries(summaries);
             }
-            setFactorSummaries(summaries);
-          }
-        })
-        .catch(() => {});
+          }),
+        fetchWithTimeout(() => getStressTestAll(ticker), controller.signal)
+          .then((d: any) => { if (d) setStressData(d.scenarios || []); }),
+        fetchWithTimeout(() => getTechnicals(ticker), controller.signal)
+          .then((techData: any) => { if (techData && techData.indicatorCount > 0) setTechnicals(techData); }),
+        fetchWithTimeout(() => getFundamentals(ticker), controller.signal)
+          .then((fundData: any) => { if (fundData && fundData.grade && fundData.grade !== 'N/A') setFundamentals(fundData); }),
+        fetchWithTimeout(() => getFactors(ticker), controller.signal)
+          .then((factorData: any) => {
+            if (factorData && factorData.dimensionScores) setFactors(factorData);
+            // Backfill factor_percentiles if not in signal response
+            if (!fp && factorData?.factor_percentiles) {
+              const fp2 = factorData.factor_percentiles;
+              setFactorPercentiles({
+                supply_chain_upstream: Number(fp2.supply_chain_upstream ?? 50),
+                supply_chain_downstream: Number(fp2.supply_chain_downstream ?? 50),
+                geopolitical: Number(fp2.geopolitical ?? 50),
+                monetary: Number(fp2.monetary ?? 50),
+                correlations: Number(fp2.correlations ?? 50),
+                performance: Number(fp2.risk_performance ?? fp2.performance ?? 50),
+              });
+            }
+          }),
+        fetchWithTimeout(() => getAltData(ticker), controller.signal)
+          .then((altResult: any) => { if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult); }),
+        fetchWithTimeout(() => getChartData(ticker, 'D', '6M'), controller.signal)
+          .then((chartResult: any) => { if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult); }),
+        fetchWithTimeout(() => getEventsForTicker(ticker, { limit: '5' }), controller.signal)
+          .then((d: any) => { if (d) setRecentEvents(d.events || []); }),
+        fetchWithTimeout(() => getSignalHistory(ticker, 30), controller.signal)
+          .then((d: any) => { if (d) setSignalHistory(d.history || []); }),
+      ];
 
       // Load sector peers
       const sectorName = price?.sector;
       if (sectorName) {
-        getScreener({ sector: sectorName, limit: '5', sort: 'score_desc' })
-          .then((d) => {
-            const results = (d.results || [])
-              .filter((r: any) => r.ticker !== ticker)
-              .slice(0, 3)
-              .map((r: any) => ({
-                ticker: r.ticker,
-                companyName: r.companyName || r.company_name || '',
-                score: safeNum(r.aiScore ?? r.score ?? r.compositeScore ?? 5),
-                scoreLabel: r.scoreLabel || getScoreLabel(safeNum(r.aiScore ?? r.score ?? 5)),
-              }));
-            if (results.length > 0) setPeerStocks(results);
-          })
-          .catch(() => {});
+        phase2.push(
+          fetchWithTimeout(() => getScreener({ sector: sectorName, limit: '5', sort: 'score_desc' }), controller.signal)
+            .then((d: any) => {
+              if (!d) return;
+              const results = (d.results || [])
+                .filter((r: any) => r.ticker !== ticker)
+                .slice(0, 3)
+                .map((r: any) => ({
+                  ticker: r.ticker,
+                  companyName: r.companyName || r.company_name || '',
+                  score: safeNum(r.aiScore ?? r.score ?? r.compositeScore ?? 5),
+                  scoreLabel: r.scoreLabel || getScoreLabel(safeNum(r.aiScore ?? r.score ?? 5)),
+                }));
+              if (results.length > 0) setPeerStocks(results);
+            }),
+        );
       }
-    } finally {
+
+      // Fire all phase 2 in parallel — don't block UI
+      Promise.all(phase2).catch(() => {});
+
+    } catch {
       setLoading(false);
     }
   };
@@ -633,12 +687,36 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               correlations: 'Correlations',
               risk_performance: 'Risk & Performance',
             };
-            const factorLabel = factorDisplayName[driver.factor] || driver.factor;
+            // Normalize driver.factor to a valid API dimension key
+            // The API might return display names, aliases, or correct keys
+            const DIMENSION_ALIASES: Record<string, string> = {
+              'supply chain (upstream)': 'supply_chain_upstream',
+              'supply chain upstream': 'supply_chain_upstream',
+              'upstream': 'supply_chain_upstream',
+              'supply_chain_upstream': 'supply_chain_upstream',
+              'supply chain (downstream)': 'supply_chain_downstream',
+              'supply chain downstream': 'supply_chain_downstream',
+              'downstream': 'supply_chain_downstream',
+              'supply_chain_downstream': 'supply_chain_downstream',
+              'geopolitical': 'geopolitical',
+              'geopolitics': 'geopolitical',
+              'monetary': 'monetary',
+              'monetary policy': 'monetary',
+              'monetary_policy': 'monetary',
+              'correlations': 'correlations',
+              'correlation': 'correlations',
+              'risk_performance': 'risk_performance',
+              'risk & performance': 'risk_performance',
+              'risk performance': 'risk_performance',
+              'performance': 'risk_performance',
+            };
+            const normalizedDimension = DIMENSION_ALIASES[driver.factor.toLowerCase()] || driver.factor;
+            const factorLabel = factorDisplayName[normalizedDimension] || driver.factor;
             return (
               <TouchableOpacity
                 key={`driver-${idx}`}
                 style={styles.driverRow}
-                onPress={() => setSelectedDimension(driver.factor)}
+                onPress={() => setSelectedDimension(normalizedDimension)}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.driverArrow, { color: isUp ? '#00C9A7' : '#F5A623' }]}>
