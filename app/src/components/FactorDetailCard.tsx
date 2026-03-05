@@ -108,6 +108,8 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
           source: f.source || f.source_type || '',
           source_url: f.source_url || f.url || '',
         }));
+        console.log(`[FactorDetail] ${dimension} response:`, JSON.stringify(result).substring(0, 200));
+        console.log(`[FactorDetail] ${dimension} findings count:`, rawFindings.length);
         const parsed: FactorDetailData = {
           dimension: result.dimension || dimension,
           score: result.score ?? 0,
@@ -212,6 +214,8 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
               </View>
             )}
 
+            {console.log(`[FactorDetail] render data:`, data ? `findings=${data.findings.length}` : 'no data')}
+
             {data && (
               <>
                 {/* Key Findings */}
@@ -291,6 +295,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A2E',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    minHeight: SCREEN_HEIGHT * 0.6,
     maxHeight: SCREEN_HEIGHT * 0.8,
     paddingTop: 16,
     paddingHorizontal: 20,
