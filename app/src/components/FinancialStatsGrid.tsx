@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Skeleton } from './Skeleton';
 import { getFinancials } from '../services/api';
+import { getBeginnerExplainer } from '../utils/metricExplainers';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -353,14 +354,31 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }
                   const barColor = percentile != null ? getPercentileColor(metricKey, percentile) : '#8E8E93';
                   const showTooltip = tooltipKey === metricKey;
 
+                  // Context-aware quality dot
+                  const isHigher = HIGHER_IS_BETTER.has(metricKey);
+                  const isLower = LOWER_IS_BETTER.has(metricKey);
+                  let qualityDotColor: string | null = null;
+                  if (percentile != null) {
+                    if (isHigher && percentile >= 75) qualityDotColor = '#00C9A7';
+                    else if (isHigher && percentile <= 25) qualityDotColor = '#F5A623';
+                    else if (isLower && percentile >= 75) qualityDotColor = '#F5A623';
+                    else if (isLower && percentile <= 25) qualityDotColor = '#00C9A7';
+                  }
+
+                  // Beginner-friendly explainer
+                  const explainer = getBeginnerExplainer(metricKey, safeNum(metric.value));
+
                   return (
                     <View key={metricKey}>
                       <View style={styles.metricRow}>
                         <View style={styles.metricNameRow}>
+                          {qualityDotColor && (
+                            <View style={[styles.qualityDot, { backgroundColor: qualityDotColor }]} />
+                          )}
                           <Text style={styles.metricName} numberOfLines={1}>
                             {METRIC_LABELS[metricKey] || metricKey.replace(/_/g, ' ')}
                           </Text>
-                          {METRIC_TOOLTIPS[metricKey] && (
+                          {(METRIC_TOOLTIPS[metricKey] || explainer) && (
                             <TouchableOpacity
                               onPress={() => setTooltipKey(showTooltip ? null : metricKey)}
                               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -403,10 +421,22 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }
                         </View>
                       )}
 
-                      {/* Tooltip */}
-                      {showTooltip && METRIC_TOOLTIPS[metricKey] && (
+                      {/* Tooltip — beginner-friendly with context */}
+                      {showTooltip && (explainer || METRIC_TOOLTIPS[metricKey]) && (
                         <View style={styles.tooltipCard}>
-                          <Text style={styles.tooltipText}>{METRIC_TOOLTIPS[metricKey]}</Text>
+                          {explainer ? (
+                            <>
+                              <Text style={styles.tooltipText}>{explainer.beginner}</Text>
+                              <Text style={styles.tooltipContext}>{explainer.context}</Text>
+                              <Text style={styles.tooltipDirection}>
+                                {explainer.direction === 'higher' ? '\u2191 Higher is generally better'
+                                  : explainer.direction === 'lower' ? '\u2193 Lower is generally better'
+                                  : '\u2194 Depends on context'}
+                              </Text>
+                            </>
+                          ) : (
+                            <Text style={styles.tooltipText}>{METRIC_TOOLTIPS[metricKey]}</Text>
+                          )}
                         </View>
                       )}
                     </View>
@@ -521,6 +551,11 @@ const styles = StyleSheet.create({
     width: 52,
     textAlign: 'right',
   },
+  qualityDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
   tooltipCard: {
     backgroundColor: 'rgba(96,165,250,0.12)',
     borderRadius: 8,
@@ -530,8 +565,22 @@ const styles = StyleSheet.create({
     borderLeftColor: '#60A5FA',
   },
   tooltipText: {
-    color: 'rgba(255,255,255,0.75)',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 12,
     lineHeight: 18,
+  },
+  tooltipContext: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  tooltipDirection: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    letterSpacing: 0.3,
   },
 });

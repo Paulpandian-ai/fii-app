@@ -37,6 +37,11 @@ import type {
 } from '../types';
 import { getScoreColor, getScoreLabel, SCORE_COLORS } from '../utils/scoreColors';
 import {
+  translateDriverDescription,
+  translateFactorName,
+  getDriverIcon,
+} from '../utils/beginnerTranslations';
+import {
   getSignalDetail,
   getPrice,
   getTechnicals,
@@ -624,7 +629,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
 
   const renderOverviewTab = () => (
     <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-      {/* SECTION 1: HERO */}
+      {/* SECTION 1: HERO — Beginner-first redesign */}
       <View style={styles.heroSection}>
         <View style={styles.heroRow}>
           {/* Left: Score Ring */}
@@ -634,51 +639,143 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <Text style={[styles.heroScoreLabel, { color: getScoreColor(compositeScore) }]}>
                 {scoreLabel}
               </Text>
-              <View style={[styles.confidenceDot, {
-                backgroundColor: confidence === 'HIGH' ? '#00C9A7' : 'transparent',
-                borderColor: confidence === 'MEDIUM' ? '#8E8E93' : confidence === 'LOW' ? '#F5A623' : 'transparent',
-                borderWidth: confidence !== 'HIGH' ? 1.5 : 0,
-              }]}>
-                {confidence === 'MEDIUM' && <View style={styles.halfDot} />}
+              <View style={styles.heroConfidenceRow}>
+                <Ionicons
+                  name={confidence === 'HIGH' ? 'shield-checkmark' : confidence === 'MEDIUM' ? 'shield-half' : 'shield-outline'}
+                  size={14}
+                  color={confidence === 'HIGH' ? '#00C9A7' : confidence === 'MEDIUM' ? '#8E8E93' : '#F5A623'}
+                />
+                <Text style={[styles.heroConfidenceText, {
+                  color: confidence === 'HIGH' ? '#00C9A7' : confidence === 'MEDIUM' ? '#8E8E93' : '#F5A623',
+                }]}>
+                  {confidence === 'HIGH' ? 'High' : confidence === 'MEDIUM' ? 'Medium' : 'Low'} Confidence
+                </Text>
               </View>
             </View>
-            {percentileRank != null && (
-              <Text style={styles.percentileText}>Top {Math.round(100 - percentileRank)}th percentile</Text>
-            )}
           </View>
 
-          {/* Right: Price */}
+          {/* Right: Price + Company */}
           <View style={styles.heroRight}>
             {hasPriceToShow && (
               <>
                 <Text style={styles.heroPrice}>${priceValue.toFixed(2)}</Text>
                 <Text style={[styles.heroPriceChange, { color: isPositive ? '#00C9A7' : '#F5A623' }]}>
-                  {isPositive ? '+' : ''}${priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePct.toFixed(1)}%)
+                  {isPositive ? '\u25B2' : '\u25BC'} ${Math.abs(priceChange).toFixed(2)} ({isPositive ? '+' : ''}{priceChangePct.toFixed(1)}%) today
                 </Text>
               </>
             )}
             <Text style={styles.heroCompanyName} numberOfLines={2}>
-              {analysis.companyName}
+              {analysis.companyName}{priceData?.sector ? ` \u00B7 ${priceData.sector}` : ''}
             </Text>
           </View>
         </View>
+
+        {/* Percentile sentence — beginner-friendly */}
+        {percentileRank != null && (
+          <Text style={styles.percentileSentence}>
+            Better than {Math.round(percentileRank)}% of stocks we track
+          </Text>
+        )}
       </View>
 
-      {/* SECTION 2: RISK SUMMARY CARD */}
+      {/* SECTION 2: RISK CHECK CARD — Emotional design with thermometer */}
       <View style={styles.riskCard}>
         <View style={styles.riskCardHeader}>
           <Ionicons name="shield-checkmark" size={18} color="#00C9A7" />
-          <Text style={styles.riskCardTitle}>Risk Summary</Text>
+          <Text style={styles.riskCardTitle}>Risk Check</Text>
         </View>
-        <Text style={styles.riskCardText}>{riskSummaryText}</Text>
+
+        {/* Risk thermometer bar */}
+        {(() => {
+          const riskLevel = compositeScore >= 7 ? 'Low' : compositeScore >= 4 ? 'Moderate' : 'High';
+          const riskPct = Math.max(10, Math.min(100, (10 - compositeScore) * 10 + 10));
+          const riskColor = riskLevel === 'Low' ? '#00C9A7' : riskLevel === 'Moderate' ? '#F5A623' : '#FF6B6B';
+          return (
+            <View style={styles.riskThermometerRow}>
+              <Text style={styles.riskThermometerLabel}>Overall Risk:</Text>
+              <View style={styles.riskThermometerTrack}>
+                <View style={[styles.riskThermometerFill, { width: `${riskPct}%`, backgroundColor: riskColor }]} />
+              </View>
+              <Text style={[styles.riskThermometerLevel, { color: riskColor }]}>{riskLevel}</Text>
+            </View>
+          );
+        })()}
+
+        {/* Dollar-based crash estimate */}
+        {stressData && stressData.length > 0 && (() => {
+          const severe = stressData.find((s: any) => s.scenarioKey === 'severely_adverse') || stressData[stressData.length - 1];
+          if (severe && severe.priceImpact != null) {
+            const impact = safeNum(severe.priceImpact);
+            const dollarResult = Math.max(0, Math.round(1000 * (1 + impact / 100)));
+            return (
+              <View style={styles.riskCrashRow}>
+                <Text style={styles.riskCrashLabel}>If markets crashed 50%:</Text>
+                <Text style={styles.riskCrashValue}>
+                  Your $1,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact}%)
+                </Text>
+              </View>
+            );
+          }
+          return null;
+        })()}
+
+        {/* Concerns (from negative drivers) */}
+        {(() => {
+          const negDrivers = scoreDrivers.filter(d => d.direction === 'negative' || d.direction === 'down');
+          const posDrivers = scoreDrivers.filter(d => d.direction === 'positive' || d.direction === 'up');
+          const concerns: string[] = [];
+          const strengths: string[] = [];
+
+          // Data coverage concern
+          if (confidence === 'LOW') {
+            const availDims = factorPercentiles
+              ? Object.values(factorPercentiles).filter(v => v !== 50).length
+              : 0;
+            concerns.push(`Limited data coverage (${Math.max(availDims, 3)}/6 factors)`);
+          }
+
+          negDrivers.slice(0, 2).forEach(d => {
+            concerns.push(translateDriverDescription(d.description));
+          });
+          posDrivers.slice(0, 2).forEach(d => {
+            strengths.push(translateDriverDescription(d.description));
+          });
+
+          return (
+            <>
+              {concerns.length > 0 && (
+                <View style={styles.riskListSection}>
+                  <Text style={styles.riskListHeader}>Key concerns:</Text>
+                  {concerns.map((c, i) => (
+                    <View key={`concern-${i}`} style={styles.riskListRow}>
+                      <Ionicons name="alert-circle" size={14} color="#F5A623" />
+                      <Text style={styles.riskListText}>{c}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {strengths.length > 0 && (
+                <View style={styles.riskListSection}>
+                  <Text style={styles.riskListHeader}>Strengths:</Text>
+                  {strengths.map((s, i) => (
+                    <View key={`strength-${i}`} style={styles.riskListRow}>
+                      <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
+                      <Text style={styles.riskListText}>{s}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          );
+        })()}
       </View>
 
-      {/* SECTION 3: WHAT'S DRIVING THIS SCORE */}
+      {/* SECTION 3: WHAT'S DRIVING THIS SCORE — Beginner-friendly translations */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>What's Driving This Score</Text>
         {scoreDrivers.length > 0 ? (
           scoreDrivers.slice(0, 3).map((driver, idx) => {
-            const isUp = driver.direction === 'positive' || driver.direction === 'up';
+            const driverIcon = getDriverIcon(driver.direction);
             const factorDisplayName: Record<string, string> = {
               supply_chain_upstream: 'Supply Chain (Upstream)',
               supply_chain_downstream: 'Supply Chain (Downstream)',
@@ -687,8 +784,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               correlations: 'Correlations',
               risk_performance: 'Risk & Performance',
             };
-            // Normalize driver.factor to a valid API dimension key
-            // The API might return display names, aliases, or correct keys
             const DIMENSION_ALIASES: Record<string, string> = {
               'supply chain (upstream)': 'supply_chain_upstream',
               'supply chain upstream': 'supply_chain_upstream',
@@ -711,7 +806,11 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               'performance': 'risk_performance',
             };
             const normalizedDimension = DIMENSION_ALIASES[driver.factor.toLowerCase()] || driver.factor;
-            const factorLabel = factorDisplayName[normalizedDimension] || driver.factor;
+            const rawLabel = factorDisplayName[normalizedDimension] || driver.factor;
+            // Beginner-friendly factor name
+            const factorLabel = translateFactorName(rawLabel);
+            // Beginner-friendly description
+            const beginnerDesc = translateDriverDescription(driver.description);
             return (
               <TouchableOpacity
                 key={`driver-${idx}`}
@@ -719,12 +818,14 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 onPress={() => setSelectedDimension(normalizedDimension)}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.driverArrow, { color: isUp ? '#00C9A7' : '#F5A623' }]}>
-                  {isUp ? '\u2191' : '\u2193'}
-                </Text>
+                <Ionicons
+                  name={driverIcon.name as any}
+                  size={20}
+                  color={driverIcon.type === 'positive' ? '#00C9A7' : '#F5A623'}
+                />
                 <View style={styles.driverContent}>
                   <Text style={styles.driverFactor}>{factorLabel}</Text>
-                  <Text style={styles.driverDesc}>{driver.description}</Text>
+                  <Text style={styles.driverDesc}>{beginnerDesc}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.2)" />
               </TouchableOpacity>
@@ -735,28 +836,33 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
       </View>
 
-      {/* SECTION 4: HOW IT COMPARES (Sector Peers) */}
+      {/* SECTION 4: HOW IT COMPARES — Color-coded peers */}
       {peerStocks.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>How it compares</Text>
+          <Text style={styles.sectionTitle}>
+            How {ticker} compares to similar companies
+          </Text>
           <View style={styles.peerRow}>
-            {peerStocks.slice(0, 3).map((peer) => (
-              <TouchableOpacity
-                key={peer.ticker}
-                style={styles.peerCard}
-                onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker, companyName: peer.companyName })}
-                activeOpacity={0.7}
-              >
-                <ScoreRing score={peer.score} size={48} />
-                <Text style={styles.peerTicker}>{peer.ticker}</Text>
-                <Text style={[styles.peerScore, { color: getScoreColor(peer.score) }]}>
-                  {peer.score.toFixed(1)}
-                </Text>
-                <Text style={[styles.peerLabel, { color: getScoreColor(peer.score) }]}>
-                  {peer.scoreLabel}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {peerStocks.slice(0, 3).map((peer) => {
+              const peerColor = getScoreColor(peer.score);
+              return (
+                <TouchableOpacity
+                  key={peer.ticker}
+                  style={[styles.peerCard, { borderWidth: 1, borderColor: peerColor + '40' }]}
+                  onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker, companyName: peer.companyName })}
+                  activeOpacity={0.7}
+                >
+                  <ScoreRing score={peer.score} size={48} />
+                  <Text style={styles.peerTicker}>{peer.ticker}</Text>
+                  <Text style={[styles.peerScore, { color: peerColor }]}>
+                    {peer.score.toFixed(1)}
+                  </Text>
+                  <Text style={[styles.peerLabel, { color: peerColor }]}>
+                    {peer.scoreLabel}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       )}
@@ -1421,23 +1527,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  confidenceDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    overflow: 'hidden',
-  },
-  halfDot: {
-    width: 10,
-    height: 5,
-    backgroundColor: '#8E8E93',
-    position: 'absolute',
-    bottom: 0,
-  },
-  percentileText: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
+  // confidenceDot/halfDot removed — replaced by heroConfidenceRow with Ionicons
+  heroConfidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     marginTop: 4,
+  },
+  heroConfidenceText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  percentileSentence: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 12,
+    fontStyle: 'italic',
   },
   heroPrice: {
     color: '#FFFFFF',
@@ -1480,6 +1587,73 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 13,
     lineHeight: 20,
+  },
+  riskThermometerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  riskThermometerLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  riskThermometerTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  riskThermometerFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  riskThermometerLevel: {
+    fontSize: 12,
+    fontWeight: '700',
+    minWidth: 60,
+    textAlign: 'right',
+  },
+  riskCrashRow: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  riskCrashLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  riskCrashValue: {
+    color: '#F5A623',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  riskListSection: {
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  riskListHeader: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  riskListRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginBottom: 4,
+  },
+  riskListText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
   },
 
   // ── Generic Section ──
