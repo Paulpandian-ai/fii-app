@@ -80,8 +80,8 @@ export const ConvictionCheck: React.FC<Props> = ({
             />
             <Text style={[styles.recommendText, { color: signalColor }]}>
               {isFavorable
-                ? 'FII still rates this positively. Consider holding.'
-                : 'FII agrees — this might be a good exit point.'}
+                ? 'Factor analysis still indicates strong positioning for this stock.'
+                : 'Multiple risk factors are currently elevated for this stock.'}
             </Text>
           </View>
 

@@ -137,11 +137,11 @@ export const BacktestScreen: React.FC = () => {
   };
 
   const getSignalStrengthColor = (strength: string) => {
-    if (strength === 'Strong' || strength === 'Strong Buy') return '#00C9A7';
-    if (strength === 'Favorable' || strength === 'Buy') return '#4A90D9';
-    if (strength === 'Neutral' || strength === 'Hold') return '#8E8E93';
-    if (strength === 'Weak' || strength === 'Weak Hold') return '#F5A623';
-    if (strength === 'Caution' || strength === 'Sell') return '#5856D6';
+    if (strength === 'Strong') return '#00C9A7';
+    if (strength === 'Favorable') return '#4A90D9';
+    if (strength === 'Neutral') return '#8E8E93';
+    if (strength === 'Weak') return '#F5A623';
+    if (strength === 'Caution') return '#5856D6';
     return '#5856D6'; // default
   };
 

@@ -332,7 +332,7 @@ export const METRIC_EXPLAINERS: Record<string, MetricExplainer> = {
   },
   analyst_rating: {
     name: 'Analyst Rating',
-    beginner: 'The consensus recommendation from Wall Street analysts. Ranges from Strong Buy to Strong Sell.',
+    beginner: 'The consensus view from Wall Street analysts. Ranges from most favorable to least favorable.',
     context: 'Like a restaurant review average \u2014 the more analysts agree, the more meaningful the rating.',
     direction: 'neutral',
   },
