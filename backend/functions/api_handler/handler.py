@@ -6386,6 +6386,8 @@ def _decimals_to_native(obj):
 
 def _response(status_code, body):
     """Build an API Gateway-compatible response."""
+    if isinstance(body, dict) and status_code == 200:
+        body.setdefault("disclaimer", "For educational purposes only. Not investment advice.")
     return {
         "statusCode": status_code,
         "headers": {
