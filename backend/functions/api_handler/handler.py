@@ -44,6 +44,8 @@ Routes:
   POST /admin/agents/<id>/run        — Manually trigger an agent
   GET  /admin/agents/<id>/history    — View agent run history
   GET  /admin/costs?month=YYYY-MM   — Claude API cost tracking summary
+  POST /admin/validate               — Run all quality checks immediately
+  GET  /admin/quality-report?date=   — Get quality report for a date
 
   # ── Factor Details & Financials ──
   GET  /stocks/<ticker>/factors                — Compact factor summary (all 6 dimensions)
@@ -5822,6 +5824,31 @@ def _handle_admin(method, path, body, query_params):
             return _response(200, summary)
         except Exception as e:
             return _response(500, {"error": f"Cost tracking error: {e}"})
+
+    # POST /admin/validate — run all quality checks immediately
+    if len(parts) == 2 and parts[1] == "validate" and method == "POST":
+        try:
+            import data_quality
+            report = data_quality.run_all_checks(db)
+            data_quality.store_quality_report(db, report, run_type="manual")
+            return _response(200, report)
+        except Exception as e:
+            logger.error(f"[Admin] Quality validation error: {e}")
+            return _response(500, {"error": f"Quality validation error: {e}"})
+
+    # GET /admin/quality-report?date=2026-03-14 — get quality report
+    if len(parts) == 2 and parts[1] == "quality-report" and method == "GET":
+        try:
+            import data_quality
+            date = query_params.get("date")
+            run_type = query_params.get("run_type")
+            report = data_quality.get_quality_report(db, date=date, run_type=run_type)
+            if not report:
+                return _response(404, {"error": "No quality report found for that date"})
+            return _response(200, report)
+        except Exception as e:
+            logger.error(f"[Admin] Quality report error: {e}")
+            return _response(500, {"error": f"Quality report error: {e}"})
 
     return _response(404, {"error": "Admin route not found"})
 
