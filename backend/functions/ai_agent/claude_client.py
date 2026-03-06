@@ -359,22 +359,24 @@ def analyze_stock(
         correlations=factor_data.get("correlations", {}),
     )
 
-    from models import compute_composite_score, determine_signal
+    from models import compute_composite_score, determine_signal, determine_score_label
     scores_only = {fid: d["score"] for fid, d in factor_scores.items()}
     composite = compute_composite_score(scores_only)
     signal = determine_signal(composite)
+    score_label = determine_score_label(composite)
 
     reasoning = generate_reasoning(
         ticker=ticker,
         company_name=factor_data.get("company_name", ticker),
         score=composite,
-        signal=signal.value,
+        signal=score_label.value,
         factor_details=factor_scores,
     )
 
     return {
         "composite_score": composite,
         "signal": signal.value,
+        "score_label": score_label.value,
         "insight": reasoning[:200] if len(reasoning) > 200 else reasoning,
         "reasoning": reasoning,
         "factor_scores": factor_scores,

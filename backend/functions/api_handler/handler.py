@@ -1077,7 +1077,7 @@ def _handle_feed(method, body, user_id):
         return _response(200, {"items": compiled["items"], "cursor": None})
 
     # Fallback: build feed from DynamoDB signal summaries
-    from models import STOCK_UNIVERSE, normalize_signals, determine_signal
+    from models import STOCK_UNIVERSE, normalize_signals, determine_signal, determine_score_label
 
     keys = [{"PK": f"SIGNAL#{t}", "SK": "LATEST"} for t in STOCK_UNIVERSE]
     items = db.batch_get(keys)
@@ -1093,6 +1093,7 @@ def _handle_feed(method, body, user_id):
         score = float(item.get("compositeScore", 5.0))
         # Use normalized signal based on mean ± 0.5*stddev
         normalized_signal = determine_signal(score, mean, stddev).value
+        score_label = determine_score_label(score).value
         feed_items.append({
             "id": f"signal-{item.get('ticker', '')}",
             "type": "signal",
@@ -1100,6 +1101,7 @@ def _handle_feed(method, body, user_id):
             "companyName": item.get("companyName", ""),
             "compositeScore": score,
             "signal": normalized_signal,
+            "score_label": score_label,
             "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,

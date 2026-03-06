@@ -46,6 +46,7 @@ from models import (
     compute_dimension_scores,
     compute_weighted_composite,
     determine_confidence,
+    determine_score_label,
     determine_signal,
     get_tier,
     score_to_label,

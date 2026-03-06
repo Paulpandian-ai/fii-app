@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 # ─── Enums ───
 
 class Signal(str, Enum):
+    """Legacy enum — prefer ScoreLabel for user-facing output."""
     BUY = "BUY"
     HOLD = "HOLD"
     SELL = "SELL"
@@ -1025,9 +1026,9 @@ def compute_composite_score(factor_scores: dict[str, float]) -> float:
 
 
 def determine_signal(score: float, mean: float = 5.0, stddev: float = 1.5) -> Signal:
-    """Determine BUY/HOLD/SELL signal from composite score.
+    """Determine signal from composite score (internal use).
 
-    Uses mean +/- 0.5*stddev thresholds for ~25% BUY, 50% HOLD, 25% SELL distribution.
+    Uses mean +/- 0.5*stddev thresholds for distribution.
     Default mean=5.0, stddev=1.5 gives thresholds of 4.25 and 5.75.
     """
     buy_threshold = mean + 0.5 * stddev
@@ -1038,6 +1039,31 @@ def determine_signal(score: float, mean: float = 5.0, stddev: float = 1.5) -> Si
         return Signal.BUY
     else:
         return Signal.HOLD
+
+
+def determine_score_label(score: float) -> ScoreLabel:
+    """Map a 1-10 composite score to an educational score label.
+
+    Use this instead of determine_signal() for all user-facing output.
+    """
+    if score >= 8.0:
+        return ScoreLabel.STRONG
+    elif score >= 6.5:
+        return ScoreLabel.FAVORABLE
+    elif score >= 4.5:
+        return ScoreLabel.NEUTRAL
+    elif score >= 3.0:
+        return ScoreLabel.WEAK
+    else:
+        return ScoreLabel.CAUTION
+
+
+# Mapping from legacy Signal to educational ScoreLabel
+SIGNAL_TO_LABEL = {
+    Signal.BUY: ScoreLabel.FAVORABLE,
+    Signal.HOLD: ScoreLabel.NEUTRAL,
+    Signal.SELL: ScoreLabel.CAUTION,
+}
 
 
 def normalize_signals(scores: list[float]) -> tuple[float, float]:
