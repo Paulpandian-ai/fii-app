@@ -148,6 +148,8 @@ def _fetch_finnhub_metrics(ticker: str) -> dict:
     if data and data.get("metric"):
         result["metrics"] = data["metric"]
         logger.info(f"[FinancialMetrics] Finnhub /stock/metric returned {len(data['metric'])} keys for {ticker}")
+        # Log ALL available keys so we can see what Finnhub actually returns
+        logger.info(f"[FinancialMetrics] Finnhub keys for {ticker}: {sorted(data['metric'].keys())}")
     else:
         logger.warning(f"[FinancialMetrics] Finnhub /stock/metric returned empty for {ticker}")
 
@@ -209,9 +211,13 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     ev = _safe_get(m, "enterpriseValueTTM") or _safe_get(m, "enterpriseValue")
     metrics["enterprise_value"] = ev
 
-    # FCF yield = FCF / EV (or market cap)
-    fcf_per_share = _safe_get(m, "fcfPerShareTTM")
-    if fcf_per_share is not None and metrics.get("trailing_pe") is not None:
+    # FCF yield = FCF / market cap
+    fcf_ttm = _safe_get(m, "freeCashFlowTTM")
+    fcf_per_share = _safe_get(m, "fcfPerShareTTM") or _safe_get(m, "freeCashFlowPerShareTTM")
+    mcap_for_fcf = metrics.get("market_cap")
+    if fcf_ttm is not None and mcap_for_fcf and mcap_for_fcf > 0:
+        metrics["fcf_yield"] = round((fcf_ttm / mcap_for_fcf) * 100, 2)
+    elif fcf_per_share is not None and metrics.get("trailing_pe") is not None:
         eps = _safe_get(m, "epsBasicExclExtraItemsTTM")
         if eps and metrics["trailing_pe"]:
             price_est = eps * metrics["trailing_pe"]
@@ -246,8 +252,8 @@ def _map_finnhub_to_metrics(fh: dict) -> dict:
     metrics["net_margin"] = _safe_get(m, "netProfitMarginTTM") or _safe_get(m, "netProfitMarginAnnual")
     metrics["roe"] = _safe_get(m, "roeTTM") or _safe_get(m, "roeRfy")
     metrics["roa"] = _safe_get(m, "roaTTM") or _safe_get(m, "roaRfy")
-    metrics["roic"] = _safe_get(m, "roicTTM") or _safe_get(m, "roicAnnual")
-    metrics["ebitda"] = _safe_get(m, "ebitdTTM")  # Finnhub uses "ebitdTTM" (not ebitda)
+    metrics["roic"] = _safe_get(m, "roicTTM") or _safe_get(m, "roicExclGoodwillTTM") or _safe_get(m, "roicAnnual")
+    metrics["ebitda"] = _safe_get(m, "ebitdTTM") or _safe_get(m, "ebitdaCagr5Y")  # Finnhub uses "ebitdTTM" (not ebitda)
     if metrics["ebitda"] is None:
         metrics["ebitda"] = _safe_get(m, "ebitdaPerShareTTM")  # Fallback to per-share * shares
         shares_out = _safe_get(m, "sharesOutstanding")
@@ -398,6 +404,245 @@ def _compute_altman_z_from_finnhub(m: dict, metrics: dict) -> Optional[float]:
         e_ratio = 0
         if rev_ps and shares:
             e_ratio = (rev_ps * shares) / total_assets
+
+        z = 1.2 * a_ratio + 1.4 * b_ratio + 3.3 * c_ratio + 0.6 * d_ratio + 1.0 * e_ratio
+        return round(z, 2)
+    except Exception:
+        return None
+
+
+def _compute_derived_metrics(metrics: dict, fh_metrics: dict, edgar: dict) -> None:
+    """Compute derived metrics from available Finnhub and EDGAR data.
+
+    Fills in metrics that Finnhub free tier doesn't provide directly
+    but CAN be computed from data we already have. Modifies metrics in place.
+    """
+    m = fh_metrics  # Finnhub raw metrics dict
+
+    # --- forward_pe: price / forward_eps ---
+    if metrics.get("forward_pe") is None:
+        # Try from EPS estimates
+        fwd_eps = _safe_get(m, "epsEstimateCurrentYear") or _safe_get(m, "epsEstimateNextQuarter")
+        eps_ttm = metrics.get("eps_ttm")
+        trailing_pe = metrics.get("trailing_pe")
+        if fwd_eps and fwd_eps > 0 and trailing_pe and eps_ttm and eps_ttm > 0:
+            price_est = eps_ttm * trailing_pe
+            metrics["forward_pe"] = round(price_est / fwd_eps, 2)
+        elif trailing_pe and metrics.get("eps_growth_yoy") is not None:
+            # Rough estimate: trailing_pe / (1 + growth_rate)
+            growth = metrics["eps_growth_yoy"] / 100.0
+            if 1 + growth > 0:
+                metrics["forward_pe"] = round(trailing_pe / (1 + growth), 2)
+
+    # --- peg_ratio: trailing_pe / eps_growth_yoy ---
+    if metrics.get("peg_ratio") is None:
+        trailing_pe = metrics.get("trailing_pe")
+        eps_growth = metrics.get("eps_growth_yoy")
+        if trailing_pe and eps_growth and eps_growth > 0:
+            metrics["peg_ratio"] = round(trailing_pe / eps_growth, 2)
+
+    # --- ev_to_ebitda: enterprise_value / ebitda ---
+    if metrics.get("ev_to_ebitda") is None:
+        ev_val = metrics.get("enterprise_value")
+        ebitda_val = metrics.get("ebitda")
+        if ev_val and ebitda_val and ebitda_val > 0:
+            metrics["ev_to_ebitda"] = round(ev_val / ebitda_val, 2)
+
+    # --- ev_to_revenue: enterprise_value / revenue ---
+    if metrics.get("ev_to_revenue") is None:
+        ev_val = metrics.get("enterprise_value")
+        rev_ps = _safe_get(m, "revenuePerShareTTM")
+        shares = _safe_get(m, "sharesOutstanding")
+        edgar_revenue = _safe_float(edgar.get("revenue"))
+        revenue = (rev_ps * shares) if (rev_ps and shares) else edgar_revenue
+        if ev_val and revenue and revenue > 0:
+            metrics["ev_to_revenue"] = round(ev_val / revenue, 2)
+
+    # --- fcf_yield: fallback using EDGAR (net_income + depreciation - capex) / market_cap ---
+    if metrics.get("fcf_yield") is None:
+        net_inc = _safe_float(edgar.get("net_income"))
+        capex = _safe_float(edgar.get("capital_expenditure")) or _safe_get(m, "capitalExpenditureTTM")
+        mcap = metrics.get("market_cap")
+        if net_inc is not None and mcap and mcap > 0:
+            # Approximate FCF as net_income - capex (depreciation already in net income)
+            capex_val = abs(capex) if capex else 0
+            fcf_approx = net_inc - capex_val
+            metrics["fcf_yield"] = round((fcf_approx / mcap) * 100, 2)
+
+    # --- roic: net_income / (total_assets - current_liabilities) from EDGAR ---
+    if metrics.get("roic") is None:
+        net_inc = _safe_float(edgar.get("net_income"))
+        total_assets = _safe_float(edgar.get("total_assets"))
+        current_liab = _safe_float(edgar.get("current_liabilities"))
+        if net_inc is not None and total_assets and current_liab is not None:
+            invested_capital = total_assets - current_liab
+            if invested_capital > 0:
+                metrics["roic"] = round((net_inc / invested_capital) * 100, 2)
+
+    # --- interest_coverage: operating_income / interest_expense from EDGAR ---
+    if metrics.get("interest_coverage") is None:
+        op_inc = _safe_float(edgar.get("operating_income"))
+        interest_exp = _safe_float(edgar.get("interest_expense"))
+        if op_inc is not None and interest_exp and interest_exp > 0:
+            metrics["interest_coverage"] = round(op_inc / interest_exp, 2)
+
+    # --- altman_z_score: compute from EDGAR balance sheet if still null ---
+    if metrics.get("altman_z_score") is None:
+        metrics["altman_z_score"] = _compute_altman_z_from_edgar(edgar, metrics)
+
+    # --- total_debt: total_liabilities - current_liabilities from EDGAR ---
+    if metrics.get("total_debt") is None:
+        total_liab = _safe_float(edgar.get("total_liabilities"))
+        current_liab = _safe_float(edgar.get("current_liabilities"))
+        if total_liab is not None and current_liab is not None:
+            metrics["total_debt"] = round(total_liab - current_liab, 2)
+
+    # --- shares_outstanding: market_cap / price ---
+    if metrics.get("shares_outstanding") is None:
+        mcap = metrics.get("market_cap")
+        # Try to get current price from candle-based price or PE * EPS
+        eps_ttm = metrics.get("eps_ttm")
+        trailing_pe = metrics.get("trailing_pe")
+        if mcap and eps_ttm and trailing_pe and eps_ttm > 0:
+            price_est = eps_ttm * trailing_pe
+            if price_est > 0:
+                metrics["shares_outstanding"] = round(mcap / price_est, 0)
+
+    # --- float_shares: shares_outstanding * (1 - insider_pct) ---
+    if metrics.get("float_shares") is None:
+        shares = metrics.get("shares_outstanding")
+        insider_pct = metrics.get("insider_pct")
+        if shares and insider_pct is not None:
+            metrics["float_shares"] = round(shares * (1 - insider_pct / 100), 0)
+
+    # --- gross_margin from EDGAR ---
+    if metrics.get("gross_margin") is None:
+        gross_profit = _safe_float(edgar.get("gross_profit"))
+        revenue = _safe_float(edgar.get("revenue"))
+        if gross_profit is not None and revenue and revenue > 0:
+            metrics["gross_margin"] = round((gross_profit / revenue) * 100, 2)
+
+    # --- operating_margin from EDGAR ---
+    if metrics.get("operating_margin") is None:
+        op_inc = _safe_float(edgar.get("operating_income"))
+        revenue = _safe_float(edgar.get("revenue"))
+        if op_inc is not None and revenue and revenue > 0:
+            metrics["operating_margin"] = round((op_inc / revenue) * 100, 2)
+
+    # --- net_margin from EDGAR ---
+    if metrics.get("net_margin") is None:
+        net_inc = _safe_float(edgar.get("net_income"))
+        revenue = _safe_float(edgar.get("revenue"))
+        if net_inc is not None and revenue and revenue > 0:
+            metrics["net_margin"] = round((net_inc / revenue) * 100, 2)
+
+    # --- debt_to_equity from EDGAR ---
+    if metrics.get("debt_to_equity") is None:
+        total_liab = _safe_float(edgar.get("total_liabilities"))
+        equity = _safe_float(edgar.get("stockholders_equity"))
+        if total_liab is not None and equity and equity > 0:
+            metrics["debt_to_equity"] = round(total_liab / equity, 2)
+
+    # --- current_ratio from EDGAR ---
+    if metrics.get("current_ratio") is None:
+        current_assets = _safe_float(edgar.get("current_assets"))
+        current_liab = _safe_float(edgar.get("current_liabilities"))
+        if current_assets is not None and current_liab and current_liab > 0:
+            metrics["current_ratio"] = round(current_assets / current_liab, 2)
+
+    # --- roe from EDGAR: net_income / stockholders_equity ---
+    if metrics.get("roe") is None:
+        net_inc = _safe_float(edgar.get("net_income"))
+        equity = _safe_float(edgar.get("stockholders_equity"))
+        if net_inc is not None and equity and equity > 0:
+            metrics["roe"] = round((net_inc / equity) * 100, 2)
+
+    # --- roa from EDGAR: net_income / total_assets ---
+    if metrics.get("roa") is None:
+        net_inc = _safe_float(edgar.get("net_income"))
+        total_assets = _safe_float(edgar.get("total_assets"))
+        if net_inc is not None and total_assets and total_assets > 0:
+            metrics["roa"] = round((net_inc / total_assets) * 100, 2)
+
+    # --- earnings_yield from trailing_pe ---
+    if metrics.get("earnings_yield") is None and metrics.get("trailing_pe"):
+        pe = metrics["trailing_pe"]
+        if pe > 0:
+            metrics["earnings_yield"] = round((1 / pe) * 100, 2)
+
+    # --- book_value_per_share from EDGAR ---
+    if metrics.get("book_value_per_share") is None:
+        equity = _safe_float(edgar.get("stockholders_equity"))
+        shares = metrics.get("shares_outstanding") or _safe_float(edgar.get("shares_outstanding"))
+        if equity is not None and shares and shares > 0:
+            metrics["book_value_per_share"] = round(equity / shares, 2)
+
+    # --- cash_per_share from EDGAR ---
+    if metrics.get("cash_per_share") is None:
+        cash = _safe_float(edgar.get("cash"))
+        shares = metrics.get("shares_outstanding") or _safe_float(edgar.get("shares_outstanding"))
+        if cash is not None and shares and shares > 0:
+            metrics["cash_per_share"] = round(cash / shares, 2)
+
+    # --- total_cash from EDGAR ---
+    if metrics.get("total_cash") is None:
+        cash = _safe_float(edgar.get("cash"))
+        if cash is not None:
+            metrics["total_cash"] = cash
+
+    # --- quick_ratio: (current_assets - inventory) / current_liabilities ---
+    if metrics.get("quick_ratio") is None:
+        current_assets = _safe_float(edgar.get("current_assets"))
+        current_liab = _safe_float(edgar.get("current_liabilities"))
+        inventory = _safe_float(edgar.get("inventory")) or 0
+        if current_assets is not None and current_liab and current_liab > 0:
+            metrics["quick_ratio"] = round((current_assets - inventory) / current_liab, 2)
+
+
+def _safe_float(val) -> Optional[float]:
+    """Convert a value to float safely, returning None on failure."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_altman_z_from_edgar(edgar: dict, metrics: dict) -> Optional[float]:
+    """Compute Altman Z-Score from EDGAR balance sheet data.
+
+    Z = 1.2*A + 1.4*B + 3.3*C + 0.6*D + 1.0*E
+    where A = working_capital/total_assets, B = retained_earnings/total_assets,
+    C = EBIT/total_assets, D = market_cap/total_liabilities, E = revenue/total_assets
+    """
+    total_assets = _safe_float(edgar.get("total_assets"))
+    if not total_assets or total_assets == 0:
+        return None
+
+    try:
+        current_assets = _safe_float(edgar.get("current_assets")) or 0
+        current_liab = _safe_float(edgar.get("current_liabilities")) or 0
+        working_capital = current_assets - current_liab
+        a_ratio = working_capital / total_assets
+
+        # B = retained_earnings / total_assets (approximate with stockholders_equity)
+        equity = _safe_float(edgar.get("stockholders_equity")) or 0
+        b_ratio = equity / total_assets
+
+        # C = EBIT / total_assets (use operating_income as EBIT proxy)
+        ebit = _safe_float(edgar.get("operating_income")) or 0
+        c_ratio = ebit / total_assets
+
+        # D = market_cap / total_liabilities
+        mcap = metrics.get("market_cap") or 0
+        total_liab = _safe_float(edgar.get("total_liabilities")) or 0
+        d_ratio = mcap / total_liab if total_liab > 0 else 0
+
+        # E = revenue / total_assets
+        revenue = _safe_float(edgar.get("revenue")) or 0
+        e_ratio = revenue / total_assets
 
         z = 1.2 * a_ratio + 1.4 * b_ratio + 3.3 * c_ratio + 0.6 * d_ratio + 1.0 * e_ratio
         return round(z, 2)
@@ -587,6 +832,15 @@ def _map_edgar_ratios_to_metrics(edgar: dict) -> dict:
         "eps_growth_yoy": "eps_growth_yoy",
         "eps": "eps_ttm",
         "market_cap": "market_cap",
+        "book_value_per_share": "book_value_per_share",
+        "dividend_yield": "dividend_yield",
+        "payout_ratio": "payout_ratio",
+        "quick_ratio": "quick_ratio",
+        "interest_coverage": "interest_coverage",
+        "price_to_book": "price_to_book",
+        "price_to_sales": "price_to_sales",
+        "roic": "roic",
+        "ebitda": "ebitda",
     }
 
     for edgar_key, metric_key in direct.items():
@@ -624,6 +878,86 @@ def _map_edgar_ratios_to_metrics(edgar: dict) -> dict:
     if net_income is not None:
         try:
             metrics["ebitda"] = float(edgar.get("operating_income") or net_income)
+        except (TypeError, ValueError):
+            pass
+
+    # --- Compute additional metrics from EDGAR raw fields ---
+    # gross_margin = gross_profit / revenue
+    gross_profit = edgar.get("gross_profit")
+    revenue_val = edgar.get("revenue")
+    if gross_profit is not None and revenue_val:
+        try:
+            gp, rv = float(gross_profit), float(revenue_val)
+            if rv > 0 and "gross_margin" not in metrics:
+                metrics["gross_margin"] = round((gp / rv) * 100, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # operating_margin = operating_income / revenue
+    op_income = edgar.get("operating_income")
+    if op_income is not None and revenue_val:
+        try:
+            oi, rv = float(op_income), float(revenue_val)
+            if rv > 0 and "operating_margin" not in metrics:
+                metrics["operating_margin"] = round((oi / rv) * 100, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # debt_to_equity = total_liabilities / stockholders_equity
+    total_liab = edgar.get("total_liabilities")
+    equity = edgar.get("stockholders_equity")
+    if total_liab is not None and equity:
+        try:
+            tl, eq = float(total_liab), float(equity)
+            if eq > 0 and "debt_to_equity" not in metrics:
+                metrics["debt_to_equity"] = round(tl / eq, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # current_ratio = current_assets / current_liabilities
+    curr_assets = edgar.get("current_assets")
+    curr_liab = edgar.get("current_liabilities")
+    if curr_assets is not None and curr_liab:
+        try:
+            ca, cl = float(curr_assets), float(curr_liab)
+            if cl > 0 and "current_ratio" not in metrics:
+                metrics["current_ratio"] = round(ca / cl, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # net_margin = net_income / revenue
+    if net_income is not None and revenue_val:
+        try:
+            ni, rv = float(net_income), float(revenue_val)
+            if rv > 0 and "net_margin" not in metrics:
+                metrics["net_margin"] = round((ni / rv) * 100, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # roe = net_income / stockholders_equity
+    if net_income is not None and equity:
+        try:
+            ni, eq = float(net_income), float(equity)
+            if eq > 0 and "roe" not in metrics:
+                metrics["roe"] = round((ni / eq) * 100, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # roa = net_income / total_assets
+    total_assets = edgar.get("total_assets")
+    if net_income is not None and total_assets:
+        try:
+            ni, ta = float(net_income), float(total_assets)
+            if ta > 0 and "roa" not in metrics:
+                metrics["roa"] = round((ni / ta) * 100, 2)
+        except (TypeError, ValueError):
+            pass
+
+    # shares_outstanding from EDGAR
+    shares = edgar.get("shares_outstanding")
+    if shares is not None:
+        try:
+            metrics.setdefault("shares_outstanding", float(shares))
         except (TypeError, ValueError):
             pass
 
@@ -773,6 +1107,7 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
     1. PRIMARY: Finnhub (/stock/metric, /stock/profile2, /stock/recommendation,
        /stock/price-target) — works reliably in Lambda.
     2. FALLBACK: EDGAR DynamoDB cache (FINANCIALS#{ticker} | RATIOS).
+    3. DERIVED: Compute metrics from available data when direct values are null.
 
     Args:
         ticker: Stock ticker symbol.
@@ -793,7 +1128,7 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
         }
     """
     # Track which source provided each metric
-    source_map = {}  # metric_key -> "finnhub" | "edgar"
+    source_map = {}  # metric_key -> "finnhub" | "edgar" | "derived"
 
     # ─── Source 1: Finnhub (PRIMARY) ───
     finnhub_raw = {}
@@ -824,12 +1159,26 @@ def compute_all_metrics(ticker: str, sector_stats: Optional[dict] = None) -> dic
                 edgar_filled += 1
         logger.info(f"[FinancialMetrics] EDGAR filled {edgar_filled} additional metrics for {ticker}")
 
+    # ─── Source 3: Derived metrics (compute from available data) ───
+    pre_derived_count = sum(1 for v in finnhub_metrics.values() if v is not None)
+    fh_raw_metrics = finnhub_raw.get("metrics", {})
+    _compute_derived_metrics(finnhub_metrics, fh_raw_metrics, edgar_ratios)
+    post_derived_count = sum(1 for v in finnhub_metrics.values() if v is not None)
+    derived_filled = post_derived_count - pre_derived_count
+    if derived_filled > 0:
+        logger.info(f"[FinancialMetrics] Derived metrics filled {derived_filled} additional metrics for {ticker}")
+        # Mark newly filled metrics as "derived"
+        for key, val in finnhub_metrics.items():
+            if val is not None and key not in source_map:
+                source_map[key] = "derived"
+
     raw_metrics = finnhub_metrics
     total_non_null = sum(1 for v in raw_metrics.values() if v is not None)
     finnhub_count = sum(1 for s in source_map.values() if s == "finnhub")
     edgar_count = sum(1 for s in source_map.values() if s == "edgar")
-    logger.info(f"[FinancialMetrics] Final: {total_non_null}/69 non-null metrics for {ticker} "
-                f"(sources: finnhub={finnhub_count}, edgar={edgar_count})")
+    derived_count = sum(1 for s in source_map.values() if s == "derived")
+    logger.info(f"[FinancialMetrics] {ticker}: {total_non_null}/69 metrics populated "
+                f"(sources: finnhub={finnhub_count}, edgar={edgar_count}, derived={derived_count})")
 
     # Get sector
     sector = _get_sector_for_ticker(ticker)
@@ -941,19 +1290,25 @@ def get_cached_metrics(ticker: str) -> Optional[dict]:
 
 
 def get_metrics(ticker: str, category: Optional[str] = None,
-                include_sparklines: bool = False) -> dict:
+                include_sparklines: bool = False,
+                force_refresh: bool = False) -> dict:
     """Get financial metrics for a ticker, using cache or computing fresh.
 
     Args:
         ticker: Stock ticker symbol.
         category: If provided, return only this category.
         include_sparklines: If False, strip sparkline data for smaller response.
+        force_refresh: If True, skip cache and recompute fresh metrics.
 
     Returns:
         Full or filtered metrics dict.
     """
-    # Try cache first
-    result = get_cached_metrics(ticker)
+    # Try cache first (unless force_refresh)
+    result = None
+    if not force_refresh:
+        result = get_cached_metrics(ticker)
+    else:
+        logger.info(f"[FinancialMetrics] force_refresh=True, skipping cache for {ticker}")
 
     if not result:
         # Compute fresh
