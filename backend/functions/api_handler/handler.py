@@ -5762,6 +5762,57 @@ def _handle_admin(method, path, body, query_params):
         _save_agent_config(agent_id, current)
         return _response(200, {"agentId": agent_id, **current, "message": "Config updated"})
 
+    # GET /admin/scoring-status — scoring queue + recent run status
+    if len(parts) == 2 and parts[1] == "scoring-status" and method == "GET":
+        try:
+            import change_detector
+
+            # Queue depth and items
+            queue_items = change_detector.get_scoring_queue(db, limit=20)
+            queue_depth = len(queue_items)
+
+            # Recent runs (daily_light, weekly_deep, queue_processor)
+            recent_runs = {}
+            for run_type in ["daily_light", "weekly_deep", "queue_processor"]:
+                runs = db.query(f"AGENT_RUN#{run_type}", limit=1, scan_forward=False)
+                if runs:
+                    r = runs[0]
+                    recent_runs[run_type] = {
+                        "timestamp": r.get("SK", ""),
+                        "scanned": int(r.get("scanned", 0)),
+                        "flagged": int(r.get("flagged", 0)),
+                        "updated": int(r.get("updated", 0)),
+                        "errors": int(r.get("errors", 0)),
+                        "stocks_scored": int(r.get("stocks_scored", 0)),
+                        "cost_estimate": r.get("cost_estimate", "0"),
+                        "completed_at": r.get("completed_at", ""),
+                    }
+
+            # Today's changes
+            from datetime import datetime, timezone
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            today_changes = db.query(f"CHANGES#{today}", limit=50)
+
+            return _response(200, {
+                "queue_depth": queue_depth,
+                "queue_items": [
+                    {
+                        "ticker": item.get("ticker"),
+                        "priority": item.get("priority"),
+                        "reason": item.get("reason", ""),
+                        "created_at": item.get("created_at", ""),
+                    }
+                    for item in queue_items
+                ],
+                "recent_runs": recent_runs,
+                "today_changes": len(today_changes),
+                "today_flagged_tickers": [
+                    item.get("ticker") for item in today_changes
+                ],
+            })
+        except Exception as e:
+            return _response(500, {"error": f"Scoring status error: {e}"})
+
     # GET /admin/costs?month=2026-03 — Claude API cost tracking
     if len(parts) == 2 and parts[1] == "costs" and method == "GET":
         month = query_params.get("month")
