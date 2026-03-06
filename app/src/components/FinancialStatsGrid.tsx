@@ -268,7 +268,7 @@ interface MetricData {
   percentile?: number;
 }
 
-export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }) => {
+export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = React.memo(({ ticker }) => {
   const [financials, setFinancials] = useState<Record<string, Record<string, MetricData>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -469,7 +469,7 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }
       })}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   loadingContainer: {

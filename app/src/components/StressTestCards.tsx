@@ -81,7 +81,7 @@ function RiskBar({ impact, riskLevel }: { impact: number; riskLevel: string }) {
 
 // ── Main Component ──
 
-export const StressTestCards: React.FC<Props> = ({ report, investmentAmount = 10000 }) => {
+export const StressTestCards: React.FC<Props> = React.memo(({ report, investmentAmount = 10000 }) => {
   const { scenarios, historical_events, disclaimer } = report;
 
   if (!scenarios || scenarios.length === 0) {
@@ -165,7 +165,7 @@ export const StressTestCards: React.FC<Props> = ({ report, investmentAmount = 10
       <AIContentDisclaimer />
     </View>
   );
-};
+});
 
 // ── Styles ──
 

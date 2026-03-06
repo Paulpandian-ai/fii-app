@@ -14,7 +14,7 @@ const getBarColor = (score: number): string => {
   return '#00C9A7';
 };
 
-export const FactorBar: React.FC<FactorBarProps> = ({ factor, compact = false }) => {
+export const FactorBar: React.FC<FactorBarProps> = React.memo(({ factor, compact = false }) => {
   const score = factor.score ?? 0;
   const color = getBarColor(score);
   // Map -2..+2 to 0..1 for bar width

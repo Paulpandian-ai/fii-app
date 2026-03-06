@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -66,6 +68,17 @@ import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
 // ═══════════════════════════════════════════════════════════════
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const COLLAPSE_ANIMATION = LayoutAnimation.create(
+  250,
+  LayoutAnimation.Types.easeInEaseOut,
+  LayoutAnimation.Properties.opacity,
+);
 
 const TAB_NAMES = ['Overview', 'Analysis', 'Deep Dive'] as const;
 
@@ -912,7 +925,10 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               key={axis.key}
               style={[styles.gaugeRow, isExpanded && styles.gaugeRowExpanded]}
               onPress={() => setSelectedDimension(axis.dimKey)}
-              onLongPress={() => setExpandedFactorBar(isExpanded ? null : axis.key)}
+              onLongPress={() => {
+                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
+                setExpandedFactorBar(isExpanded ? null : axis.key);
+              }}
               activeOpacity={0.7}
             >
               <View style={styles.gaugeHeader}>
@@ -1060,7 +1076,10 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <View style={styles.section}>
           <TouchableOpacity
             style={styles.collapsibleHeader}
-            onPress={() => setFactorDeepDiveExpanded(!factorDeepDiveExpanded)}
+            onPress={() => {
+              LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
+              setFactorDeepDiveExpanded(!factorDeepDiveExpanded);
+            }}
             activeOpacity={0.7}
           >
             <View style={styles.collapsibleHeaderLeft}>
@@ -1199,7 +1218,10 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             <TouchableOpacity
               key={cat.id}
               activeOpacity={0.8}
-              onPress={() => setExpandedCategory(expandedCategory === cat.id ? null : cat.id)}
+              onPress={() => {
+                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
+                setExpandedCategory(expandedCategory === cat.id ? null : cat.id);
+              }}
             >
               <View style={styles.categoryCard}>
                 <View style={styles.categoryHeader}>
@@ -1266,6 +1288,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                 key={catKey}
                 activeOpacity={0.8}
                 onPress={() => {
+                  LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
                   setExpandedFinancialCats((prev) => {
                     const next = new Set(prev);
                     if (next.has(catKey)) next.delete(catKey);

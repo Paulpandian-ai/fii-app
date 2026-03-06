@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { getScoreColor } from '../utils/scoreColors';
+import { AnimatedScore } from './AnimatedScore';
 
 interface ScoreRingProps {
   score: number; // 1–10
@@ -45,9 +46,11 @@ export const ScoreRing: React.FC<ScoreRingProps> = React.memo(({ score: rawScore
         />
       </Svg>
       <View style={styles.labelContainer}>
-        <Text style={[styles.score, { color, fontSize: size * 0.3 }]}>
-          {score.toFixed(1)}
-        </Text>
+        <AnimatedScore
+          value={score}
+          decimals={1}
+          style={{ ...styles.score, color, fontSize: size * 0.3 }}
+        />
         <Text style={styles.label}>FII Score</Text>
       </View>
     </View>

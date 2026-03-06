@@ -8,7 +8,7 @@ interface SignalBadgeProps {
   score?: number;
 }
 
-export const SignalBadge: React.FC<SignalBadgeProps> = ({ scoreLabel, score }) => {
+export const SignalBadge: React.FC<SignalBadgeProps> = React.memo(({ scoreLabel, score }) => {
   const label = scoreLabel ?? (score != null ? getScoreLabel(score) : 'Neutral');
   const bgColor = SCORE_COLORS[label] || SCORE_COLORS.Neutral;
 
@@ -17,7 +17,7 @@ export const SignalBadge: React.FC<SignalBadgeProps> = ({ scoreLabel, score }) =
       <Text style={styles.text}>{label}</Text>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   badge: {
