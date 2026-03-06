@@ -58,14 +58,28 @@ logger.setLevel(logging.INFO)
 def lambda_handler(event, context):
     """Run the 6-factor signal analysis.
 
-    Handles three trigger modes:
-    1. Scheduled (EventBridge cron): Fan out — invoke self async per stock
-    2. Single ticker ({"ticker": "NVDA"}): Analyze one stock
-    3. Multiple tickers ({"tickers": [...]}): Fan out — invoke self async per stock
+    Routes on event.run_type:
+      "daily_light"    — Light refresh: detect changes, update technicals, NO Claude
+      "weekly_deep"    — Full Claude-powered analysis for all stocks (Saturday 6AM)
+      "process_queue"  — Process urgent scoring queue (hourly during market hours)
+      (default)        — Legacy: single ticker or scheduled fan-out
     """
     try:
-        logger.info(f"[SignalEngine] Starting at {datetime.now(timezone.utc).isoformat()}")
+        run_type = event.get("run_type", "")
+        logger.info(
+            f"[SignalEngine] Starting at {datetime.now(timezone.utc).isoformat()}, "
+            f"run_type={run_type or 'default'}"
+        )
 
+        # ── Route based on run_type ──
+        if run_type == "daily_light":
+            return _run_daily_light_refresh(event)
+        if run_type == "weekly_deep":
+            return _run_weekly_deep_analysis(event, context)
+        if run_type == "process_queue":
+            return _run_queue_processor(event)
+
+        # ── Legacy: single ticker or scheduled fan-out ──
         tickers = _extract_tickers(event)
 
         # Single ticker — process it directly (tier-aware)
@@ -1053,6 +1067,417 @@ def _store_signal(ticker: str, result: dict) -> None:
     s3.write_json(f"signals/{ticker}.json", result)
 
     logger.info(f"[{ticker}] Stored signal in DynamoDB + S3")
+
+
+def _safe_float(val, default=0.0):
+    """Safely convert to float."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _run_daily_light_refresh(event):
+    """Daily light refresh — detect material changes, recompute scores, NO Claude.
+
+    Runs at 6AM ET weekdays. Free (no Claude API calls).
+    Steps:
+      1. Detect material changes across all stocks
+      2. Re-score changed stocks from cached data (no new API calls)
+      3. Apply stability buffer (skip if delta < 0.5)
+      4. Normalize signal distribution
+    """
+    import change_detector
+
+    now = datetime.now(timezone.utc)
+    all_tickers = list(ALL_SECURITIES)
+
+    # 1. Detect material changes
+    logger.info("[DailyLight] Scanning for material changes...")
+    change_result = change_detector.detect_all_changes(db, all_tickers)
+    flagged = change_result.get("flagged_tickers", [])
+    logger.info(
+        f"[DailyLight] {change_result['flagged_count']} stocks flagged "
+        f"out of {change_result['scanned']}"
+    )
+
+    # 2. Light-refresh scores for flagged stocks
+    updated = 0
+    skipped = 0
+    errors = 0
+    for ticker in flagged:
+        try:
+            did_update = _light_refresh_signal(ticker)
+            if did_update:
+                updated += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(f"[DailyLight] Error refreshing {ticker}: {e}")
+
+    # 3. Normalize if we updated anything
+    if updated > 0:
+        logger.info(f"[DailyLight] Normalizing signals after {updated} updates...")
+        _normalize_signals()
+
+    # 4. Record the run
+    db.put_item({
+        "PK": "AGENT_RUN#daily_light",
+        "SK": now.isoformat(),
+        "run_type": "daily_light",
+        "scanned": len(all_tickers),
+        "flagged": len(flagged),
+        "updated": updated,
+        "skipped_stable": skipped,
+        "errors": errors,
+        "flagged_tickers": flagged[:50],
+        "change_summary": change_result.get("by_priority", {}),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(
+        f"[DailyLight] Complete: {updated} updated, {skipped} stable (delta<0.5), "
+        f"{errors} errors"
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "run_type": "daily_light",
+            "scanned": len(all_tickers),
+            "flagged": len(flagged),
+            "updated": updated,
+            "skipped_stable": skipped,
+            "errors": errors,
+            "timestamp": now.isoformat(),
+        }),
+    }
+
+
+def _light_refresh_signal(ticker):
+    """Re-compute compositeScore from cached DynamoDB data (no API calls).
+
+    Uses the 6-component formula:
+      Momentum (25%) + Technical (20%) + Fundamental (20%) +
+      Stability (10%) + Sector Momentum (15%) + Volatility (10%)
+
+    Applies stability buffer: skip update if abs(new - old) < 0.5.
+
+    Returns True if score was updated, False if skipped (stable).
+    """
+    STABILITY_BUFFER = 0.5
+
+    # Fetch cached data
+    price_data = db.get_item(f"PRICE#{ticker}", "LATEST") or {}
+    tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST") or {}
+    health_data = db.get_item(f"HEALTH#{ticker}", "LATEST") or {}
+    signal_data = db.get_item(f"SIGNAL#{ticker}", "LATEST") or {}
+
+    old_score = _safe_float(signal_data.get("compositeScore"))
+
+    # Parse indicators from tech_data
+    indicators = tech_data.get("indicators") or {}
+    if isinstance(indicators, str):
+        try:
+            indicators = json.loads(indicators)
+        except Exception:
+            indicators = {}
+
+    signals = indicators.get("signals") or {}
+    if isinstance(signals, str):
+        try:
+            signals = json.loads(signals)
+        except Exception:
+            signals = {}
+
+    # ── Component 1: Momentum (25%) ──
+    change_pct = _safe_float(price_data.get("changePercent"))
+    momentum_score = 5.0 + (change_pct * 0.5)
+    momentum_score = max(1.0, min(10.0, momentum_score))
+
+    # ── Component 2: Technical (20%) ──
+    rsi = _safe_float(indicators.get("rsi"), default=50.0)
+    macd_data = indicators.get("macd") or {}
+    if isinstance(macd_data, str):
+        try:
+            macd_data = json.loads(macd_data)
+        except Exception:
+            macd_data = {}
+
+    # RSI component: 30-70 is neutral, extremes are signals
+    if rsi >= 70:
+        rsi_score = max(1.0, 10.0 - (rsi - 70) * 0.3)
+    elif rsi <= 30:
+        rsi_score = min(10.0, 1.0 + (30 - rsi) * 0.3)
+    else:
+        rsi_score = 5.0 + (50 - rsi) * 0.05
+
+    macd_signal = signals.get("macd", "")
+    macd_score = 5.0
+    if macd_signal == "bullish_crossover":
+        macd_score = 7.5
+    elif macd_signal == "bearish_crossover":
+        macd_score = 2.5
+
+    tech_score = (rsi_score * 0.5 + macd_score * 0.5)
+
+    # ── Component 3: Fundamental (20%) ──
+    pe_ratio = _safe_float(health_data.get("peRatio"), default=20.0)
+    if pe_ratio <= 0:
+        fund_score = 5.0
+    elif pe_ratio < 15:
+        fund_score = 8.0
+    elif pe_ratio < 25:
+        fund_score = 6.0
+    elif pe_ratio < 40:
+        fund_score = 4.0
+    else:
+        fund_score = 2.0
+
+    # ── Component 4: Stability (10%) ──
+    beta = _safe_float(health_data.get("beta"), default=1.0)
+    stability_score = max(1.0, min(10.0, 8.0 - abs(beta - 1.0) * 3.0))
+
+    # ── Component 5: Sector Momentum (15%) ──
+    sector = health_data.get("sector", "")
+    sector_perf = _safe_float(price_data.get("sectorPerformance"))
+    sector_score = 5.0 + (sector_perf * 0.5)
+    sector_score = max(1.0, min(10.0, sector_score))
+
+    # ── Component 6: Volatility (10%) ──
+    atr_pct = _safe_float(indicators.get("atrPercent"), default=2.0)
+    vol_score = max(1.0, min(10.0, 8.0 - atr_pct * 1.5))
+
+    # ── Weighted composite ──
+    new_score = (
+        momentum_score * 0.25
+        + tech_score * 0.20
+        + fund_score * 0.20
+        + stability_score * 0.10
+        + sector_score * 0.15
+        + vol_score * 0.10
+    )
+    new_score = round(max(1.0, min(10.0, new_score)), 2)
+
+    # Stability buffer: skip if change is negligible
+    if abs(new_score - old_score) < STABILITY_BUFFER:
+        logger.debug(
+            f"[DailyLight] {ticker}: delta={abs(new_score - old_score):.2f} "
+            f"< {STABILITY_BUFFER}, skipping"
+        )
+        return False
+
+    # Update the signal record
+    now = datetime.now(timezone.utc).isoformat()
+    label = score_to_label(new_score)
+
+    db.update_item(
+        f"SIGNAL#{ticker}", "LATEST",
+        updates={
+            "compositeScore": str(new_score),
+            "score_label": label,
+            "signal": label,
+            "lastUpdated": now,
+            "lastRefreshType": "daily_light",
+        },
+    )
+
+    logger.info(
+        f"[DailyLight] {ticker}: {old_score} -> {new_score} "
+        f"(delta={abs(new_score - old_score):.2f}, label={label})"
+    )
+    return True
+
+
+def _run_weekly_deep_analysis(event, context):
+    """Weekly deep analysis — full Claude-powered scoring for all stocks.
+
+    Runs Saturday 6AM ET. Budget ~$15-25.
+    Steps:
+      1. Process any urgent queue items with Sonnet first
+      2. Score ALL stocks with Haiku via batch_scorer
+      3. Normalize signal distribution
+      4. Refresh stress tests for TIER_1 stocks
+    """
+    import change_detector
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Process urgent queue first (Sonnet for urgent items)
+    logger.info("[WeeklyDeep] Processing urgent queue...")
+    queue_items = change_detector.get_scoring_queue(db, limit=50)
+    urgent_items = [
+        item for item in queue_items if item.get("priority") == "urgent"
+    ]
+    urgent_scored = 0
+    for item in urgent_items:
+        ticker = item.get("ticker")
+        if ticker:
+            try:
+                batch_scorer.score_batch([ticker], run_type="urgent")
+                change_detector.remove_from_queue(db, item.get("SK", ""))
+                urgent_scored += 1
+            except Exception as e:
+                logger.warning(f"[WeeklyDeep] Urgent scoring failed for {ticker}: {e}")
+
+    logger.info(f"[WeeklyDeep] Urgent queue: {urgent_scored} scored")
+
+    # 2. Full batch scoring with Haiku for all stocks
+    logger.info("[WeeklyDeep] Starting full batch scoring...")
+    all_stock_tickers = [t for t in ALL_SECURITIES if t not in ETF_SET]
+    batch_summary = batch_scorer.score_batch(all_stock_tickers, run_type="weekly")
+    logger.info(
+        f"[WeeklyDeep] Batch complete: {batch_summary.get('scored', 0)} scored, "
+        f"~${batch_summary.get('cost_estimate', 0):.4f}"
+    )
+
+    # 3. Normalize signals
+    logger.info("[WeeklyDeep] Normalizing signals...")
+    _normalize_signals()
+
+    # 4. Refresh stress tests for TIER_1
+    stress_refreshed = 0
+    try:
+        import stress_engine
+
+        for ticker in list(TIER_1_SET)[:50]:
+            try:
+                price_data = db.get_item(f"PRICE#{ticker}", "LATEST") or {}
+                health_data = db.get_item(f"HEALTH#{ticker}", "LATEST") or {}
+                tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST") or {}
+                report = stress_engine.build_full_stress_report(
+                    ticker, price_data, health_data, tech_data
+                )
+                stress_engine.store_stress_report(db, ticker, report)
+                stress_refreshed += 1
+            except Exception as e:
+                logger.debug(f"[WeeklyDeep] Stress refresh failed for {ticker}: {e}")
+    except ImportError:
+        logger.warning("[WeeklyDeep] stress_engine not available, skipping stress refresh")
+
+    # 5. Clear remaining queue
+    for item in queue_items:
+        try:
+            change_detector.remove_from_queue(db, item.get("SK", ""))
+        except Exception:
+            pass
+
+    # 6. Record the run
+    completed_at = datetime.now(timezone.utc).isoformat()
+    cost = batch_summary.get("cost_estimate", 0)
+    db.put_item({
+        "PK": "AGENT_RUN#weekly_deep",
+        "SK": now.isoformat(),
+        "run_type": "weekly_deep",
+        "stocks_scored": batch_summary.get("scored", 0),
+        "urgent_scored": urgent_scored,
+        "stress_refreshed": stress_refreshed,
+        "errors": batch_summary.get("errors", 0),
+        "cost_estimate": str(round(cost, 4)),
+        "started_at": now.isoformat(),
+        "completed_at": completed_at,
+    })
+
+    logger.info(
+        f"[WeeklyDeep] Complete: {batch_summary.get('scored', 0)} stocks, "
+        f"{urgent_scored} urgent, {stress_refreshed} stress refreshed, "
+        f"~${cost:.4f}"
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "run_type": "weekly_deep",
+            "stocks_scored": batch_summary.get("scored", 0),
+            "urgent_scored": urgent_scored,
+            "stress_refreshed": stress_refreshed,
+            "cost_estimate": round(cost, 4),
+            "timestamp": now.isoformat(),
+        }),
+    }
+
+
+def _run_queue_processor(event):
+    """Process the scoring queue — runs hourly during market hours.
+
+    Scores urgent items with Sonnet, others with Haiku.
+    Max 20 items per run to stay within Lambda timeout.
+    """
+    import change_detector
+
+    now = datetime.now(timezone.utc)
+
+    # Check market hours (9:30 AM - 4:00 PM ET, Mon-Fri)
+    et_hour = (now.hour - 5) % 24  # rough UTC->ET
+    is_weekday = now.weekday() < 5
+    is_market_hours = is_weekday and 9 <= et_hour <= 16
+
+    if not is_market_hours:
+        logger.info("[QueueProcessor] Outside market hours, skipping")
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Outside market hours", "processed": 0}),
+        }
+
+    # Read queue (max 20 per run)
+    queue_items = change_detector.get_scoring_queue(db, limit=20)
+    if not queue_items:
+        logger.info("[QueueProcessor] Queue empty, nothing to process")
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Queue empty", "processed": 0}),
+        }
+
+    logger.info(f"[QueueProcessor] Processing {len(queue_items)} items...")
+
+    processed = 0
+    errors = 0
+    for item in queue_items:
+        ticker = item.get("ticker")
+        priority = item.get("priority", "normal")
+        if not ticker:
+            continue
+
+        try:
+            run_type = "urgent" if priority == "urgent" else "daily"
+            batch_scorer.score_batch([ticker], run_type=run_type)
+            change_detector.remove_from_queue(db, item.get("SK", ""))
+            processed += 1
+            logger.info(f"[QueueProcessor] Scored {ticker} (priority={priority})")
+        except Exception as e:
+            errors += 1
+            logger.warning(f"[QueueProcessor] Failed to score {ticker}: {e}")
+
+    # Normalize if we processed anything
+    if processed > 0:
+        _normalize_signals()
+
+    # Record the run
+    db.put_item({
+        "PK": "AGENT_RUN#queue_processor",
+        "SK": now.isoformat(),
+        "run_type": "queue_processor",
+        "queue_depth": len(queue_items),
+        "processed": processed,
+        "errors": errors,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(f"[QueueProcessor] Complete: {processed} processed, {errors} errors")
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "run_type": "process_queue",
+            "processed": processed,
+            "errors": errors,
+            "queue_depth": len(queue_items),
+            "timestamp": now.isoformat(),
+        }),
+    }
 
 
 def _run_batch_scoring(event: dict, tickers: list) -> None:
