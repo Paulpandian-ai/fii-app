@@ -119,8 +119,8 @@ export const WealthAdvisorScreen: React.FC = () => {
             score: r.aiScore ?? r.score ?? 0,
             sector: r.sector || 'Unknown',
             reason: holdingSectors.has(r.sector)
-              ? `High FII score (${r.aiScore ?? r.score ?? 0}/10) — strengthens ${r.sector} position`
-              : `High FII score (${r.aiScore ?? r.score ?? 0}/10) — adds ${r.sector} diversification`,
+              ? `FII score ${r.aiScore ?? r.score ?? 0}/10 — strong factor alignment in ${r.sector}`
+              : `FII score ${r.aiScore ?? r.score ?? 0}/10 — fills ${r.sector} sector gap`,
           }));
         setBuyRecs(recs);
       } catch {
@@ -148,7 +148,7 @@ export const WealthAdvisorScreen: React.FC = () => {
   if (hasRun && optimization) {
     const currentSharpe = optimization.currentPortfolio?.sharpeRatio ?? 0;
     if (currentSharpe > 0.5) strengths.push('Strong risk-adjusted returns (Sharpe > 0.5)');
-    if (currentSharpe <= 0.3) weaknesses.push('Low risk-adjusted returns — consider rebalancing');
+    if (currentSharpe <= 0.3) weaknesses.push('Low risk-adjusted returns — rebalancing may help');
 
     const sectorCount = new Set(diversification?.sectors?.map((s) => s.sector) || []).size;
     if (sectorCount >= 5) strengths.push(`Diversified across ${sectorCount} sectors`);
@@ -161,10 +161,10 @@ export const WealthAdvisorScreen: React.FC = () => {
     if (lowScoreCount > 0) weaknesses.push(`${lowScoreCount} holding${lowScoreCount !== 1 ? 's' : ''} with low FII scores — review positions`);
 
     if (diversification && diversification.diversificationScore < 50) {
-      opportunities.push('Improve diversification — consider international or bond exposure');
+      opportunities.push('Low diversification score — international or bond exposure may help');
     }
     if (moves.length > 0) {
-      opportunities.push(`${moves.length} rebalancing move${moves.length !== 1 ? 's' : ''} could improve your portfolio`);
+      opportunities.push(`${moves.length} potential rebalancing move${moves.length !== 1 ? 's' : ''} identified by factor analysis`);
     }
   }
 
@@ -205,7 +205,7 @@ export const WealthAdvisorScreen: React.FC = () => {
         ticker: 'CASH',
         name: 'Cash Reserve',
         category: 'Cash Position',
-        reason: 'Market volatility is elevated — consider keeping 10% in cash for opportunities.',
+        reason: 'Market volatility is elevated — data suggests cash reserves may reduce drawdowns.',
         icon: 'wallet',
         color: '#00C9A7',
       });
@@ -309,7 +309,7 @@ export const WealthAdvisorScreen: React.FC = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>High-Scoring Stocks by Sector</Text>
           <Text style={styles.sectionSubtitle}>
-            Stocks that could improve your portfolio based on gaps and FII scores
+            Stocks with high FII scores in sectors where your portfolio has gaps
           </Text>
 
           {buyLoading ? (

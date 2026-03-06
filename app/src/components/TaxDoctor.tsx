@@ -126,8 +126,8 @@ export const TaxDoctor: React.FC<Props> = ({
               <Ionicons name="checkmark-circle" size={32} color="#00C9A7" />
               <Text style={styles.emptyTitle}>Clean Bill of Health</Text>
               <Text style={styles.emptyText}>
-                No tax-loss harvesting opportunities found. Your portfolio
-                positions are all in the green!
+                No tax-loss harvesting opportunities found. All positions
+                are currently showing unrealized gains.
               </Text>
             </View>
           ) : (

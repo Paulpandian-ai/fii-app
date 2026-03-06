@@ -306,7 +306,7 @@ export const AICoachScreen: React.FC = () => {
                     <View style={styles.watchItem}>
                       <Ionicons name="shield-checkmark" size={16} color="#FBBF24" />
                       <Text style={styles.watchItemText}>
-                        Review any rebalancing recommendations
+                        Review rebalancing insights from factor analysis
                       </Text>
                     </View>
                   </View>

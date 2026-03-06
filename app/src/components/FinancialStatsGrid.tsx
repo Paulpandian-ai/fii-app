@@ -78,9 +78,9 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   // Momentum & Technicals
   beta: 'How much the stock moves relative to the market. Beta > 1 means more volatile than average.',
   fifty_two_week_high: 'Highest price in the past year. Proximity to this level can indicate strength.',
-  fifty_two_week_low: 'Lowest price in the past year. Proximity may indicate weakness or a buying opportunity.',
-  fifty_day_ma: '50-day moving average price. A short-term trend indicator. Price above = bullish.',
-  two_hundred_day_ma: '200-day moving average price. A long-term trend indicator. Price above = bullish.',
+  fifty_two_week_low: 'Lowest price in the past year. Proximity may indicate weakness or value.',
+  fifty_day_ma: '50-day moving average price. A short-term trend indicator. Price above suggests upward momentum.',
+  two_hundred_day_ma: '200-day moving average price. A long-term trend indicator. Price above suggests upward trend.',
   relative_strength_index: 'RSI measures momentum. Above 70 is overbought, below 30 is oversold.',
   avg_volume: 'Average number of shares traded daily. Higher volume means easier to buy and sell.',
   price_to_52w_high: 'Current price as a percentage of the 52-week high. Shows how far from the peak.',
@@ -88,10 +88,10 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   // Ownership
   insider_ownership: 'Percentage of shares owned by company executives. Higher can align interests with shareholders.',
   institutional_ownership: 'Percentage owned by funds and institutions. High institutional ownership adds stability.',
-  insider_transactions: 'Recent insider buying or selling activity. Insiders buying is generally a positive signal.',
+  insider_transactions: 'Recent insider buying or selling activity. Insider purchases historically correlate with confidence.',
   shares_outstanding: 'Total shares that exist. Used to calculate market cap and per-share metrics.',
   float_shares: 'Shares available for public trading. Lower float can mean higher volatility.',
-  shares_short: 'Number of shares currently sold short by bearish investors.',
+  shares_short: 'Number of shares currently sold short. High short interest reflects negative market sentiment.',
   // Additional metric tooltips
   fcf_yield: 'Free cash flow relative to market cap. Higher means more cash generation per dollar of valuation.',
   earnings_yield: 'Earnings divided by share price (inverse of P/E). Higher means cheaper relative to profits.',
