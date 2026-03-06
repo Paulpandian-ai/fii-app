@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getFactorDetail } from '../services/api';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -269,6 +270,8 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
                     {'\u24D8'} For educational purposes only
                   </Text>
                 </View>
+
+                <AIContentDisclaimer />
               </>
             )}
           </ScrollView>

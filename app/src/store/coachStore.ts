@@ -215,7 +215,7 @@ const DEFAULT_LEARNING_PATHS: LearningPathsData = {
             '"Neutral" means conditions are mixed — factors are balanced. Historically, stocks with these scores show no strong directional tendency.',
             '"Weak" and "Caution" labels indicate deteriorating conditions: weakening fundamentals, negative technical momentum, or elevated risk factors.',
           ],
-          quiz: [{ question: 'What does a "Neutral" score label indicate?', options: ['The stock will drop', 'Factors are currently mixed with no strong direction', 'You should exit immediately', 'Ignore FII completely'], correctIndex: 1 }],
+          quiz: [{ question: 'What does a "Neutral" score label indicate?', options: ['The stock will drop', 'Factors are currently mixed with no strong direction', 'All factors signal immediate risk', 'Ignore FII completely'], correctIndex: 1 }],
         },
         {
           id: 's5', title: 'Confidence Levels', xpReward: 10,

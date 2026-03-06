@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 export const AIContentDisclaimer: React.FC = () => (
   <View style={styles.container}>
     <Ionicons name="information-circle-outline" size={11} color="rgba(255,255,255,0.3)" />
-    <Text style={styles.text}>For educational purposes only. Not investment advice.</Text>
+    <Text style={styles.text}>AI-generated analysis for educational purposes only</Text>
   </View>
 );
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 // ── Types ──
 
@@ -152,6 +153,8 @@ export const StressTestCards: React.FC<Props> = ({ report, investmentAmount = 10
           {disclaimer || 'Estimates based on historical patterns and factor analysis. Not predictions.'}
         </Text>
       </View>
+
+      <AIContentDisclaimer />
     </View>
   );
 };

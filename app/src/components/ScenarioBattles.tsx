@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ScenarioCard } from '../types';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -135,6 +136,8 @@ export const ScenarioBattles: React.FC<Props> = ({ scenarios, isLoading }) => {
           </View>
         ))}
       </ScrollView>
+
+      <AIContentDisclaimer />
     </View>
   );
 };

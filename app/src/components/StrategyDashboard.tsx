@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { ReportCard } from '../types';
+import { AIContentDisclaimer } from './AIContentDisclaimer';
 
 interface Props {
   reportCard: ReportCard | null;
@@ -144,6 +145,8 @@ export const StrategyDashboard: React.FC<Props> = ({
           </View>
         </>
       )}
+
+      <AIContentDisclaimer />
     </View>
   );
 };

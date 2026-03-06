@@ -58,6 +58,8 @@ import {
   getScreener,
   getFinancials,
 } from '../services/api';
+import { DisclaimerFooter } from '../components/DisclaimerFooter';
+import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
 
 // ═══════════════════════════════════════════════════════════════
 // Constants
@@ -1042,6 +1044,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <Text style={styles.sectionTitle}>Financial Statistics</Text>
         <FinancialStatsGrid ticker={ticker} />
       </View>
+      <AIContentDisclaimer />
+      <DisclaimerFooter />
     </ScrollView>
   );
 
@@ -1340,6 +1344,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         </TouchableOpacity>
       </View>
 
+      <AIContentDisclaimer />
+      <DisclaimerFooter />
       {/* Bottom padding */}
       <View style={{ height: 40 }} />
     </ScrollView>

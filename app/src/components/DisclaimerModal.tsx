@@ -26,7 +26,7 @@ export const DisclaimerModal: React.FC = () => {
           <Text style={styles.title}>Important Information</Text>
           <ScrollView style={styles.scrollBody}>
             <Text style={styles.body}>
-              Factor Impact Intelligence provides educational analysis of publicly available financial data. FII is not a registered investment adviser and does not provide personalized investment advice. Factor scores represent quantitative analysis of market data and are not recommendations to buy, sell, or hold any security. You are solely responsible for your investment decisions. Past performance does not guarantee future results.
+              Factor Impact Intelligence provides educational analysis of publicly available market data. All scores, analysis, and content are for informational purposes only and do not constitute investment advice. Past performance does not guarantee future results. Consult a qualified financial advisor before making investment decisions.
             </Text>
           </ScrollView>
           <TouchableOpacity style={styles.button} onPress={handleAccept} activeOpacity={0.8}>
