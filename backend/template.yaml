@@ -695,6 +695,23 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Admin monitoring endpoints
+        GetAdminScoringStatus:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /admin/scoring-status
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetAdminCosts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /admin/costs
+            Method: GET
+            Auth:
+              Authorizer: NONE
         # Catch-all for any remaining routes
         CatchAll:
           Type: HttpApi
@@ -1049,12 +1066,27 @@ Resources:
       Timeout: 900
       MemorySize: 2048
       Events:
-        DailySignalRun:
+        DailyLightRefresh:
           Type: Schedule
           Properties:
             Schedule: cron(0 11 ? * MON-FRI *)
-            Description: Run signal engine at 6AM ET weekdays
+            Description: Daily light refresh — detect changes, re-score, NO Claude (6AM ET weekdays)
             Enabled: true
+            Input: '{"run_type": "daily_light"}'
+        WeeklyDeepAnalysis:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 11 ? * SAT *)
+            Description: Weekly deep analysis — full Claude scoring (~$15-25) (6AM ET Saturday)
+            Enabled: true
+            Input: '{"run_type": "weekly_deep"}'
+        UrgentQueueProcessor:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 14-21 ? * MON-FRI *)
+            Description: Process urgent scoring queue hourly during market hours (9AM-4PM ET)
+            Enabled: true
+            Input: '{"run_type": "process_queue"}'
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !If [CreateTable, !Ref FiiTable, !Ref ExistingTableName]
