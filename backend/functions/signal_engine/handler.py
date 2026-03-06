@@ -1123,6 +1123,14 @@ def _run_daily_light_refresh(event):
         logger.info(f"[DailyLight] Normalizing signals after {updated} updates...")
         _normalize_signals()
 
+    # 3b. Run data quality validation after scoring
+    try:
+        import data_quality
+        data_quality.run_post_scoring_validation(db, run_type="post_daily")
+        logger.info("[DailyLight] Data quality validation complete")
+    except Exception as e:
+        logger.warning(f"[DailyLight] Data quality validation failed: {e}")
+
     # 4. Record the run
     db.put_item({
         "PK": "AGENT_RUN#daily_light",
@@ -1358,14 +1366,27 @@ def _run_weekly_deep_analysis(event, context):
     except ImportError:
         logger.warning("[WeeklyDeep] stress_engine not available, skipping stress refresh")
 
-    # 5. Clear remaining queue
+    # 5. Run data quality validation
+    quality_report = None
+    try:
+        import data_quality
+        quality_report = data_quality.run_post_scoring_validation(db, run_type="post_weekly")
+        logger.info(
+            f"[WeeklyDeep] Quality: completeness={quality_report.get('completeness_pct', '?')}%, "
+            f"quality={quality_report.get('quality_score', '?')}%, "
+            f"alerts={len(quality_report.get('alerts', []))}"
+        )
+    except Exception as e:
+        logger.warning(f"[WeeklyDeep] Data quality validation failed: {e}")
+
+    # 6. Clear remaining queue
     for item in queue_items:
         try:
             change_detector.remove_from_queue(db, item.get("SK", ""))
         except Exception:
             pass
 
-    # 6. Record the run
+    # 7. Record the run
     completed_at = datetime.now(timezone.utc).isoformat()
     cost = batch_summary.get("cost_estimate", 0)
     db.put_item({
@@ -1395,6 +1416,7 @@ def _run_weekly_deep_analysis(event, context):
             "urgent_scored": urgent_scored,
             "stress_refreshed": stress_refreshed,
             "cost_estimate": round(cost, 4),
+            "quality_alerts": len(quality_report.get("alerts", [])) if quality_report else None,
             "timestamp": now.isoformat(),
         }),
     }
