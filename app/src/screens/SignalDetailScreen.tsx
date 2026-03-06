@@ -728,7 +728,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               <View style={styles.riskCrashRow}>
                 <Text style={styles.riskCrashLabel}>Severe crisis estimate:</Text>
                 <Text style={styles.riskCrashValue}>
-                  $10,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact}%)
+                  $10,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact.toFixed(1)}%)
                 </Text>
               </View>
             );
@@ -785,6 +785,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             </>
           );
         })()}
+        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
       {/* SECTION 3: WHAT'S DRIVING THIS SCORE — Beginner-friendly translations */}
@@ -851,6 +852,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         ) : (
           <Text style={styles.emptyText}>Score drivers will appear after the next analysis cycle.</Text>
         )}
+        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
       {/* SECTION 4: HOW IT COMPARES — Color-coded peers */}
@@ -993,6 +995,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         {!factorPercentiles && (
           <Text style={styles.emptyText}>Factor percentiles calculating...</Text>
         )}
+        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
       {/* SECTION 3: STRESS TEST */}
@@ -1756,6 +1759,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     lineHeight: 16,
     paddingHorizontal: 8,
+  },
+  aiSectionDisclaimer: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 10,
+    fontStyle: 'italic',
+    textAlign: 'right',
+    marginTop: 8,
   },
 
   // ── Factor Gauges (Analysis tab) ──
