@@ -20,6 +20,7 @@ import { ErrorState } from '../components/ErrorState';
 import { StockChart } from '../components/StockChart';
 import { FactorDetailCard } from '../components/FactorDetailCard';
 import { FinancialStatsGrid } from '../components/FinancialStatsGrid';
+import { StressTestCards } from '../components/StressTestCards';
 import type { ChartData } from '../components/StockChart';
 import type { StockEvent, SignalHistoryPoint } from '../types';
 import type {
@@ -244,7 +245,7 @@ function buildRiskSummary(
   score: number,
   confidence: string,
   scoreDrivers: Array<{ factor: string; direction: string; description: string }>,
-  stressData: any[] | null,
+  stressData: any | null,
   factorPercentiles: FactorPercentiles | null,
 ): string {
   const lines: string[] = [];
@@ -266,17 +267,18 @@ function buildRiskSummary(
     lines.push(`This stock faces significant factor headwinds. ${negText}.${secText}`);
   }
 
-  // Stress test line
-  if (stressData && stressData.length > 0) {
-    const severe = stressData.find((s: any) => s.scenarioKey === 'severely_adverse') || stressData[stressData.length - 1];
-    if (severe && severe.priceImpact != null) {
-      const impact = safeNum(severe.priceImpact);
+  // Stress test line — use new report format
+  const scenarios = stressData?.scenarios;
+  if (scenarios && scenarios.length > 0) {
+    const severe = scenarios.find((s: any) => s.scenarioKey === 'severe') || scenarios[scenarios.length - 1];
+    if (severe && severe.estimated_impact != null) {
+      const impact = safeNum(severe.estimated_impact);
       if (impact < -50) {
-        lines.push(`In a severe recession scenario, the model estimates a potential ${impact}% impact.`);
+        lines.push(`In a severe crisis, a $10,000 investment could drop to ~$${Math.max(0, Math.round(10000 * (1 + impact / 100))).toLocaleString()}.`);
       } else if (impact <= -20) {
-        lines.push(`Stress testing suggests moderate vulnerability to economic downturns (${impact}%).`);
+        lines.push(`Stress testing suggests moderate vulnerability to downturns (est. ${impact}% in a severe crisis).`);
       } else {
-        lines.push(`The stock shows relative resilience in stress test scenarios (${impact}%).`);
+        lines.push(`The stock shows relative resilience in stress test scenarios (est. ${impact}% in a severe crisis).`);
       }
     }
   } else {
@@ -326,7 +328,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [loading, setLoading] = useState(true);
   const [recentEvents, setRecentEvents] = useState<StockEvent[]>([]);
   const [signalHistory, setSignalHistory] = useState<SignalHistoryPoint[]>([]);
-  const [stressData, setStressData] = useState<any[] | null>(null);
+  const [stressData, setStressData] = useState<any | null>(null);
   const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(null);
   const [factorSummaries, setFactorSummaries] = useState<Record<string, { summary: string; score: number; score_label: string; confidence: string }>>({});
   const [scoreDrivers, setScoreDrivers] = useState<Array<{ factor: string; direction: string; description: string }>>([]);
@@ -463,7 +465,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             }
           }),
         fetchWithTimeout(() => getStressTestAll(ticker), controller.signal)
-          .then((d: any) => { if (d) setStressData(d.scenarios || []); }),
+          .then((d: any) => { if (d && d.scenarios) setStressData(d); }),
         fetchWithTimeout(() => getTechnicals(ticker), controller.signal)
           .then((techData: any) => { if (techData && techData.indicatorCount > 0) setTechnicals(techData); }),
         fetchWithTimeout(() => getFundamentals(ticker), controller.signal)
@@ -701,17 +703,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           );
         })()}
 
-        {/* Dollar-based crash estimate */}
-        {stressData && stressData.length > 0 && (() => {
-          const severe = stressData.find((s: any) => s.scenarioKey === 'severely_adverse') || stressData[stressData.length - 1];
-          if (severe && severe.priceImpact != null) {
-            const impact = safeNum(severe.priceImpact);
-            const dollarResult = Math.max(0, Math.round(1000 * (1 + impact / 100)));
+        {/* Dollar-based crash estimate from severe scenario */}
+        {stressData?.scenarios && stressData.scenarios.length > 0 && (() => {
+          const severe = stressData.scenarios.find((s: any) => s.scenarioKey === 'severe') || stressData.scenarios[stressData.scenarios.length - 1];
+          if (severe && severe.estimated_impact != null) {
+            const impact = safeNum(severe.estimated_impact);
+            const dollarResult = Math.max(0, Math.round(10000 * (1 + impact / 100)));
             return (
               <View style={styles.riskCrashRow}>
-                <Text style={styles.riskCrashLabel}>If markets crashed 50%:</Text>
+                <Text style={styles.riskCrashLabel}>Severe crisis estimate:</Text>
                 <Text style={styles.riskCrashValue}>
-                  Your $1,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact}%)
+                  $10,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact}%)
                 </Text>
               </View>
             );
@@ -977,32 +979,15 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
 
       {/* SECTION 3: STRESS TEST */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Stress Test</Text>
-        {stressData && stressData.length > 0 ? (
-          <View style={styles.stressGrid}>
-            {stressData.slice(0, 3).map((scenario: any, idx: number) => {
-              const key = scenario.scenarioKey || `s-${idx}`;
-              const isSevere = scenario.scenarioKey === 'severely_adverse';
-              const isAdverse = scenario.scenarioKey === 'adverse';
-              const bgColor = isSevere ? 'rgba(88,86,214,0.12)' : isAdverse ? 'rgba(245,166,35,0.12)' : 'rgba(142,142,147,0.12)';
-              const labelColor = isSevere ? '#5856D6' : isAdverse ? '#F5A623' : '#8E8E93';
-              return (
-                <View key={key} style={[styles.stressCard, { backgroundColor: bgColor, borderColor: labelColor + '30' }]}>
-                  <Text style={[styles.stressScenarioName, { color: labelColor }]}>{scenario.scenario}</Text>
-                  <Text style={[styles.stressImpact, { color: labelColor }]}>
-                    {scenario.priceImpact > 0 ? '+' : ''}{scenario.priceImpact}%
-                  </Text>
-                  <Text style={styles.stressLabel}>
-                    {scenario.resilienceScore != null ? `Resilience: ${safeNum(scenario.resilienceScore).toFixed(1)}/10` : ''}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
+        {stressData && stressData.scenarios && stressData.scenarios.length > 0 ? (
+          <StressTestCards report={stressData} />
         ) : (
-          <Text style={styles.emptyText}>
-            Stress test analysis pending. Available after next scoring cycle.
-          </Text>
+          <>
+            <Text style={styles.sectionTitle}>Stress Test</Text>
+            <Text style={styles.emptyText}>
+              Stress test analysis pending. Available after next scoring cycle.
+            </Text>
+          </>
         )}
       </View>
 
