@@ -84,7 +84,15 @@ function RiskBar({ impact, riskLevel }: { impact: number; riskLevel: string }) {
 export const StressTestCards: React.FC<Props> = ({ report, investmentAmount = 10000 }) => {
   const { scenarios, historical_events, disclaimer } = report;
 
-  if (!scenarios || scenarios.length === 0) return null;
+  if (!scenarios || scenarios.length === 0) {
+    return (
+      <View style={{ padding: 24, alignItems: 'center' }}>
+        <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, fontStyle: 'italic', textAlign: 'center' }}>
+          Stress analysis is being calculated. Check back shortly.
+        </Text>
+      </View>
+    );
+  }
 
   const amtLabel = `$${investmentAmount.toLocaleString()}`;
 

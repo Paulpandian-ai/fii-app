@@ -208,7 +208,7 @@ export const FactorDetailCard: React.FC<FactorDetailCardProps> = ({
               <View style={styles.emptyContainer}>
                 <Ionicons name="hourglass-outline" size={28} color="rgba(255,255,255,0.3)" />
                 <Text style={styles.emptyText}>
-                  Factor analysis in progress. Available after next scoring cycle.
+                  Detailed analysis will be available after the next weekly scoring cycle (Saturday).
                 </Text>
               </View>
             )}

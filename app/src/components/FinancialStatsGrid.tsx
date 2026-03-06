@@ -271,10 +271,12 @@ interface MetricData {
 export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }) => {
   const [financials, setFinancials] = useState<Record<string, Record<string, MetricData>> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set(['valuation']));
   const [tooltipKey, setTooltipKey] = useState<string | null>(null);
 
   useEffect(() => {
+    setError(false);
     getFinancials(ticker)
       .then((d: any) => {
         if (d && typeof d === 'object') {
@@ -282,7 +284,7 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }
           setFinancials(cats);
         }
       })
-      .catch(() => {})
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, [ticker]);
 
@@ -308,7 +310,25 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = ({ ticker }
     );
   }
 
-  if (!financials || Object.keys(financials).length === 0) return null;
+  if (error) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, textAlign: 'center' }}>
+          Financial data temporarily unavailable. Pull to refresh.
+        </Text>
+      </View>
+    );
+  }
+
+  if (!financials || Object.keys(financials).length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, fontStyle: 'italic', textAlign: 'center' }}>
+          Financial data is being compiled. Check back shortly.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View>
