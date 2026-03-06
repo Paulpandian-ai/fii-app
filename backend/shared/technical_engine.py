@@ -130,6 +130,16 @@ def compute_indicators(candles: list[dict]) -> dict:
     result["vwap"] = _safe_last(_vwap(high, low, close, volume))
     indicator_count += 2
 
+    # Volume ratio: latest volume / 20-day average (for material change detection)
+    if n >= 20 and float(volume.iloc[-1]) > 0:
+        avg_vol_20 = float(volume.iloc[-20:].mean())
+        if avg_vol_20 > 0:
+            result["volume_ratio"] = round(float(volume.iloc[-1]) / avg_vol_20, 2)
+        else:
+            result["volume_ratio"] = None
+    else:
+        result["volume_ratio"] = None
+
     # ─── Pattern: Fibonacci Retracement ───
 
     window = min(60, n)

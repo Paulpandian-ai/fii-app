@@ -103,19 +103,11 @@ def detect_changes_for_ticker(ticker, price_data, tech_data, signal_data):
             reasons.append("macd_crossover")
             magnitude = max(magnitude, 3.0)
 
-        # ── 5. Volume spike ──
-        # Check if current volume is > 2x average
-        volume_data = indicators.get("volume") or {}
-        if isinstance(volume_data, str):
-            try:
-                volume_data = json.loads(volume_data)
-            except Exception:
-                volume_data = {}
-
-        # Also check from signals
-        if signals.get("volume_breakout"):
+        # ── 5. Volume spike > 2x 20-day average ──
+        volume_ratio = _safe_float(indicators.get("volume_ratio"), default=None)
+        if volume_ratio is not None and volume_ratio >= VOLUME_SPIKE_MULTIPLIER:
             reasons.append("volume_spike")
-            magnitude = max(magnitude, 4.0)
+            magnitude = max(magnitude, volume_ratio)
             if priority != PRIORITY_URGENT:
                 priority = PRIORITY_HIGH
 

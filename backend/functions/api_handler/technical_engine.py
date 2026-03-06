@@ -90,6 +90,16 @@ def compute_indicators(candles):
     obv = _obv(closes, volumes)
     result["obv"] = obv
 
+    # Volume ratio: latest volume / 20-day average (for material change detection)
+    if n >= 20 and volumes[-1] > 0:
+        avg_vol_20 = sum(volumes[-20:]) / 20
+        if avg_vol_20 > 0:
+            result["volume_ratio"] = round(volumes[-1] / avg_vol_20, 2)
+        else:
+            result["volume_ratio"] = None
+    else:
+        result["volume_ratio"] = None
+
     # ─── Signals & Score ───
 
     signals = _generate_signals(latest, sma20, sma50, sma200, rsi, macd_hist)
