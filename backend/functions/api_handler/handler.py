@@ -70,9 +70,12 @@ Routes:
 """
 
 import json
+import logging
 import os
 import sys
 import traceback
+
+logger = logging.getLogger(__name__)
 
 # Ensure the function's own directory is searched FIRST for local modules
 # (finnhub_client.py, technical_engine.py), then the Lambda layer.
@@ -5413,7 +5416,11 @@ def _handle_coach_weekly(user_id):
 
 
 def _handle_stress_test(method, path, query_params):
-    """GET /stock/<ticker>/stress-test[/all] — Macro stress-test scenarios."""
+    """GET /stock/<ticker>/stress-test[/all] — Enhanced 4-scenario stress test.
+
+    GET /stock/{ticker}/stress-test/all  — Full report (4 scenarios + historical)
+    GET /stock/{ticker}/stress-test      — Single scenario (query: ?scenario=severe)
+    """
     if method != "GET":
         return _response(405, {"error": "Method not allowed"})
 
@@ -5428,6 +5435,24 @@ def _handle_stress_test(method, path, query_params):
 
     run_all = len(parts) >= 4 and parts[3] == "all"
 
+    # Check DynamoDB cache first (1-hour TTL for full reports)
+    if run_all:
+        import datetime as _dt
+        cached = db.get_item(f"STRESS#{ticker}", "LATEST")
+        if cached and cached.get("generatedAt"):
+            try:
+                gen_time = _dt.datetime.fromisoformat(
+                    cached["generatedAt"].replace("Z", "+00:00"))
+                age_hours = (_dt.datetime.now(_dt.timezone.utc) - gen_time
+                             ).total_seconds() / 3600
+                if age_hours < 1.0:
+                    # Return cached report
+                    cached.pop("PK", None)
+                    cached.pop("SK", None)
+                    return _response(200, cached)
+            except (ValueError, TypeError):
+                pass
+
     # Fetch data from DynamoDB
     price_data = db.get_item(f"PRICE#{ticker}", "LATEST")
     tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST")
@@ -5438,12 +5463,20 @@ def _handle_stress_test(method, path, query_params):
         return _response(404, {"error": f"No price data for {ticker}"})
 
     if run_all:
-        results = stress_engine.run_all_scenarios(
-            ticker, price_data, tech_data, health_data, signal_data
+        # Build full stress report with 4 scenarios + historical overlays
+        report = stress_engine.build_full_stress_report(
+            ticker, price_data, tech_data, health_data, signal_data,
+            include_historical=True,
         )
-        return _response(200, {"ticker": ticker, "scenarios": results})
+        # Cache in DynamoDB
+        try:
+            stress_engine.store_stress_report(db, ticker, report)
+        except Exception as e:
+            logger.warning("Failed to cache stress report for %s: %s", ticker, e)
+        return _response(200, report)
 
-    scenario_key = query_params.get("scenario", "severely_adverse")
+    # Single scenario
+    scenario_key = query_params.get("scenario", "severe")
     result = stress_engine.run_stress_test(
         ticker, scenario_key, price_data, tech_data, health_data, signal_data
     )
