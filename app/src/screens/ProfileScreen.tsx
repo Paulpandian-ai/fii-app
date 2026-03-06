@@ -82,7 +82,7 @@ export const ProfileScreen: React.FC = () => {
       setProfile(data);
       setEditedName(data.displayName ?? '');
     } catch (err: any) {
-      setError(err?.message ?? 'Failed to load profile');
+      setError('Unable to load profile. Pull down to refresh.');
     } finally {
       setIsLoading(false);
     }
