@@ -19,6 +19,7 @@ import { StrategyScreen } from './src/screens/StrategyScreen';
 import { StocksScreen } from './src/screens/StocksScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { RecentStocksProvider } from './src/contexts/RecentStocksContext';
+import { PriceAlertProvider } from './src/contexts/PriceAlertContext';
 import { SignalDetailScreen } from './src/screens/SignalDetailScreen';
 import { WealthSimulatorScreen } from './src/screens/WealthSimulatorScreen';
 import { TaxStrategyScreen } from './src/screens/TaxStrategyScreen';
@@ -265,6 +266,7 @@ export default function App() {
 
   return (
     <RecentStocksProvider>
+    <PriceAlertProvider>
     <NavigationContainer>
       <StatusBar style="light" />
       <DisclaimerModal />
@@ -400,6 +402,7 @@ export default function App() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+    </PriceAlertProvider>
     </RecentStocksProvider>
   );
 }

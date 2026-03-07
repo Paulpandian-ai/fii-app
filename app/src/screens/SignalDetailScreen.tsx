@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,9 @@ import {
   Platform,
   LayoutAnimation,
   UIManager,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -63,6 +66,7 @@ import {
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
 import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
 import { useRecentStocks } from '../contexts/RecentStocksContext';
+import { usePriceAlerts } from '../contexts/PriceAlertContext';
 
 // ═══════════════════════════════════════════════════════════════
 // Constants
@@ -329,8 +333,19 @@ interface SignalDetailScreenProps {
 export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, navigation }) => {
   const { ticker } = route.params;
   const { addRecent } = useRecentStocks();
+  const { addAlert, checkAlerts, getAlertsForTicker } = usePriceAlerts();
   const pagerRef = useRef<PagerView>(null);
   const [activeTab, setActiveTab] = useState(0);
+
+  // ── Price Alert State ──
+  const [alertModalVisible, setAlertModalVisible] = useState(false);
+  const [alertDirection, setAlertDirection] = useState<'above' | 'below'>('above');
+  const [alertTargetPrice, setAlertTargetPrice] = useState('');
+  const [alertConfirmation, setAlertConfirmation] = useState<string | null>(null);
+
+  // ── Peer Comparison State ──
+  const [peerSortBy, setPeerSortBy] = useState<'score' | 'name'>('score');
+  const [compareModalPeer, setCompareModalPeer] = useState<{ ticker: string; companyName: string; score: number; scoreLabel: string } | null>(null);
 
   // ── Data State ──
   const [analysis, setAnalysis] = useState<FullAnalysis | null>(null);
@@ -392,6 +407,17 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   useEffect(() => {
     addRecent(ticker);
   }, [ticker, addRecent]);
+
+  // Check price alerts when price data loads
+  useEffect(() => {
+    if (priceData?.price) {
+      const triggered = checkAlerts({ [ticker]: priceData.price });
+      if (triggered.length > 0) {
+        setAlertConfirmation(`Alert triggered: ${ticker} is now $${priceData.price.toFixed(2)}`);
+        setTimeout(() => setAlertConfirmation(null), 4000);
+      }
+    }
+  }, [priceData?.price, ticker, checkAlerts]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -521,12 +547,12 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
       const sectorName = price?.sector;
       if (sectorName) {
         phase2.push(
-          fetchWithTimeout(() => getScreener({ sector: sectorName, limit: '5', sort: 'score_desc' }), controller.signal)
+          fetchWithTimeout(() => getScreener({ sector: sectorName, limit: '10', sort: 'score_desc' }), controller.signal)
             .then((d: any) => {
               if (!d) return;
               const results = (d.results || [])
                 .filter((r: any) => r.ticker !== ticker)
-                .slice(0, 3)
+                .slice(0, 5)
                 .map((r: any) => ({
                   ticker: r.ticker,
                   companyName: r.companyName || r.company_name || '',
@@ -699,6 +725,29 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             Better than {Math.round(percentileRank)}% of stocks we track
           </Text>
         )}
+
+        {/* Set Price Alert button */}
+        {hasPriceToShow && (
+          <TouchableOpacity
+            style={styles.alertButton}
+            onPress={() => {
+              setAlertTargetPrice('');
+              setAlertDirection('above');
+              setAlertModalVisible(true);
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="notifications-outline" size={16} color="#60A5FA" />
+            <Text style={styles.alertButtonText}>Set Price Alert</Text>
+            {getAlertsForTicker(ticker).filter((a) => !a.triggered).length > 0 && (
+              <View style={styles.alertCountBadge}>
+                <Text style={styles.alertCountText}>
+                  {getAlertsForTicker(ticker).filter((a) => !a.triggered).length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* SECTION 2: RISK CHECK CARD — Emotional design with thermometer */}
@@ -861,36 +910,60 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
-      {/* SECTION 4: HOW IT COMPARES — Color-coded peers */}
-      {peerStocks.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            How {ticker} compares to similar companies
-          </Text>
-          <View style={styles.peerRow}>
-            {peerStocks.slice(0, 3).map((peer) => {
-              const peerColor = getScoreColor(peer.score);
-              return (
-                <TouchableOpacity
-                  key={peer.ticker}
-                  style={[styles.peerCard, { borderWidth: 1, borderColor: peerColor + '40' }]}
-                  onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker, companyName: peer.companyName })}
-                  activeOpacity={0.7}
-                >
-                  <ScoreRing score={peer.score} size={48} />
-                  <Text style={styles.peerTicker}>{peer.ticker}</Text>
-                  <Text style={[styles.peerScore, { color: peerColor }]}>
-                    {peer.score.toFixed(1)}
-                  </Text>
-                  <Text style={[styles.peerLabel, { color: peerColor }]}>
-                    {peer.scoreLabel}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+      {/* SECTION 4: PEER COMPARISON — Enhanced with sort, compare, insight */}
+      {peerStocks.length > 0 && (() => {
+        const sortedPeers = peerSortBy === 'score'
+          ? [...peerStocks].sort((a, b) => b.score - a.score)
+          : [...peerStocks].sort((a, b) => a.ticker.localeCompare(b.ticker));
+        const higherCount = sortedPeers.filter((p) => compositeScore > p.score).length;
+
+        return (
+          <View style={styles.section}>
+            <View style={styles.peerHeader}>
+              <Text style={styles.sectionTitle}>Peer Comparison</Text>
+              <TouchableOpacity
+                style={styles.peerSortButton}
+                onPress={() => setPeerSortBy(peerSortBy === 'score' ? 'name' : 'score')}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="swap-vertical" size={14} color="rgba(255,255,255,0.5)" />
+                <Text style={styles.peerSortText}>
+                  {peerSortBy === 'score' ? 'By Score' : 'By Name'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peerScrollContent}>
+              {sortedPeers.map((peer) => {
+                const peerColor = getScoreColor(peer.score);
+                const trendArrow = peer.score > compositeScore ? '\u25B2' : peer.score < compositeScore ? '\u25BC' : '\u2500';
+                return (
+                  <TouchableOpacity
+                    key={peer.ticker}
+                    style={[styles.peerCard, { borderTopWidth: 3, borderTopColor: peerColor }]}
+                    onPress={() => setCompareModalPeer(peer)}
+                    activeOpacity={0.7}
+                  >
+                    <ScoreRing score={peer.score} size={48} />
+                    <Text style={styles.peerTicker}>{peer.ticker}</Text>
+                    <Text style={[styles.peerScore, { color: peerColor }]}>
+                      {peer.score.toFixed(1)} {trendArrow}
+                    </Text>
+                    <Text style={[styles.peerLabel, { color: peerColor }]}>
+                      {peer.scoreLabel}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Peer vs You insight */}
+            <Text style={styles.peerInsight}>
+              {ticker} scores higher than {higherCount} of {sortedPeers.length} sector peers
+            </Text>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       {/* SECTION 5: EDUCATIONAL DISCLAIMER */}
       <Text style={styles.eduDisclaimer}>
@@ -1440,6 +1513,164 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           onClose={() => setSelectedDimension(null)}
         />
       )}
+
+      {/* Alert Confirmation Banner */}
+      {alertConfirmation && (
+        <View style={styles.alertBanner}>
+          <Ionicons name="notifications" size={16} color="#60A5FA" />
+          <Text style={styles.alertBannerText}>{alertConfirmation}</Text>
+        </View>
+      )}
+
+      {/* Price Alert Modal */}
+      <Modal
+        visible={alertModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAlertModalVisible(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.alertModalOverlay}>
+          <TouchableOpacity style={styles.alertModalOverlay} activeOpacity={1} onPress={() => setAlertModalVisible(false)}>
+            <TouchableOpacity activeOpacity={1} style={styles.alertModalContent} onPress={() => {}}>
+              <View style={styles.alertModalHandle} />
+              <Text style={styles.alertModalTitle}>Set Price Alert for {ticker}</Text>
+
+              {hasPriceToShow && (
+                <Text style={styles.alertModalCurrentPrice}>
+                  Current Price: ${priceValue.toFixed(2)}
+                </Text>
+              )}
+
+              <Text style={styles.alertModalLabel}>Alert me when price goes:</Text>
+              <View style={styles.alertDirectionRow}>
+                <TouchableOpacity
+                  style={[styles.alertDirectionBtn, alertDirection === 'above' && styles.alertDirectionBtnActive]}
+                  onPress={() => setAlertDirection('above')}
+                >
+                  <Ionicons name="arrow-up" size={16} color={alertDirection === 'above' ? '#FFF' : 'rgba(255,255,255,0.5)'} />
+                  <Text style={[styles.alertDirectionText, alertDirection === 'above' && styles.alertDirectionTextActive]}>
+                    Above
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.alertDirectionBtn, alertDirection === 'below' && styles.alertDirectionBtnActive]}
+                  onPress={() => setAlertDirection('below')}
+                >
+                  <Ionicons name="arrow-down" size={16} color={alertDirection === 'below' ? '#FFF' : 'rgba(255,255,255,0.5)'} />
+                  <Text style={[styles.alertDirectionText, alertDirection === 'below' && styles.alertDirectionTextActive]}>
+                    Below
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.alertModalLabel}>Target Price:</Text>
+              <TextInput
+                style={styles.alertPriceInput}
+                value={alertTargetPrice}
+                onChangeText={setAlertTargetPrice}
+                placeholder="0.00"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+              />
+
+              {hasPriceToShow && (
+                <View style={styles.alertQuickPicks}>
+                  {[5, 10, -5, -10].map((pct) => (
+                    <TouchableOpacity
+                      key={pct}
+                      style={styles.alertQuickPickBtn}
+                      onPress={() => setAlertTargetPrice((priceValue * (1 + pct / 100)).toFixed(2))}
+                    >
+                      <Text style={styles.alertQuickPickText}>
+                        {pct > 0 ? '+' : ''}{pct}%
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.alertSetButton,
+                  (!alertTargetPrice || parseFloat(alertTargetPrice) === priceValue) && styles.alertSetButtonDisabled,
+                ]}
+                onPress={() => {
+                  const target = parseFloat(alertTargetPrice);
+                  if (!target || target === priceValue) return;
+                  addAlert(ticker, analysis?.companyName || ticker, target, alertDirection);
+                  setAlertModalVisible(false);
+                  setAlertConfirmation(`Alert set: ${ticker} ${alertDirection} $${target.toFixed(2)}`);
+                  setTimeout(() => setAlertConfirmation(null), 3000);
+                }}
+                disabled={!alertTargetPrice || parseFloat(alertTargetPrice) === priceValue}
+              >
+                <Ionicons name="notifications" size={18} color="#FFF" />
+                <Text style={styles.alertSetButtonText}>Set Alert</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Peer Comparison Modal */}
+      <Modal
+        visible={compareModalPeer != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCompareModalPeer(null)}
+      >
+        <TouchableOpacity style={styles.compareModalOverlay} activeOpacity={1} onPress={() => setCompareModalPeer(null)}>
+          <View style={styles.compareModalContent}>
+            <View style={styles.alertModalHandle} />
+            <Text style={styles.compareModalTitle}>Compare</Text>
+            {compareModalPeer && (
+              <View style={styles.compareRow}>
+                {/* Current Stock */}
+                <View style={styles.compareCol}>
+                  <ScoreRing score={compositeScore} size={56} />
+                  <Text style={styles.compareTicker}>{ticker}</Text>
+                  <Text style={[styles.compareScore, { color: getScoreColor(compositeScore) }]}>
+                    {compositeScore.toFixed(1)}
+                  </Text>
+                  <Text style={[styles.compareLabel, { color: getScoreColor(compositeScore) }]}>
+                    {scoreLabel}
+                  </Text>
+                </View>
+
+                <Text style={styles.compareVs}>vs</Text>
+
+                {/* Peer Stock */}
+                <View style={styles.compareCol}>
+                  <ScoreRing score={compareModalPeer.score} size={56} />
+                  <Text style={styles.compareTicker}>{compareModalPeer.ticker}</Text>
+                  <Text style={[styles.compareScore, { color: getScoreColor(compareModalPeer.score) }]}>
+                    {compareModalPeer.score.toFixed(1)}
+                  </Text>
+                  <Text style={[styles.compareLabel, { color: getScoreColor(compareModalPeer.score) }]}>
+                    {compareModalPeer.scoreLabel}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.compareActions}>
+              <TouchableOpacity
+                style={styles.compareViewBtn}
+                onPress={() => {
+                  setCompareModalPeer(null);
+                  if (compareModalPeer) {
+                    navigation.push('SignalDetail', { ticker: compareModalPeer.ticker, companyName: compareModalPeer.companyName });
+                  }
+                }}
+              >
+                <Text style={styles.compareViewBtnText}>View {compareModalPeer?.ticker} Details</Text>
+                <Ionicons name="arrow-forward" size={16} color="#60A5FA" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </LinearGradient>
   );
 };
@@ -1727,14 +1958,31 @@ const styles = StyleSheet.create({
   },
 
   // ── Peers ──
-  peerRow: {
+  peerHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  peerSortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  peerSortText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  peerScrollContent: {
+    gap: 10,
+    paddingRight: 16,
   },
   peerCard: {
     alignItems: 'center',
-    flex: 1,
+    width: 90,
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 12,
     padding: 12,
@@ -1754,6 +2002,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: 1,
+  },
+  peerInsight: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 12,
   },
 
   // ── Educational Disclaimer ──
@@ -2299,5 +2554,248 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+
+  // ── Price Alert Button ──
+  alertButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.3)',
+    alignSelf: 'center',
+  },
+  alertButtonText: {
+    color: '#60A5FA',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  alertCountBadge: {
+    backgroundColor: '#60A5FA',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  alertCountText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // ── Alert Banner ──
+  alertBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 100 : 80,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(96,165,250,0.15)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    zIndex: 100,
+  },
+  alertBannerText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+
+  // ── Alert Modal ──
+  alertModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  alertModalContent: {
+    backgroundColor: '#0D1B3E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+  },
+  alertModalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  alertModalTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  alertModalCurrentPrice: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginBottom: 20,
+  },
+  alertModalLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  alertDirectionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
+  alertDirectionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  alertDirectionBtnActive: {
+    backgroundColor: 'rgba(96,165,250,0.2)',
+    borderColor: '#60A5FA',
+  },
+  alertDirectionText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  alertDirectionTextActive: {
+    color: '#FFF',
+  },
+  alertPriceInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  alertQuickPicks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 24,
+  },
+  alertQuickPickBtn: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  alertQuickPickText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  alertSetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#60A5FA',
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  alertSetButtonDisabled: {
+    opacity: 0.4,
+  },
+  alertSetButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  // ── Compare Modal ──
+  compareModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  compareModalContent: {
+    backgroundColor: '#0D1B3E',
+    borderRadius: 20,
+    padding: 24,
+    width: SCREEN_WIDTH - 48,
+    alignItems: 'center',
+  },
+  compareModalTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 20,
+  },
+  compareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 20,
+  },
+  compareCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  compareTicker: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  compareScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  compareLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  compareVs: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  compareActions: {
+    width: '100%',
+  },
+  compareViewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(96,165,250,0.15)',
+  },
+  compareViewBtnText: {
+    color: '#60A5FA',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

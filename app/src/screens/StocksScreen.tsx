@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   StyleSheet,
   Dimensions,
-  Animated,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -19,6 +18,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { getScreener } from '../services/api';
 import { useRecentStocks } from '../contexts/RecentStocksContext';
+import { usePriceAlerts, type PriceAlert } from '../contexts/PriceAlertContext';
 import { ScoreRing } from '../components/ScoreRing';
 import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 import type { ScreenerResult, RootStackParamList, ScoreLabel } from '../types';
@@ -52,6 +52,11 @@ const SECTOR_LIST = [
 export const StocksScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { recentStocks, addRecent } = useRecentStocks();
+  const { alerts, removeAlert } = usePriceAlerts();
+
+  const activeAlerts = useMemo(() => alerts.filter((a) => !a.triggered), [alerts]);
+  const triggeredAlerts = useMemo(() => alerts.filter((a) => a.triggered), [alerts]);
+  const tickersWithAlerts = useMemo(() => new Set(activeAlerts.map((a) => a.ticker)), [activeAlerts]);
 
   // All stocks cache
   const [allStocks, setAllStocks] = useState<ScreenerResult[]>([]);
@@ -154,7 +159,12 @@ export const StocksScreen: React.FC = () => {
         activeOpacity={0.7}
       >
         <View style={styles.stockRowLeft}>
-          <Text style={styles.stockTicker}>{item.ticker}</Text>
+          <View style={styles.tickerRow}>
+            <Text style={styles.stockTicker}>{item.ticker}</Text>
+            {tickersWithAlerts.has(item.ticker) && (
+              <Ionicons name="notifications" size={12} color="#60A5FA" />
+            )}
+          </View>
           <Text style={styles.stockName} numberOfLines={1}>
             {item.companyName}
           </Text>
@@ -167,7 +177,7 @@ export const StocksScreen: React.FC = () => {
         <ScoreBadge score={item.aiScore} label={item.scoreLabel} />
       </TouchableOpacity>
     ),
-    [goToStock],
+    [goToStock, tickersWithAlerts],
   );
 
   if (loading) {
@@ -237,6 +247,41 @@ export const StocksScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Active Alerts */}
+          {(activeAlerts.length > 0 || triggeredAlerts.length > 0) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Price Alerts</Text>
+              {activeAlerts.map((alert) => (
+                <View key={alert.id} style={styles.alertRow}>
+                  <Ionicons name="notifications-outline" size={16} color="#60A5FA" />
+                  <View style={styles.alertRowContent}>
+                    <Text style={styles.alertRowTicker}>{alert.ticker}</Text>
+                    <Text style={styles.alertRowDetail}>
+                      {alert.direction === 'above' ? 'Above' : 'Below'} ${alert.targetPrice.toFixed(2)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removeAlert(alert.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.3)" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {triggeredAlerts.slice(0, 3).map((alert) => (
+                <View key={alert.id} style={[styles.alertRow, styles.alertRowTriggered]}>
+                  <Ionicons name="checkmark-circle" size={16} color="rgba(255,255,255,0.3)" />
+                  <View style={styles.alertRowContent}>
+                    <Text style={[styles.alertRowTicker, styles.alertRowTriggeredText]}>{alert.ticker}</Text>
+                    <Text style={[styles.alertRowDetail, styles.alertRowTriggeredText]}>
+                      {alert.direction === 'above' ? 'Above' : 'Below'} ${alert.targetPrice.toFixed(2)} — Triggered
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removeAlert(alert.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.2)" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
           {/* Recently Viewed */}
           {recentStockData.length > 0 && (
             <View style={styles.section}>
@@ -604,5 +649,41 @@ const styles = StyleSheet.create({
   hintText: {
     color: 'rgba(255,255,255,0.2)',
     fontSize: 13,
+  },
+
+  // Ticker row with alert indicator
+  tickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  // Alert rows
+  alertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  alertRowTriggered: {
+    opacity: 0.5,
+  },
+  alertRowContent: {
+    flex: 1,
+  },
+  alertRowTicker: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  alertRowDetail: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  alertRowTriggeredText: {
+    textDecorationLine: 'line-through',
   },
 });
