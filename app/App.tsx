@@ -16,7 +16,7 @@ import { DisclaimerModal } from './src/components/DisclaimerModal';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { StrategyScreen } from './src/screens/StrategyScreen';
-import { StocksScreen } from './src/screens/StocksScreen';
+import { RadarScreen } from './src/screens/RadarScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
 import { RecentStocksProvider } from './src/contexts/RecentStocksContext';
 import { PriceAlertProvider } from './src/contexts/PriceAlertContext';
@@ -58,8 +58,8 @@ const WrappedPortfolio = () => (
 const WrappedStrategy = () => (
   <ErrorBoundary screenName="StrategyScreen"><StrategyScreen /></ErrorBoundary>
 );
-const WrappedStocks = () => (
-  <ErrorBoundary screenName="StocksScreen"><StocksScreen /></ErrorBoundary>
+const WrappedRadar = () => (
+  <ErrorBoundary screenName="RadarScreen"><RadarScreen /></ErrorBoundary>
 );
 const WrappedCoach = () => (
   <ErrorBoundary screenName="CoachScreen"><CoachScreen /></ErrorBoundary>
@@ -146,7 +146,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof RootTabParamList, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
   Feed: { focused: 'play-circle', unfocused: 'play-circle-outline' },
   Portfolio: { focused: 'briefcase', unfocused: 'briefcase-outline' },
-  Stocks: { focused: 'stats-chart', unfocused: 'stats-chart-outline' },
+  Radar: { focused: 'radio', unfocused: 'radio-outline' },
   Screener: { focused: 'funnel', unfocused: 'funnel-outline' },
   Strategy: { focused: 'sparkles', unfocused: 'sparkles-outline' },
 };
@@ -180,7 +180,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Feed" component={WrappedFeed} />
       <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
-      <Tab.Screen name="Stocks" component={WrappedStocks} />
+      <Tab.Screen name="Radar" component={WrappedRadar} />
       <Tab.Screen name="Screener" component={WrappedScreener} />
       <Tab.Screen name="Strategy" component={WrappedStrategy} />
     </Tab.Navigator>

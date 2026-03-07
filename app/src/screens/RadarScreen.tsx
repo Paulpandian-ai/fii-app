@@ -49,7 +49,7 @@ const SECTOR_LIST = [
 
 // ─── Main Screen ───
 
-export const StocksScreen: React.FC = () => {
+export const RadarScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { recentStocks, addRecent } = useRecentStocks();
   const { alerts, removeAlert } = usePriceAlerts();
@@ -75,11 +75,14 @@ export const StocksScreen: React.FC = () => {
     let mounted = true;
     (async () => {
       try {
-        const data = await getScreener({});
+        const data = await getScreener({ limit: '600' });
+        console.log('Loaded stocks:', data?.results?.length);
         if (mounted && data?.results) {
           setAllStocks(data.results);
         }
-      } catch {}
+      } catch (err) {
+        console.error('Stock load failed:', err);
+      }
       if (mounted) setLoading(false);
     })();
     return () => { mounted = false; };
@@ -98,11 +101,12 @@ export const StocksScreen: React.FC = () => {
   const searchResults = useMemo(() => {
     if (!debouncedQuery) return [];
     const q = debouncedQuery.toLowerCase();
+    console.log('Search query:', q, 'Total stocks:', allStocks.length);
     return allStocks
       .filter(
         (s) =>
-          s.ticker.toLowerCase().includes(q) ||
-          s.companyName.toLowerCase().includes(q),
+          s.ticker?.toLowerCase().includes(q) ||
+          s.companyName?.toLowerCase().includes(q),
       )
       .slice(0, MAX_SEARCH_RESULTS);
   }, [debouncedQuery, allStocks]);
