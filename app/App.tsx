@@ -16,7 +16,9 @@ import { DisclaimerModal } from './src/components/DisclaimerModal';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { PortfolioScreen } from './src/screens/PortfolioScreen';
 import { StrategyScreen } from './src/screens/StrategyScreen';
+import { StocksScreen } from './src/screens/StocksScreen';
 import { CoachScreen } from './src/screens/CoachScreen';
+import { RecentStocksProvider } from './src/contexts/RecentStocksContext';
 import { SignalDetailScreen } from './src/screens/SignalDetailScreen';
 import { WealthSimulatorScreen } from './src/screens/WealthSimulatorScreen';
 import { TaxStrategyScreen } from './src/screens/TaxStrategyScreen';
@@ -43,7 +45,6 @@ import { TermsOfServiceScreen } from './src/screens/TermsOfServiceScreen';
 import { WealthAdvisorScreen } from './src/screens/WealthAdvisorScreen';
 import { TaxPlaybookScreen } from './src/screens/TaxPlaybookScreen';
 import { AICoachScreen } from './src/screens/AICoachScreen';
-import { useCoachStore } from './src/store/coachStore';
 import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
@@ -55,6 +56,9 @@ const WrappedPortfolio = () => (
 );
 const WrappedStrategy = () => (
   <ErrorBoundary screenName="StrategyScreen"><StrategyScreen /></ErrorBoundary>
+);
+const WrappedStocks = () => (
+  <ErrorBoundary screenName="StocksScreen"><StocksScreen /></ErrorBoundary>
 );
 const WrappedCoach = () => (
   <ErrorBoundary screenName="CoachScreen"><CoachScreen /></ErrorBoundary>
@@ -141,20 +145,17 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const TAB_ICONS: Record<keyof RootTabParamList, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
   Feed: { focused: 'play-circle', unfocused: 'play-circle-outline' },
   Portfolio: { focused: 'briefcase', unfocused: 'briefcase-outline' },
+  Stocks: { focused: 'stats-chart', unfocused: 'stats-chart-outline' },
   Screener: { focused: 'funnel', unfocused: 'funnel-outline' },
   Strategy: { focused: 'bar-chart', unfocused: 'bar-chart-outline' },
-  Coach: { focused: 'shield-checkmark', unfocused: 'shield-checkmark-outline' },
 };
 
 function MainTabs() {
-  const dailyDismissed = useCoachStore((s) => s.dailyDismissed);
-  const daily = useCoachStore((s) => s.daily);
-
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        lazy: true, // Don't mount off-screen tabs until user navigates to them
+        lazy: true,
         tabBarIcon: ({ focused, color, size }) => {
           const icons = TAB_ICONS[route.name];
           const iconName = focused ? icons.focused : icons.unfocused;
@@ -178,22 +179,9 @@ function MainTabs() {
     >
       <Tab.Screen name="Feed" component={WrappedFeed} />
       <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
+      <Tab.Screen name="Stocks" component={WrappedStocks} />
       <Tab.Screen name="Screener" component={WrappedScreener} />
       <Tab.Screen name="Strategy" component={WrappedStrategy} />
-      <Tab.Screen
-        name="Coach"
-        component={WrappedCoach}
-        options={{
-          tabBarBadge: daily && !dailyDismissed ? '' : undefined,
-          tabBarBadgeStyle: {
-            backgroundColor: '#4A90D9',
-            minWidth: 8,
-            maxHeight: 8,
-            borderRadius: 4,
-            fontSize: 0,
-          },
-        }}
-      />
     </Tab.Navigator>
   );
 }
@@ -276,6 +264,7 @@ export default function App() {
   }
 
   return (
+    <RecentStocksProvider>
     <NavigationContainer>
       <StatusBar style="light" />
       <DisclaimerModal />
@@ -411,5 +400,6 @@ export default function App() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+    </RecentStocksProvider>
   );
 }

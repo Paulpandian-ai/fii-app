@@ -1098,9 +1098,9 @@ export interface ChatMessage {
 export type RootTabParamList = {
   Feed: undefined;
   Portfolio: undefined;
+  Stocks: undefined;
   Screener: undefined;
   Strategy: undefined;
-  Coach: undefined;
 };
 
 export type RootStackParamList = {

@@ -62,6 +62,7 @@ import {
 } from '../services/api';
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
 import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
+import { useRecentStocks } from '../contexts/RecentStocksContext';
 
 // ═══════════════════════════════════════════════════════════════
 // Constants
@@ -327,6 +328,7 @@ interface SignalDetailScreenProps {
 
 export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, navigation }) => {
   const { ticker } = route.params;
+  const { addRecent } = useRecentStocks();
   const pagerRef = useRef<PagerView>(null);
   const [activeTab, setActiveTab] = useState(0);
 
@@ -386,6 +388,10 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         .catch(() => { clearTimeout(timeout); resolve(null); });
     });
   }, []);
+
+  useEffect(() => {
+    addRecent(ticker);
+  }, [ticker, addRecent]);
 
   useEffect(() => {
     const controller = new AbortController();
