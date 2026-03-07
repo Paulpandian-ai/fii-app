@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Share,
   Alert,
-  Animated,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +18,7 @@ import type { RootStackParamList } from '../types';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useStrategyStore } from '../store/strategyStore';
 import { useSignalStore } from '../store/signalStore';
+import { useCoachStore } from '../store/coachStore';
 import { getInsightsFeed } from '../services/api';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
@@ -58,6 +58,21 @@ export const StrategyScreen: React.FC = () => {
   } = useStrategyStore();
 
   const signals = useSignalStore((s) => s.signals);
+
+  // Coach store for integrated Coach functionality
+  const coachDaily = useCoachStore((s) => s.daily);
+  const coachHasLoaded = useCoachStore((s) => s.hasLoaded);
+  const coachLoadAll = useCoachStore((s) => s.loadAll);
+
+  // Load coach data on mount
+  useEffect(() => {
+    if (!coachHasLoaded) {
+      coachLoadAll();
+    }
+  }, [coachHasLoaded, coachLoadAll]);
+
+  // Recent insights state
+  const [recentInsights, setRecentInsights] = useState<Array<{ title: string; summary: string }>>([]);
 
   const isAnyLoading =
     isOptimizing || isDiversifying || isTaxLoading || isAdviceLoading || isReportCardLoading;
@@ -113,6 +128,25 @@ export const StrategyScreen: React.FC = () => {
       } finally {
         if (mounted) setPulseLoading(false);
       }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Load recent insights
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await getInsightsFeed(5);
+        if (!mounted) return;
+        const insights = (data?.insights ?? [])
+          .slice(0, 5)
+          .map((i: any) => ({
+            title: i.title || 'Insight',
+            summary: i.summary || i.body || '',
+          }));
+        setRecentInsights(insights);
+      } catch {}
     })();
     return () => { mounted = false; };
   }, []);
@@ -207,7 +241,7 @@ export const StrategyScreen: React.FC = () => {
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.topBarTitle}>Strategy</Text>
+          <Text style={styles.topBarTitle}>Strategy & Insights</Text>
           {strategyLastUpdated > 0 && <LastUpdated timestamp={strategyLastUpdated} />}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -255,6 +289,37 @@ export const StrategyScreen: React.FC = () => {
                 </Text>
               </>
             )}
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* ═══ AI COACH CARD (integrated from Coach tab) ═══ */}
+        <TouchableOpacity
+          style={styles.coachCard}
+          onPress={() => navigation.navigate('AICoach')}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['rgba(139,92,246,0.12)', 'rgba(96,165,250,0.08)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.coachGradient}
+          >
+            <View style={styles.mainCardInner}>
+              <View style={styles.mainCardLeft}>
+                <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(139,92,246,0.15)' }]}>
+                  <Text style={{ fontSize: 24 }}>💬</Text>
+                </View>
+                <View style={styles.mainCardInfo}>
+                  <Text style={styles.mainCardTitle}>AI Coach</Text>
+                  <Text style={styles.mainCardPreview} numberOfLines={1}>
+                    {coachDaily
+                      ? coachDaily.headline || 'Ask questions about your portfolio or any stock'
+                      : 'Ask questions about your portfolio or any stock'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
+            </View>
           </LinearGradient>
         </TouchableOpacity>
 
@@ -313,36 +378,6 @@ export const StrategyScreen: React.FC = () => {
                     : hasRun
                     ? 'No harvesting opportunities right now'
                     : 'Find tax-saving opportunities'}
-                </Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-          </View>
-        </TouchableOpacity>
-
-        {/* CARD 3: AI Coach */}
-        <TouchableOpacity
-          style={styles.mainCard}
-          onPress={() => navigation.navigate('AICoach')}
-          activeOpacity={0.7}
-        >
-          <View style={styles.mainCardInner}>
-            <View style={styles.mainCardLeft}>
-              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(251,191,36,0.12)' }]}>
-                <Text style={{ fontSize: 24 }}>🤖</Text>
-              </View>
-              <View style={styles.mainCardInfo}>
-                <Text style={styles.mainCardTitle}>AI Coach</Text>
-                <Text style={styles.mainCardPreview} numberOfLines={1}>
-                  {isAdviceLoading
-                    ? 'Generating insights...'
-                    : topAdvice
-                    ? `New insight: ${topAdvice.title}`
-                    : adviceCount > 0
-                    ? `${adviceCount} recommendation${adviceCount !== 1 ? 's' : ''} ready`
-                    : hasRun
-                    ? 'Weekly portfolio review ready'
-                    : 'Get AI-powered portfolio coaching'}
                 </Text>
               </View>
             </View>
@@ -447,6 +482,49 @@ export const StrategyScreen: React.FC = () => {
             )}
           </LinearGradient>
         </View>
+
+        {/* ═══ RECENT INSIGHTS ═══ */}
+        {(recentInsights.length > 0 || advice.length > 0) && (
+          <View style={styles.insightsSection}>
+            <Text style={styles.insightsSectionTitle}>💡 Recent Insights</Text>
+            {advice.slice(0, 2).map((item, idx) => (
+              <TouchableOpacity
+                key={`advice-${idx}`}
+                style={styles.insightRow}
+                onPress={() => navigation.navigate('AICoach')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightTitle} numberOfLines={1}>
+                    "{item.title}"
+                  </Text>
+                  <Text style={styles.insightSummary} numberOfLines={2}>
+                    {item.observation || item.insight || ''}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+              </TouchableOpacity>
+            ))}
+            {recentInsights.slice(0, 3).map((insight, idx) => (
+              <TouchableOpacity
+                key={`insight-${idx}`}
+                style={styles.insightRow}
+                onPress={() => navigation.navigate('AICoach')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.insightContent}>
+                  <Text style={styles.insightTitle} numberOfLines={1}>
+                    "{insight.title}"
+                  </Text>
+                  <Text style={styles.insightSummary} numberOfLines={2}>
+                    {insight.summary}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         <DisclaimerBanner />
         <DisclaimerFooter />
@@ -692,5 +770,55 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // ─── AI Coach Card ───
+  coachCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  coachGradient: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.2)',
+  },
+
+  // ─── Recent Insights ───
+  insightsSection: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  insightsSectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  insightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  insightContent: {
+    flex: 1,
+    marginRight: 8,
+  },
+  insightTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 3,
+  },
+  insightSummary: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

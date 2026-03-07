@@ -148,7 +148,7 @@ const TAB_ICONS: Record<keyof RootTabParamList, { focused: keyof typeof Ionicons
   Portfolio: { focused: 'briefcase', unfocused: 'briefcase-outline' },
   Stocks: { focused: 'stats-chart', unfocused: 'stats-chart-outline' },
   Screener: { focused: 'funnel', unfocused: 'funnel-outline' },
-  Strategy: { focused: 'bar-chart', unfocused: 'bar-chart-outline' },
+  Strategy: { focused: 'sparkles', unfocused: 'sparkles-outline' },
 };
 
 function MainTabs() {
