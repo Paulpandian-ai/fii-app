@@ -84,7 +84,7 @@ export const RadarScreen: React.FC = () => {
     let mounted = true;
     (async () => {
       try {
-        const data = await getScreener({ limit: '600' });
+        const data = await getScreener({ limit: '600', sortBy: 'ticker', sortDir: 'asc' });
         console.log('allStocks length:', (data?.results || data?.items || []).length);
         const raw = data?.results || data?.items || [];
         if (raw.length > 0) {
