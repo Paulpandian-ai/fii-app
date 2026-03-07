@@ -9,23 +9,16 @@ import {
   ActivityIndicator,
   StyleSheet,
   Dimensions,
-  LayoutAnimation,
   Platform,
-  UIManager,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { getScreener } from '../services/api';
 import { useRecentStocks } from '../contexts/RecentStocksContext';
-import { usePriceAlerts, type PriceAlert } from '../contexts/PriceAlertContext';
 import { ScoreRing } from '../components/ScoreRing';
 import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
 import type { ScreenerResult, RootStackParamList, ScoreLabel } from '../types';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -33,30 +26,49 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const DEBOUNCE_MS = 300;
 const MAX_SEARCH_RESULTS = 20;
 
-const SECTOR_LIST = [
-  'Technology',
-  'Healthcare',
-  'Financials',
-  'Energy',
-  'Consumer Cyclical',
-  'Consumer Defensive',
-  'Industrials',
-  'Communication Services',
-  'Utilities',
-  'Real Estate',
-  'Basic Materials',
+// ─── Normalize raw API items to ScreenerResult shape ───
+const normalizeItem = (item: any): ScreenerResult => ({
+  ticker: item.ticker || '',
+  companyName: item.companyName || item.company_name || '',
+  price: item.price ?? 0,
+  change: item.change ?? 0,
+  changePercent: item.changePercent ?? item.change_percent ?? 0,
+  aiScore: item.aiScore ?? item.ai_score ?? item.compositeScore ?? item.score ?? 0,
+  scoreLabel: item.scoreLabel ?? item.score_label ?? getScoreLabel(item.aiScore ?? item.ai_score ?? item.compositeScore ?? item.score ?? 0),
+  confidence: item.confidence || '',
+  technicalScore: item.technicalScore ?? item.technical_score ?? null,
+  fundamentalGrade: item.fundamentalGrade ?? item.fundamental_grade ?? '',
+  rsi: item.rsi ?? null,
+  sector: item.sector || '',
+  marketCap: item.marketCap ?? item.market_cap ?? 0,
+  marketCapLabel: item.marketCapLabel ?? item.market_cap_label ?? '',
+  peRatio: item.peRatio ?? item.pe_ratio ?? null,
+});
+
+// ─── Feature cards data ───
+const FEATURES = [
+  {
+    icon: 'flask-outline' as const,
+    title: '6-Factor Analysis',
+    desc: 'Supply chain, geopolitical, macro, correlations, earnings, risk',
+  },
+  {
+    icon: 'shield-checkmark-outline' as const,
+    title: 'Stress Testing',
+    desc: 'See how stocks perform in crashes, recessions, and sector shocks',
+  },
+  {
+    icon: 'stats-chart-outline' as const,
+    title: '69 Financial Metrics',
+    desc: 'Valuation, profitability, growth with sector benchmarks',
+  },
 ];
 
 // ─── Main Screen ───
 
 export const RadarScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
-  const { recentStocks, addRecent } = useRecentStocks();
-  const { alerts, removeAlert } = usePriceAlerts();
-
-  const activeAlerts = useMemo(() => alerts.filter((a) => !a.triggered), [alerts]);
-  const triggeredAlerts = useMemo(() => alerts.filter((a) => a.triggered), [alerts]);
-  const tickersWithAlerts = useMemo(() => new Set(activeAlerts.map((a) => a.ticker)), [activeAlerts]);
+  const { addRecent } = useRecentStocks();
 
   // All stocks cache
   const [allStocks, setAllStocks] = useState<ScreenerResult[]>([]);
@@ -67,18 +79,19 @@ export const RadarScreen: React.FC = () => {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sector expansion
-  const [expandedSector, setExpandedSector] = useState<string | null>(null);
-
   // Fetch all stocks on mount
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const data = await getScreener({ limit: '600' });
-        console.log('Loaded stocks:', data?.results?.length);
-        if (mounted && data?.results) {
-          setAllStocks(data.results);
+        console.log('allStocks length:', (data?.results || data?.items || []).length);
+        const raw = data?.results || data?.items || [];
+        if (raw.length > 0) {
+          console.log('First stock:', JSON.stringify(raw[0]));
+        }
+        if (mounted && raw.length > 0) {
+          setAllStocks(raw.map(normalizeItem));
         }
       } catch (err) {
         console.error('Stock load failed:', err);
@@ -113,31 +126,20 @@ export const RadarScreen: React.FC = () => {
 
   const isSearching = debouncedQuery.length > 0;
 
-  // Derived data
-  const topScored = useMemo(
-    () => [...allStocks].sort((a, b) => b.aiScore - a.aiScore).slice(0, 5),
+  // Derived data — top 4 by score for trending
+  const trendingStocks = useMemo(
+    () => [...allStocks].sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0)).slice(0, 4),
     [allStocks],
   );
 
+  // Biggest movers — top 3 by absolute changePercent
   const biggestMovers = useMemo(
     () =>
       [...allStocks]
-        .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-        .slice(0, 5),
+        .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0))
+        .slice(0, 3),
     [allStocks],
   );
-
-  const recentStockData = useMemo(() => {
-    const map = new Map(allStocks.map((s) => [s.ticker, s]));
-    return recentStocks
-      .map((t) => map.get(t))
-      .filter(Boolean) as ScreenerResult[];
-  }, [recentStocks, allStocks]);
-
-  const sectorStocks = useMemo(() => {
-    if (!expandedSector) return [];
-    return allStocks.filter((s) => s.sector === expandedSector);
-  }, [expandedSector, allStocks]);
 
   // Navigation
   const goToStock = useCallback(
@@ -148,40 +150,30 @@ export const RadarScreen: React.FC = () => {
     [navigation, addRecent],
   );
 
-  const toggleSector = useCallback((sector: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpandedSector((prev) => (prev === sector ? null : sector));
-  }, []);
-
   // ─── Render helpers ───
 
   const renderSearchResult = useCallback(
     ({ item }: { item: ScreenerResult }) => (
       <TouchableOpacity
-        style={styles.stockRow}
+        style={styles.searchResultRow}
         onPress={() => goToStock(item.ticker)}
         activeOpacity={0.7}
       >
-        <View style={styles.stockRowLeft}>
-          <View style={styles.tickerRow}>
-            <Text style={styles.stockTicker}>{item.ticker}</Text>
-            {tickersWithAlerts.has(item.ticker) && (
-              <Ionicons name="notifications" size={12} color="#60A5FA" />
-            )}
-          </View>
-          <Text style={styles.stockName} numberOfLines={1}>
+        <View style={styles.searchResultLeft}>
+          <Text style={styles.searchResultTicker}>{item.ticker}</Text>
+          <Text style={styles.searchResultName} numberOfLines={1}>
             {item.companyName}
           </Text>
         </View>
-        <View style={styles.stockRowMid}>
-          <Text style={styles.stockSector} numberOfLines={1}>
+        <View style={styles.searchResultMid}>
+          <Text style={styles.searchResultSector} numberOfLines={1}>
             {item.sector}
           </Text>
         </View>
         <ScoreBadge score={item.aiScore} label={item.scoreLabel} />
       </TouchableOpacity>
     ),
-    [goToStock, tickersWithAlerts],
+    [goToStock],
   );
 
   if (loading) {
@@ -191,7 +183,7 @@ export const RadarScreen: React.FC = () => {
           <View style={styles.searchBar}>
             <Ionicons name="search" size={18} color="rgba(255,255,255,0.4)" />
             <Text style={[styles.searchInput, { color: 'rgba(255,255,255,0.3)' }]}>
-              Search stocks by name or ticker...
+              Search any S&P 500 stock...
             </Text>
           </View>
         </View>
@@ -211,7 +203,7 @@ export const RadarScreen: React.FC = () => {
           <Ionicons name="search" size={18} color="rgba(255,255,255,0.4)" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search stocks by name or ticker..."
+            placeholder="Search any S&P 500 stock..."
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={query}
             onChangeText={setQuery}
@@ -228,7 +220,7 @@ export const RadarScreen: React.FC = () => {
       </View>
 
       {isSearching ? (
-        /* Search Results */
+        /* Search Results Overlay */
         searchResults.length > 0 ? (
           <FlatList
             data={searchResults}
@@ -244,68 +236,55 @@ export const RadarScreen: React.FC = () => {
           </View>
         )
       ) : (
-        /* Default Content */
+        /* Landing Content */
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Active Alerts */}
-          {(activeAlerts.length > 0 || triggeredAlerts.length > 0) && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Price Alerts</Text>
-              {activeAlerts.map((alert) => (
-                <View key={alert.id} style={styles.alertRow}>
-                  <Ionicons name="notifications-outline" size={16} color="#60A5FA" />
-                  <View style={styles.alertRowContent}>
-                    <Text style={styles.alertRowTicker}>{alert.ticker}</Text>
-                    <Text style={styles.alertRowDetail}>
-                      {alert.direction === 'above' ? 'Above' : 'Below'} ${alert.targetPrice.toFixed(2)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity onPress={() => removeAlert(alert.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.3)" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              {triggeredAlerts.slice(0, 3).map((alert) => (
-                <View key={alert.id} style={[styles.alertRow, styles.alertRowTriggered]}>
-                  <Ionicons name="checkmark-circle" size={16} color="rgba(255,255,255,0.3)" />
-                  <View style={styles.alertRowContent}>
-                    <Text style={[styles.alertRowTicker, styles.alertRowTriggeredText]}>{alert.ticker}</Text>
-                    <Text style={[styles.alertRowDetail, styles.alertRowTriggeredText]}>
-                      {alert.direction === 'above' ? 'Above' : 'Below'} ${alert.targetPrice.toFixed(2)} — Triggered
-                    </Text>
-                  </View>
-                  <TouchableOpacity onPress={() => removeAlert(alert.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.2)" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
+          {/* Hero Section */}
+          <View style={styles.heroSection}>
+            <Text style={styles.heroIcon}>📡</Text>
+            <Text style={styles.heroTitle}>Scan Any Stock in Seconds</Text>
+            <Text style={styles.heroSubtitle}>
+              Get institutional-grade analysis on all 547 S&P 500 companies
+            </Text>
+          </View>
 
-          {/* Recently Viewed */}
-          {recentStockData.length > 0 && (
+          {/* Feature Cards */}
+          <View style={styles.featureCardsContainer}>
+            {FEATURES.map((f) => (
+              <View key={f.title} style={styles.featureCard}>
+                <Ionicons name={f.icon} size={22} color="#60A5FA" />
+                <View style={styles.featureCardText}>
+                  <Text style={styles.featureCardTitle}>{f.title}</Text>
+                  <Text style={styles.featureCardDesc}>{f.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Trending Now */}
+          {trendingStocks.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Recently Viewed</Text>
+              <Text style={styles.sectionTitle}>🔥  Trending Now</Text>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
+                contentContainerStyle={styles.trendingRow}
               >
-                {recentStockData.slice(0, 5).map((stock) => (
+                {trendingStocks.map((stock) => (
                   <TouchableOpacity
                     key={stock.ticker}
-                    style={styles.recentCard}
+                    style={styles.trendingCard}
                     onPress={() => goToStock(stock.ticker)}
                     activeOpacity={0.7}
                   >
-                    <ScoreRing score={stock.aiScore} size={48} />
-                    <Text style={styles.recentTicker}>{stock.ticker}</Text>
-                    <Text style={styles.recentName} numberOfLines={1}>
-                      {stock.companyName}
+                    <ScoreRing score={stock.aiScore} size={52} />
+                    <Text style={styles.trendingTicker}>{stock.ticker}</Text>
+                    <Text style={styles.trendingLabel}>
+                      {getScoreLabel(stock.aiScore)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -313,122 +292,54 @@ export const RadarScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Top Scored */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Top Scored</Text>
-            {topScored.map((stock) => (
-              <TouchableOpacity
-                key={stock.ticker}
-                style={styles.stockRow}
-                onPress={() => goToStock(stock.ticker)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.stockRowLeft}>
-                  <Text style={styles.stockTicker}>{stock.ticker}</Text>
-                  <Text style={styles.stockName} numberOfLines={1}>
-                    {stock.companyName}
-                  </Text>
-                </View>
-                <ScoreBadge score={stock.aiScore} label={stock.scoreLabel} />
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Biggest Movers */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Biggest Movers</Text>
-            {biggestMovers.map((stock) => (
-              <TouchableOpacity
-                key={stock.ticker}
-                style={styles.stockRow}
-                onPress={() => goToStock(stock.ticker)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.stockRowLeft}>
-                  <Text style={styles.stockTicker}>{stock.ticker}</Text>
-                  <Text style={styles.stockName} numberOfLines={1}>
-                    {stock.companyName}
-                  </Text>
-                </View>
-                <View style={styles.changeContainer}>
-                  <Text
-                    style={[
-                      styles.changeText,
-                      { color: stock.changePercent >= 0 ? '#00C9A7' : '#F5A623' },
-                    ]}
-                  >
-                    {stock.changePercent >= 0 ? '+' : ''}
-                    {stock.changePercent.toFixed(2)}%
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Browse by Sector */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Browse by Sector</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.sectorPillsRow}
-            >
-              {SECTOR_LIST.map((sector) => (
-                <TouchableOpacity
-                  key={sector}
-                  style={[
-                    styles.sectorPill,
-                    expandedSector === sector && styles.sectorPillActive,
-                  ]}
-                  onPress={() => toggleSector(sector)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.sectorPillText,
-                      expandedSector === sector && styles.sectorPillTextActive,
-                    ]}
-                  >
-                    {sector}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {expandedSector && sectorStocks.length > 0 && (
-              <View style={styles.sectorList}>
-                {sectorStocks.slice(0, 15).map((stock) => (
+          {/* Biggest Movers Today */}
+          {biggestMovers.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>📈  Biggest Movers Today</Text>
+              {biggestMovers.map((stock) => {
+                const isUp = (stock.changePercent || 0) >= 0;
+                const changeColor = isUp ? '#00C9A7' : '#F5A623';
+                const pct = Math.abs(stock.changePercent || 0);
+                const barWidth = Math.min(pct * 12, 100); // scale bar
+                return (
                   <TouchableOpacity
                     key={stock.ticker}
-                    style={styles.stockRow}
+                    style={styles.moverRow}
                     onPress={() => goToStock(stock.ticker)}
                     activeOpacity={0.7}
                   >
-                    <View style={styles.stockRowLeft}>
-                      <Text style={styles.stockTicker}>{stock.ticker}</Text>
-                      <Text style={styles.stockName} numberOfLines={1}>
-                        {stock.companyName}
-                      </Text>
+                    <Text style={styles.moverTicker}>{stock.ticker}</Text>
+                    <Text style={[styles.moverChange, { color: changeColor }]}>
+                      {isUp ? '+' : '-'}{pct.toFixed(1)}%
+                    </Text>
+                    <View style={styles.moverBarBg}>
+                      <View style={[styles.moverBarFill, { width: `${barWidth}%`, backgroundColor: changeColor }]} />
                     </View>
-                    <ScoreBadge score={stock.aiScore} label={stock.scoreLabel} />
+                    {stock.aiScore > 0 ? (
+                      <View style={styles.moverScore}>
+                        <Text style={[styles.moverScoreText, { color: getScoreColor(stock.aiScore) }]}>
+                          {stock.aiScore.toFixed(1)}
+                        </Text>
+                        <Text style={styles.moverScoreLabel}>
+                          {getShortLabel(stock.aiScore)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.moverScore}>
+                        <Text style={styles.moverScoreDash}>—</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
-                ))}
-                {sectorStocks.length > 15 && (
-                  <Text style={styles.moreText}>
-                    +{sectorStocks.length - 15} more in {expandedSector}
-                  </Text>
-                )}
-              </View>
-            )}
-            {expandedSector && sectorStocks.length === 0 && (
-              <Text style={styles.emptyText}>No stocks in {expandedSector}</Text>
-            )}
-          </View>
+                );
+              })}
+            </View>
+          )}
 
-          {/* Empty state hint */}
-          <View style={styles.hintContainer}>
-            <Ionicons name="search-outline" size={20} color="rgba(255,255,255,0.2)" />
-            <Text style={styles.hintText}>Search any S&P 500 stock above</Text>
+          {/* Disclaimer */}
+          <View style={styles.disclaimerContainer}>
+            <Text style={styles.disclaimerText}>
+              Scores reflect factor analysis. For educational purposes only.
+            </Text>
           </View>
 
           <View style={{ height: 40 }} />
@@ -437,6 +348,16 @@ export const RadarScreen: React.FC = () => {
     </View>
   );
 };
+
+// ─── Helpers ───
+
+function getShortLabel(score: number): string {
+  if (score >= 9) return 'Strong';
+  if (score >= 7) return 'Favor.';
+  if (score >= 5) return 'Neut.';
+  if (score >= 3) return 'Weak';
+  return 'Caution';
+}
 
 // ─── Score Badge Component ───
 
@@ -518,69 +439,178 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+  // Hero
+  heroSection: {
+    alignItems: 'center',
+    paddingTop: 24,
+    paddingBottom: 8,
+    paddingHorizontal: 24,
+  },
+  heroIcon: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  // Feature cards
+  featureCardsContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    gap: 10,
+  },
+  featureCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(96,165,250,0.06)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.12)',
+    padding: 16,
+    gap: 14,
+  },
+  featureCardText: {
+    flex: 1,
+  },
+  featureCardTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  featureCardDesc: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+
   // Sections
   section: {
-    marginTop: 20,
+    marginTop: 28,
     paddingHorizontal: 16,
   },
   sectionTitle: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 14,
   },
 
-  // Horizontal recently viewed
-  horizontalList: {
+  // Trending cards
+  trendingRow: {
     gap: 12,
     paddingRight: 16,
   },
-  recentCard: {
+  trendingCard: {
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 14,
+    padding: 14,
     alignItems: 'center',
-    width: 100,
+    width: (SCREEN_WIDTH - 80) / 4,
+    minWidth: 80,
     gap: 6,
   },
-  recentTicker: {
+  trendingTicker: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
     marginTop: 4,
   },
-  recentName: {
-    color: 'rgba(255,255,255,0.5)',
+  trendingLabel: {
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 11,
-    textAlign: 'center',
+    fontWeight: '600',
   },
 
-  // Stock rows
-  stockRow: {
+  // Mover rows
+  moverRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
+    gap: 10,
   },
-  stockRowLeft: {
+  moverTicker: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    width: 50,
+  },
+  moverChange: {
+    fontSize: 14,
+    fontWeight: '600',
+    width: 58,
+    textAlign: 'right',
+  },
+  moverBarBg: {
+    flex: 1,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  moverBarFill: {
+    height: 6,
+    borderRadius: 3,
+  },
+  moverScore: {
+    width: 60,
+    alignItems: 'flex-end',
+  },
+  moverScoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  moverScoreLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  moverScoreDash: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Search result rows
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  searchResultLeft: {
     flex: 1,
   },
-  stockRowMid: {
+  searchResultMid: {
     width: 90,
     marginRight: 8,
   },
-  stockTicker: {
+  searchResultTicker: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
   },
-  stockName: {
+  searchResultName: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
     marginTop: 2,
   },
-  stockSector: {
+  searchResultSector: {
     color: 'rgba(255,255,255,0.4)',
     fontSize: 11,
     textAlign: 'right',
@@ -599,95 +629,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Change
-  changeContainer: {
-    minWidth: 70,
-    alignItems: 'flex-end',
+  // Disclaimer
+  disclaimerContainer: {
+    marginTop: 32,
+    paddingHorizontal: 24,
+    alignItems: 'center',
   },
-  changeText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Sector pills
-  sectorPillsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  sectorPill: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  sectorPillActive: {
-    backgroundColor: '#60A5FA',
-  },
-  sectorPillText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  sectorPillTextActive: {
-    color: '#FFFFFF',
-  },
-  sectorList: {
-    marginTop: 12,
-  },
-  moreText: {
-    color: 'rgba(255,255,255,0.3)',
+  disclaimerText: {
+    color: 'rgba(255,255,255,0.2)',
     fontSize: 12,
     textAlign: 'center',
-    paddingVertical: 12,
-  },
-
-  // Hint
-  hintContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 32,
-    paddingHorizontal: 16,
-  },
-  hintText: {
-    color: 'rgba(255,255,255,0.2)',
-    fontSize: 13,
-  },
-
-  // Ticker row with alert indicator
-  tickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-
-  // Alert rows
-  alertRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  alertRowTriggered: {
-    opacity: 0.5,
-  },
-  alertRowContent: {
-    flex: 1,
-  },
-  alertRowTicker: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  alertRowDetail: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  alertRowTriggeredText: {
-    textDecorationLine: 'line-through',
+    lineHeight: 18,
   },
 });
