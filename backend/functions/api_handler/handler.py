@@ -203,6 +203,8 @@ def lambda_handler(event, context):
             return _handle_portfolio(http_method, path, body, user_id, query_params)
         elif path.startswith("/strategy"):
             return _handle_strategy(http_method, path, body, user_id)
+        elif path.startswith("/advisor"):
+            return _handle_advisor(http_method, path, body, user_id, query_params)
         elif path.startswith("/coach"):
             return _handle_coach(http_method, path, body, user_id)
         elif path.startswith("/stocks/") and len(path.strip("/").split("/")) >= 3:
@@ -4187,6 +4189,60 @@ def _handle_strategy(method, path, body, user_id):
         return _handle_strategy_achievements(user_id)
     else:
         return _response(405, {"error": "Strategy endpoint not found"})
+
+
+def _handle_advisor(method, path, body, user_id, query_params):
+    """Wealth advisor sub-router — /advisor/* endpoints."""
+    import wealth_advisor
+
+    # Load holdings (shared across most endpoints)
+    def _load():
+        record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+        if not record or not record.get("holdings"):
+            return []
+        raw = record["holdings"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        return raw
+
+    try:
+        if "/holdings-analysis" in path and method == "GET":
+            holdings = _load()
+            result = wealth_advisor.analyze_holdings(holdings, user_id)
+            return _response(200, result)
+
+        elif "/investment-ideas" in path and method == "GET":
+            holdings = _load()
+            budget = float((query_params or {}).get("budget", 5000))
+            risk = (query_params or {}).get("risk", "moderate")
+            result = wealth_advisor.suggest_investments(holdings, budget, risk)
+            return _response(200, result)
+
+        elif "/research/" in path and method == "GET":
+            parts = path.strip("/").split("/")
+            ticker = parts[-1].upper() if len(parts) >= 3 else None
+            if not ticker:
+                return _response(400, {"error": "Missing ticker in path"})
+            result = wealth_advisor.research_stock(ticker, user_id)
+            return _response(200, result)
+
+        elif "/tax-strategy" in path and method == "GET":
+            holdings = _load()
+            result = wealth_advisor.get_tax_strategy(holdings, user_id)
+            return _response(200, result)
+
+        elif "/events" in path and method == "GET":
+            holdings = _load()
+            days = int((query_params or {}).get("days", 30))
+            result = wealth_advisor.get_events_watchlist(holdings, days)
+            return _response(200, result)
+
+        else:
+            return _response(404, {"error": "Advisor endpoint not found"})
+
+    except Exception as e:
+        logger.error(f"[Advisor] Error: {e}", exc_info=True)
+        return _response(500, {"error": f"Advisor error: {str(e)}"})
 
 
 def _get_portfolio_tickers_and_weights(user_id):
