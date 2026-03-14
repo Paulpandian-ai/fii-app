@@ -20,7 +20,7 @@ import type { RootStackParamList, Prescription } from '../types';
 import { useStrategyStore } from '../store/strategyStore';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useCoachStore, type ChatMsg } from '../store/coachStore';
-import { getCoachWeekly, getAdvice, sendChatMessage } from '../services/api';
+import { getCoachWeekly, getAdvice, sendChatMessage, postCoachMessage, getCoachSuggestions } from '../services/api';
 import { syncService } from '../services/SyncService';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
@@ -32,7 +32,7 @@ const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string
   low: { bg: 'rgba(0,201,167,0.08)', border: 'rgba(0,201,167,0.2)', text: '#00C9A7', badge: '#00C9A7' },
 };
 
-const ASK_FII_SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   'What factors affect my stocks?',
   'What factor exposures does my portfolio have?',
   'How would a recession affect my portfolio?',
@@ -69,6 +69,10 @@ export const AICoachScreen: React.FC = () => {
   const [sending, setSending] = useState(false);
   const chatScrollRef = useRef<ScrollView>(null);
   const [sessionId] = useState(() => `coach_${Date.now()}`);
+  const [followUpChips, setFollowUpChips] = useState<string[]>([]);
+  const [askSuggestions, setAskSuggestions] = useState<Array<{ label: string; message: string }>>(
+    DEFAULT_SUGGESTIONS.map((s) => ({ label: s, message: s }))
+  );
 
   // Load weekly review
   useEffect(() => {
@@ -95,6 +99,20 @@ export const AICoachScreen: React.FC = () => {
       loadReportCard();
     }
   }, [advice.length, isAdviceLoading, loadAdvice, reportCard, loadReportCard]);
+
+  // Load contextual suggestions
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await getCoachSuggestions();
+        if (mounted && data?.suggestions?.length >= 4) {
+          setAskSuggestions(data.suggestions.slice(0, 4));
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   // Load chat history from local cache, then reconcile from cloud
   useEffect(() => {
@@ -144,17 +162,26 @@ export const AICoachScreen: React.FC = () => {
     scrollToBottom();
 
     try {
-      const res = await sendChatMessage(msg, {
-        sessionId,
-      });
+      // Try new coach endpoint first, fallback to legacy
+      let res: any;
+      try {
+        res = await postCoachMessage(msg);
+      } catch {
+        res = await sendChatMessage(msg, { sessionId });
+      }
       const assistantMsg: ChatMsg = {
         role: 'assistant',
-        content: res.reply || res.response || "I couldn't generate a response. Please try again.",
+        content: res.response || res.reply || "I couldn't generate a response. Please try again.",
         timestamp: new Date().toISOString(),
       };
+      // Extract follow-up chips if available
+      if (res.follow_ups?.length) {
+        setFollowUpChips(res.follow_ups.slice(0, 3));
+      } else {
+        setFollowUpChips([]);
+      }
       setMessages((prev) => {
         const updated = [...prev, assistantMsg];
-        // Sync conversation to cloud after each assistant reply
         syncService.syncToCloud('chat', 'POST', {
           messages: updated.slice(-20),
           context: 'coach',
@@ -490,18 +517,37 @@ export const AICoachScreen: React.FC = () => {
               </View>
             )}
 
+            {/* Follow-up chips */}
+            {followUpChips.length > 0 && !sending && (
+              <View style={styles.followUpRow}>
+                {followUpChips.map((chip, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.followUpChip}
+                    onPress={() => {
+                      setFollowUpChips([]);
+                      handleSendChat(chip);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.followUpText} numberOfLines={1}>{chip}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
             {/* Suggested questions */}
             {messages.length <= 1 && (
               <View style={styles.suggestions}>
                 <Text style={styles.suggestionsLabel}>Ask about your portfolio:</Text>
-                {ASK_FII_SUGGESTIONS.map((q) => (
+                {askSuggestions.map((q, idx) => (
                   <TouchableOpacity
-                    key={q}
+                    key={idx}
                     style={styles.suggestionChip}
-                    onPress={() => handleSendChat(q)}
+                    onPress={() => handleSendChat(q.message || q.label)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.suggestionText}>{q}</Text>
+                    <Text style={styles.suggestionText}>{q.label}</Text>
                     <Ionicons name="arrow-forward" size={12} color="rgba(255,255,255,0.3)" />
                   </TouchableOpacity>
                 ))}
@@ -874,6 +920,26 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  followUpRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  followUpChip: {
+    backgroundColor: 'rgba(139,92,246,0.12)',
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.25)',
+  },
+  followUpText: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontWeight: '500',
   },
   suggestions: {
     marginTop: 16,

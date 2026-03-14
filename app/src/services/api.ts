@@ -434,6 +434,45 @@ export const getCoachWeekly = async () => {
   return _deduplicatedGet('/coach/weekly');
 };
 
+// ─── Portfolio Analytics (Prompt 1) ───
+
+export const getPortfolioAnalytics = async () => {
+  return _deduplicatedGet('/portfolio/analytics');
+};
+
+export const getPortfolioMonteCarlo = async (months: number = 12, simulations: number = 1000) => {
+  return _deduplicatedGet('/portfolio/monte-carlo', { months: String(months), simulations: String(simulations) });
+};
+
+// ─── Tax Optimization (Prompt 2) ───
+
+export const getTaxOpportunities = async () => {
+  return _deduplicatedGet('/portfolio/tax-opportunities');
+};
+
+export const getTaxSummary = async () => {
+  return _deduplicatedGet('/portfolio/tax-summary');
+};
+
+export const getTaxLots = async (ticker: string) => {
+  return _deduplicatedGet(`/portfolio/tax-lots/${ticker}`);
+};
+
+// ─── AI Coach (Prompt 3) ───
+
+export const postCoachMessage = async (message: string, ticker?: string) => {
+  const { data } = await api.post('/coach/message', { message, ticker });
+  return data;
+};
+
+export const getCoachInsights = async () => {
+  return _deduplicatedGet('/coach/insights');
+};
+
+export const getCoachSuggestions = async () => {
+  return _deduplicatedGet('/coach/suggestions');
+};
+
 // ─── Earnings Calendar ───
 
 export const getEarningsCalendar = async () => {

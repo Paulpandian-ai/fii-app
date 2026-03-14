@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Share,
-  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,75 +14,37 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 
 import { usePortfolioStore } from '../store/portfolioStore';
-import { useStrategyStore } from '../store/strategyStore';
-import { useSignalStore } from '../store/signalStore';
-import { useCoachStore } from '../store/coachStore';
 import { getInsightsFeed } from '../services/api';
-import { DisclaimerBanner } from '../components/DisclaimerBanner';
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
 import { Skeleton } from '../components/Skeleton';
 import { LastUpdated } from '../components/LastUpdated';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 
-const formatMoney = (v: unknown): string => {
-  const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
-  if (Math.abs(n) >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-};
+// New wealth management components
+import { AiCoachCard } from '../components/AiCoachCard';
+import { PortfolioHealthCard } from '../components/PortfolioHealthCard';
+import { MonteCarloChart } from '../components/MonteCarloChart';
+import { TaxOpportunitiesCard } from '../components/TaxOpportunitiesCard';
+import { SectorAllocationChart } from '../components/SectorAllocationChart';
+import { InsightsFeed } from '../components/InsightsFeed';
 
 export const StrategyScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const holdings = usePortfolioStore((s) => s.holdings);
-  const totalValue = usePortfolioStore((s) => s.totalValue);
   const hasPortfolio = holdings.length >= 3;
 
-  const {
-    optimization,
-    isOptimizing,
-    diversification,
-    isDiversifying,
-    taxHarvest,
-    isTaxLoading,
-    advice,
-    isAdviceLoading,
-    reportCard,
-    isReportCardLoading,
-    moves,
-    hasRun,
-    error: strategyError,
-    runFullSimulation,
-  } = useStrategyStore();
-
-  const signals = useSignalStore((s) => s.signals);
-
-  // Coach store for integrated Coach functionality
-  const coachDaily = useCoachStore((s) => s.daily);
-  const coachHasLoaded = useCoachStore((s) => s.hasLoaded);
-  const coachLoadAll = useCoachStore((s) => s.loadAll);
-
-  // Load coach data on mount
-  useEffect(() => {
-    if (!coachHasLoaded) {
-      coachLoadAll();
-    }
-  }, [coachHasLoaded, coachLoadAll]);
-
-  // Recent insights state
-  const [recentInsights, setRecentInsights] = useState<Array<{ title: string; summary: string }>>([]);
-
-  const isAnyLoading =
-    isOptimizing || isDiversifying || isTaxLoading || isAdviceLoading || isReportCardLoading;
+  // Shared analytics data for sector chart (avoid double fetch)
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
 
   // Market pulse state
   const [marketPulse, setMarketPulse] = useState<string>('');
   const [marketPulseExpanded, setMarketPulseExpanded] = useState(false);
   const [marketPulseFull, setMarketPulseFull] = useState<string>('');
   const [pulseLoading, setPulseLoading] = useState(true);
-  const [strategyLastUpdated, setStrategyLastUpdated] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState(0);
 
-  // ─── Data polling: market pulse every 5min (strategy data is not time-sensitive) ───
+  // Market pulse polling every 5min
   useDataRefresh(
     'market-pulse',
     async () => {
@@ -96,7 +56,7 @@ export const StrategyScreen: React.FC = () => {
           setMarketPulseFull(
             insight.summary || insight.body || insight.title || 'Markets are active today. Check your portfolio for updates.'
           );
-          setStrategyLastUpdated(Date.now());
+          setLastUpdated(Date.now());
         }
       } catch {}
     },
@@ -118,7 +78,7 @@ export const StrategyScreen: React.FC = () => {
           );
         } else {
           setMarketPulse('Markets are active today. Tap to see your portfolio update.');
-          setMarketPulseFull('Markets are active today. Run a full analysis to get personalized insights about your portfolio performance and recommendations.');
+          setMarketPulseFull('Markets are active today. Run a full analysis to get personalized insights.');
         }
       } catch {
         if (mounted) {
@@ -132,124 +92,37 @@ export const StrategyScreen: React.FC = () => {
     return () => { mounted = false; };
   }, []);
 
-  // Load recent insights
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const data = await getInsightsFeed(5);
-        if (!mounted) return;
-        const insights = (data?.insights ?? [])
-          .slice(0, 5)
-          .map((i: any) => ({
-            title: i.title || 'Insight',
-            summary: i.summary || i.body || '',
-          }));
-        setRecentInsights(insights);
-      } catch {}
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  // Auto-run simulation if we have portfolio and haven't run yet
-  useEffect(() => {
-    if (hasPortfolio && !hasRun && !isAnyLoading && !strategyError) {
-      const value = totalValue > 0 ? totalValue : 50000;
-      runFullSimulation(value);
-    }
-  }, [hasPortfolio, hasRun, isAnyLoading, strategyError, totalValue, runFullSimulation]);
-
-  // Compute card previews
-  const rebalanceCount = moves.length;
-  const sharpeImprovement = optimization
-    ? ((optimization.optimized?.sharpeRatio ?? 0) - (optimization.currentPortfolio?.sharpeRatio ?? 0))
-    : 0;
-  const annualImprovement = sharpeImprovement > 0
-    ? Math.round(sharpeImprovement * (totalValue > 0 ? totalValue : 50000) * 0.1)
-    : 0;
-
-  const taxOpportunities = taxHarvest?.losses?.length ?? 0;
-  const taxSavings = taxHarvest?.totalTaxSavings ?? 0;
-
-  const adviceCount = advice.length;
-  const topAdvice = advice[0];
-
-  // Compute Strategy Score (0-100)
-  const computeStrategyScore = (): number => {
-    if (!hasRun) return 0;
-    let score = 0;
-    let components = 0;
-
-    // Diversification score (0-25)
-    if (diversification) {
-      score += Math.min(25, (diversification.diversificationScore / 100) * 25);
-      components++;
-    }
-
-    // Tax efficiency (0-25)
-    if (taxHarvest) {
-      const taxScore = taxHarvest.losses.length === 0 ? 25 : Math.max(0, 25 - taxHarvest.losses.length * 5);
-      score += taxScore;
-      components++;
-    }
-
-    // Risk management via Sharpe (0-25)
-    if (optimization) {
-      const currentSharpe = optimization.currentPortfolio?.sharpeRatio ?? 0;
-      score += Math.min(25, (currentSharpe / 1.5) * 25);
-      components++;
-    }
-
-    // Score alignment (0-25)
-    if (holdings.length > 0) {
-      const highScoreCount = holdings.filter((h) => {
-        const sig = signals[h.ticker];
-        return sig?.score >= 7;
-      }).length;
-      score += Math.min(25, (highScoreCount / holdings.length) * 25);
-      components++;
-    }
-
-    return components > 0 ? Math.round(score) : 0;
-  };
-
-  const strategyScore = computeStrategyScore();
-  const scoreColor =
-    strategyScore >= 75 ? '#00C9A7' :
-    strategyScore >= 50 ? '#60A5FA' :
-    strategyScore >= 25 ? '#F5A623' : '#5856D6';
-
-  const handleShare = useCallback(async () => {
-    try {
-      let message = `My FII Strategy Score: ${strategyScore}/100\n\n`;
-      if (reportCard) {
-        message += `Overall Grade: ${reportCard.overall}\n`;
-        for (const g of reportCard.grades) {
-          message += `${g.category}: ${g.grade}\n`;
-        }
-      }
-      message += '\nRun your own analysis at factorimpact.app';
-      await Share.share({ message, title: 'FII Strategy Report' });
-    } catch (error: any) {
-      if (error?.message !== 'User did not share') {
-        Alert.alert('Share failed', 'Could not share your report card');
-      }
-    }
-  }, [strategyScore, reportCard]);
+  // Empty state for no portfolio
+  if (!hasPortfolio) {
+    return (
+      <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.topBarTitle}>Wealth Advisor</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.emptyState}>
+          <Ionicons name="analytics-outline" size={48} color="rgba(255,255,255,0.2)" />
+          <Text style={styles.emptyTitle}>Add Your Portfolio</Text>
+          <Text style={styles.emptySubtitle}>
+            Add at least 3 holdings to unlock portfolio analytics, tax insights, Monte Carlo projections, and AI-powered coaching.
+          </Text>
+        </View>
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.topBarTitle}>Strategy & Insights</Text>
-          {strategyLastUpdated > 0 && <LastUpdated timestamp={strategyLastUpdated} />}
+          <Text style={styles.topBarTitle}>Wealth Advisor</Text>
+          {lastUpdated > 0 && <LastUpdated timestamp={lastUpdated} />}
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {isAnyLoading && <ActivityIndicator color="#60A5FA" size="small" />}
-          <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+          <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.6)" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -292,241 +165,25 @@ export const StrategyScreen: React.FC = () => {
           </LinearGradient>
         </TouchableOpacity>
 
-        {/* ═══ AI COACH CARD (integrated from Coach tab) ═══ */}
-        <TouchableOpacity
-          style={styles.coachCard}
-          onPress={() => navigation.navigate('AICoach')}
-          activeOpacity={0.7}
-        >
-          <LinearGradient
-            colors={['rgba(139,92,246,0.12)', 'rgba(96,165,250,0.08)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.coachGradient}
-          >
-            <View style={styles.mainCardInner}>
-              <View style={styles.mainCardLeft}>
-                <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(139,92,246,0.15)' }]}>
-                  <Text style={{ fontSize: 24 }}>💬</Text>
-                </View>
-                <View style={styles.mainCardInfo}>
-                  <Text style={styles.mainCardTitle}>AI Coach</Text>
-                  <Text style={styles.mainCardPreview} numberOfLines={1}>
-                    {coachDaily
-                      ? coachDaily.headline || 'Ask questions about your portfolio or any stock'
-                      : 'Ask questions about your portfolio or any stock'}
-                  </Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* ═══ AI COACH CARD ═══ */}
+        <AiCoachCard />
 
-        {/* ═══ MAIN STRATEGY CARDS ═══ */}
+        {/* ═══ PORTFOLIO HEALTH ═══ */}
+        <PortfolioHealthCard onLoaded={(data) => setAnalyticsData(data)} />
 
-        {/* CARD 1: Portfolio Analytics */}
-        <TouchableOpacity
-          style={styles.mainCard}
-          onPress={() => navigation.navigate('WealthAdvisor')}
-          activeOpacity={0.7}
-        >
-          <View style={styles.mainCardInner}>
-            <View style={styles.mainCardLeft}>
-              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(96,165,250,0.12)' }]}>
-                <Text style={{ fontSize: 24 }}>💰</Text>
-              </View>
-              <View style={styles.mainCardInfo}>
-                <Text style={styles.mainCardTitle}>Portfolio Analytics</Text>
-                <Text style={styles.mainCardPreview} numberOfLines={1}>
-                  {isAnyLoading && !hasRun
-                    ? 'Analyzing your portfolio...'
-                    : rebalanceCount > 0
-                    ? `${rebalanceCount} rebalancing opportunit${rebalanceCount === 1 ? 'y' : 'ies'} found`
-                    : annualImprovement > 0
-                    ? `Your portfolio could improve by ${formatMoney(annualImprovement)}/year`
-                    : hasRun
-                    ? 'Portfolio analysis ready'
-                    : 'Get personalized portfolio analytics'}
-                </Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-          </View>
-        </TouchableOpacity>
+        {/* ═══ MONTE CARLO PROJECTION ═══ */}
+        <MonteCarloChart />
 
-        {/* CARD 2: Tax Education Calculator */}
-        <TouchableOpacity
-          style={styles.mainCard}
-          onPress={() => navigation.navigate('TaxPlaybook')}
-          activeOpacity={0.7}
-        >
-          <View style={styles.mainCardInner}>
-            <View style={styles.mainCardLeft}>
-              <View style={[styles.mainCardIcon, { backgroundColor: 'rgba(0,201,167,0.12)' }]}>
-                <Text style={{ fontSize: 24 }}>📋</Text>
-              </View>
-              <View style={styles.mainCardInfo}>
-                <Text style={styles.mainCardTitle}>Tax Education Calculator</Text>
-                <Text style={styles.mainCardPreview} numberOfLines={1}>
-                  {isTaxLoading
-                    ? 'Scanning for tax opportunities...'
-                    : taxOpportunities > 0
-                    ? `${taxOpportunities} tax-loss harvesting opportunit${taxOpportunities === 1 ? 'y' : 'ies'}`
-                    : taxSavings > 0
-                    ? `Estimated tax savings: ${formatMoney(taxSavings)}`
-                    : hasRun
-                    ? 'No harvesting opportunities right now'
-                    : 'Find tax-saving opportunities'}
-                </Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
-          </View>
-        </TouchableOpacity>
+        {/* ═══ TAX OPPORTUNITIES ═══ */}
+        <TaxOpportunitiesCard />
 
-        {/* ═══ SECONDARY CARDS (2-column row) ═══ */}
-        <View style={styles.secondaryRow}>
-          <TouchableOpacity
-            style={styles.secondaryCard}
-            onPress={() => navigation.navigate('Backtest')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.secondaryIcon, { backgroundColor: 'rgba(244,114,182,0.12)' }]}>
-              <Ionicons name="time-outline" size={20} color="#F472B6" />
-            </View>
-            <Text style={styles.secondaryTitle}>Score Backtester</Text>
-            <Text style={styles.secondarySubtitle}>See how FII scores performed</Text>
-          </TouchableOpacity>
+        {/* ═══ SECTOR ALLOCATION ═══ */}
+        <SectorAllocationChart analyticsData={analyticsData} />
 
-          <TouchableOpacity
-            style={styles.secondaryCard}
-            onPress={() => navigation.navigate('EarningsCalendar')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.secondaryIcon, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
-              <Ionicons name="calendar" size={20} color="#3B82F6" />
-            </View>
-            <Text style={styles.secondaryTitle}>Earnings Calendar</Text>
-            <Text style={styles.secondarySubtitle}>Upcoming reports & analysis</Text>
-          </TouchableOpacity>
-        </View>
+        {/* ═══ AI INSIGHTS FEED ═══ */}
+        <InsightsFeed />
 
-        {/* ═══ STRATEGY SCORE ═══ */}
-        <View style={styles.scoreContainer}>
-          <LinearGradient
-            colors={['#1A1A2E', '#16213E', '#0F3460']}
-            style={styles.scoreCard}
-          >
-            <Text style={styles.scoreLabel}>STRATEGY SCORE</Text>
-
-            {/* Score ring */}
-            <View style={styles.scoreRingContainer}>
-              <View style={[styles.scoreRingOuter, { borderColor: `${scoreColor}30` }]}>
-                <View style={[styles.scoreRingInner, { borderColor: scoreColor }]}>
-                  <Text style={[styles.scoreValue, { color: scoreColor }]}>
-                    {hasRun ? strategyScore : '--'}
-                  </Text>
-                  <Text style={styles.scoreMax}>/100</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Score breakdown */}
-            {hasRun && (
-              <View style={styles.scoreBreakdown}>
-                <View style={styles.scoreItem}>
-                  <View style={[styles.scoreItemDot, { backgroundColor: '#8B5CF6' }]} />
-                  <Text style={styles.scoreItemLabel}>Diversification</Text>
-                </View>
-                <View style={styles.scoreItem}>
-                  <View style={[styles.scoreItemDot, { backgroundColor: '#00C9A7' }]} />
-                  <Text style={styles.scoreItemLabel}>Tax Efficiency</Text>
-                </View>
-                <View style={styles.scoreItem}>
-                  <View style={[styles.scoreItemDot, { backgroundColor: '#60A5FA' }]} />
-                  <Text style={styles.scoreItemLabel}>Risk Management</Text>
-                </View>
-                <View style={styles.scoreItem}>
-                  <View style={[styles.scoreItemDot, { backgroundColor: '#FBBF24' }]} />
-                  <Text style={styles.scoreItemLabel}>Score Alignment</Text>
-                </View>
-              </View>
-            )}
-
-            {!hasRun && !isAnyLoading && (
-              <Text style={styles.scoreEmpty}>
-                {hasPortfolio
-                  ? 'Running analysis...'
-                  : 'Add 3+ holdings to see your Strategy Score'}
-              </Text>
-            )}
-
-            {isAnyLoading && !hasRun && (
-              <View style={{ marginTop: 12, gap: 8 }}>
-                <Skeleton width="100%" height={12} borderRadius={4} />
-                <Skeleton width="80%" height={12} borderRadius={4} />
-              </View>
-            )}
-
-            {/* Share button */}
-            {hasRun && (
-              <TouchableOpacity
-                style={styles.shareButton}
-                onPress={handleShare}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="share-social" size={16} color="#FFFFFF" />
-                <Text style={styles.shareText}>Share Report Card</Text>
-              </TouchableOpacity>
-            )}
-          </LinearGradient>
-        </View>
-
-        {/* ═══ RECENT INSIGHTS ═══ */}
-        {(recentInsights.length > 0 || advice.length > 0) && (
-          <View style={styles.insightsSection}>
-            <Text style={styles.insightsSectionTitle}>💡 Recent Insights</Text>
-            {advice.slice(0, 2).map((item, idx) => (
-              <TouchableOpacity
-                key={`advice-${idx}`}
-                style={styles.insightRow}
-                onPress={() => navigation.navigate('AICoach')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.insightContent}>
-                  <Text style={styles.insightTitle} numberOfLines={1}>
-                    "{item.title}"
-                  </Text>
-                  <Text style={styles.insightSummary} numberOfLines={2}>
-                    {item.observation || item.insight || ''}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-              </TouchableOpacity>
-            ))}
-            {recentInsights.slice(0, 3).map((insight, idx) => (
-              <TouchableOpacity
-                key={`insight-${idx}`}
-                style={styles.insightRow}
-                onPress={() => navigation.navigate('AICoach')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.insightContent}>
-                  <Text style={styles.insightTitle} numberOfLines={1}>
-                    "{insight.title}"
-                  </Text>
-                  <Text style={styles.insightSummary} numberOfLines={2}>
-                    {insight.summary}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        <DisclaimerBanner />
+        {/* ═══ DISCLAIMER FOOTER ═══ */}
         <DisclaimerFooter />
       </ScrollView>
     </LinearGradient>
@@ -552,6 +209,27 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
+  },
+
+  // ─── Empty State ───
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
 
   // ─── Market Pulse ───
@@ -596,229 +274,5 @@ const styles = StyleSheet.create({
     fontSize: 9,
     marginTop: 6,
     fontStyle: 'italic',
-  },
-
-  // ─── Main Strategy Cards ───
-  mainCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-  },
-  mainCardInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-  },
-  mainCardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 14,
-  },
-  mainCardIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mainCardInfo: {
-    flex: 1,
-  },
-  mainCardTitle: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 3,
-  },
-  mainCardPreview: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-
-  // ─── Secondary Cards ───
-  secondaryRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 12,
-    marginTop: 8,
-    marginBottom: 20,
-  },
-  secondaryCard: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  secondaryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  secondaryTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 3,
-  },
-  secondarySubtitle: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-
-  // ─── Strategy Score ───
-  scoreContainer: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-  },
-  scoreCard: {
-    alignItems: 'center',
-    borderRadius: 20,
-    padding: 28,
-    borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.12)',
-  },
-  scoreLabel: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 2,
-    marginBottom: 16,
-  },
-  scoreRingContainer: {
-    marginBottom: 16,
-  },
-  scoreRingOuter: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scoreRingInner: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-  },
-  scoreValue: {
-    fontSize: 36,
-    fontWeight: '900',
-  },
-  scoreMax: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: -2,
-  },
-  scoreBreakdown: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-    marginTop: 4,
-  },
-  scoreItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  scoreItemDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  scoreItemLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  scoreEmpty: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  shareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 16,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-  },
-  shareText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // ─── AI Coach Card ───
-  coachCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  coachGradient: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(139,92,246,0.2)',
-  },
-
-  // ─── Recent Insights ───
-  insightsSection: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-  },
-  insightsSectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  insightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  insightContent: {
-    flex: 1,
-    marginRight: 8,
-  },
-  insightTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 3,
-  },
-  insightSummary: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
-    lineHeight: 17,
   },
 });
