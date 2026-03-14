@@ -34,7 +34,9 @@ Routes:
   DELETE /watchlist/<name>           — Delete watchlist
   POST /watchlist/add                — Add ticker to watchlist
   POST /watchlist/remove             — Remove ticker from watchlist
-  GET  /coach/insights               — Coaching insights
+  POST /coach/message                — AI coach chat with full portfolio context
+  GET  /coach/insights               — Proactive AI-generated insights
+  GET  /coach/suggestions             — Contextual suggestion chips
   POST /strategy/optimize            — Monte Carlo optimization (numpy)
   POST /strategy/project             — Fan chart projection data
   POST /strategy/scenarios           — What-if scenario battles
@@ -5331,7 +5333,13 @@ def _handle_strategy_report_card(user_id):
 
 def _handle_coach(method, path, body, user_id):
     """Route coach sub-endpoints."""
-    if path == "/coach/daily" and method == "GET":
+    if path == "/coach/message" and method == "POST":
+        return _handle_coach_message(body, user_id)
+    elif path == "/coach/insights" and method == "GET":
+        return _handle_coach_insights(user_id)
+    elif path == "/coach/suggestions" and method == "GET":
+        return _handle_coach_suggestions(user_id)
+    elif path == "/coach/daily" and method == "GET":
         return _handle_coach_daily(user_id)
     elif path == "/coach/score" and method == "GET":
         return _handle_coach_score(user_id)
@@ -5341,9 +5349,260 @@ def _handle_coach(method, path, body, user_id):
         return _handle_coach_event(body, user_id)
     elif path == "/coach/weekly" and method == "GET":
         return _handle_coach_weekly(user_id)
-    elif path == "/coach/insights" and method == "GET":
-        return _handle_coach_daily(user_id)
     return _response(404, {"error": f"Coach route not found: {path}"})
+
+
+def _gather_coach_context(user_id, ticker=None):
+    """Gather full app context for AI coach responses."""
+    context = {}
+
+    # 1. Portfolio holdings (enriched with prices)
+    try:
+        record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+        if record and record.get("holdings"):
+            holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+            context["portfolio_holdings"] = holdings_raw
+        else:
+            context["portfolio_holdings"] = []
+    except Exception as e:
+        logger.warning(f"[Coach] Failed to load holdings: {e}")
+        context["portfolio_holdings"] = []
+
+    # 2. Portfolio analytics (from cache)
+    try:
+        cached = db.get_item(f"PORTFOLIO_ANALYTICS#{user_id}", "LATEST")
+        if cached and cached.get("analytics"):
+            context["portfolio_analytics"] = _decimals_to_native(cached["analytics"])
+        else:
+            context["portfolio_analytics"] = {}
+    except Exception:
+        context["portfolio_analytics"] = {}
+
+    # 3. Tax opportunities
+    if context["portfolio_holdings"]:
+        try:
+            import tax_optimizer
+            holdings_for_tax = []
+            for h in context["portfolio_holdings"]:
+                holdings_for_tax.append({
+                    "ticker": h["ticker"],
+                    "shares": float(h.get("shares", 0)),
+                    "cost_basis": float(h.get("avgCost", h.get("cost_basis", 0))),
+                    "dateAdded": h.get("dateAdded", ""),
+                })
+            tax_result = tax_optimizer.detect_tax_loss_opportunities(holdings_for_tax)
+            context["tax_opportunities"] = tax_result
+        except Exception as e:
+            logger.warning(f"[Coach] Failed to get tax data: {e}")
+            context["tax_opportunities"] = {}
+
+    # 4. Stock signal + factors if a ticker is mentioned
+    if ticker:
+        try:
+            signal = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+            if signal:
+                context["stock_signal"] = _decimals_to_native(signal)
+        except Exception:
+            pass
+
+        # Factor summary
+        try:
+            factors = db.query(f"FACTOR#{ticker}")
+            if factors:
+                factor_summary = {}
+                for f in factors:
+                    dim = f.get("SK", "").split("#")[0] if "#" in f.get("SK", "") else f.get("SK", "")
+                    factor_summary[dim] = _decimals_to_native(f)
+                context["factor_summary"] = factor_summary
+        except Exception:
+            pass
+
+        # Stress test
+        try:
+            stress = db.get_item(f"STRESS#{ticker}", "LATEST")
+            if stress:
+                context["stress_test"] = _decimals_to_native(stress)
+        except Exception:
+            pass
+
+    # 5. Conversation history
+    try:
+        history = db.query(f"CHAT#{user_id}", limit=10, scan_forward=False)
+        if history:
+            context["conversation_history"] = [
+                _decimals_to_native(h) for h in reversed(history)
+            ]
+        else:
+            context["conversation_history"] = []
+    except Exception:
+        context["conversation_history"] = []
+
+    return context
+
+
+def _handle_coach_message(body, user_id):
+    """POST /coach/message — AI coach chat with full app context."""
+    user_message = body.get("message", "").strip()
+    if not user_message:
+        return _response(400, {"error": "Message is required"})
+
+    ticker = body.get("ticker", "").upper() or None
+
+    # Auto-detect ticker from message if not provided
+    if not ticker:
+        try:
+            from models import COMPANY_NAMES
+            words = user_message.upper().split()
+            for w in words:
+                clean = w.strip("?.,!()\"'")
+                if clean in COMPANY_NAMES and len(clean) >= 1:
+                    ticker = clean
+                    break
+        except Exception:
+            pass
+
+    # Gather context
+    context = _gather_coach_context(user_id, ticker)
+
+    # Generate response
+    try:
+        import ai_coach
+        result = ai_coach.generate_coach_response(user_message, context)
+    except Exception as e:
+        logger.error(f"[Coach] Message handler failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Coach response failed", "detail": str(e)})
+
+    # Save conversation to DynamoDB
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        ts = now.isoformat()
+
+        # Save user message
+        db.put_item({
+            "PK": f"CHAT#{user_id}",
+            "SK": f"MSG#{ts}#user",
+            "role": "user",
+            "content": user_message,
+            "ticker": ticker or "",
+            "timestamp": ts,
+            "TTL": int(now.timestamp()) + (30 * 24 * 3600),  # 30-day TTL
+        })
+
+        # Save assistant response
+        db.put_item({
+            "PK": f"CHAT#{user_id}",
+            "SK": f"MSG#{ts}#assistant",
+            "role": "assistant",
+            "content": result.get("response", ""),
+            "timestamp": ts,
+            "TTL": int(now.timestamp()) + (30 * 24 * 3600),
+        })
+    except Exception as e:
+        logger.warning(f"[Coach] Failed to save chat history: {e}")
+
+    return _response(200, result)
+
+
+def _handle_coach_insights(user_id):
+    """GET /coach/insights — Proactive AI-generated insights."""
+    from datetime import datetime, timezone
+
+    # Check cache (insight refresh every 1 hour)
+    try:
+        cached = db.get_item(f"INSIGHT#{user_id}", "LATEST")
+        if cached and cached.get("generatedAt"):
+            cache_time = datetime.fromisoformat(cached["generatedAt"].replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - cache_time).total_seconds()
+            if age < 3600:
+                insights = _decimals_to_native(cached.get("insights", []))
+                return _response(200, {
+                    "insights": insights,
+                    "cached": True,
+                    "disclaimer": "AI-generated educational analysis. Not investment advice.",
+                })
+    except Exception:
+        pass
+
+    # Gather data
+    context = _gather_coach_context(user_id)
+    portfolio = context.get("portfolio_holdings", [])
+    analytics = context.get("portfolio_analytics", {})
+    tax_data = context.get("tax_opportunities", {})
+
+    # Get signal data for holdings
+    signals = {}
+    for h in portfolio[:15]:
+        ticker = h.get("ticker", "")
+        if ticker:
+            try:
+                sig = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+                if sig:
+                    signals[ticker] = _decimals_to_native(sig)
+            except Exception:
+                pass
+
+    try:
+        import ai_coach
+        insights = ai_coach.generate_proactive_insights(
+            portfolio, analytics, tax_data, signals
+        )
+    except Exception as e:
+        logger.error(f"[Coach] Insights generation failed: {e}")
+        insights = []
+
+    # Cache insights
+    try:
+        from decimal import Decimal
+
+        def _to_decimal(obj):
+            if isinstance(obj, float):
+                return Decimal(str(round(obj, 6)))
+            if isinstance(obj, dict):
+                return {k: _to_decimal(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_to_decimal(i) for i in obj]
+            return obj
+
+        now = datetime.now(timezone.utc)
+        db.put_item({
+            "PK": f"INSIGHT#{user_id}",
+            "SK": "LATEST",
+            "insights": _to_decimal(insights),
+            "generatedAt": now.isoformat(),
+            "TTL": int(now.timestamp()) + (7 * 24 * 3600),  # 7-day TTL
+        })
+    except Exception as e:
+        logger.warning(f"[Coach] Failed to cache insights: {e}")
+
+    return _response(200, {
+        "insights": insights,
+        "cached": False,
+        "disclaimer": "AI-generated educational analysis. Not investment advice.",
+    })
+
+
+def _handle_coach_suggestions(user_id):
+    """GET /coach/suggestions — Contextual suggestion chips."""
+    context = _gather_coach_context(user_id)
+
+    try:
+        import ai_coach
+        chips = ai_coach.generate_suggestion_chips(context)
+    except Exception as e:
+        logger.error(f"[Coach] Suggestions failed: {e}")
+        chips = [
+            {"label": "How risky is my portfolio?", "message": "How risky is my portfolio?"},
+            {"label": "Am I diversified?", "message": "How diversified is my portfolio?"},
+            {"label": "Tax opportunities", "message": "What are my tax-loss harvesting opportunities?"},
+        ]
+
+    return _response(200, {
+        "suggestions": chips,
+        "disclaimer": "AI-generated educational analysis. Not investment advice.",
+    })
 
 
 def _handle_coach_daily(user_id):
