@@ -11,6 +11,8 @@ Routes:
   POST /portfolio/parse-csv          — Parse CSV, return structured holdings
   GET  /portfolio/summary            — Portfolio summary stats
   GET  /portfolio/health             — Portfolio health score (0-100)
+  GET  /portfolio/analytics          — Full portfolio analytics (Sharpe, VaR, etc.)
+  GET  /portfolio/monte-carlo        — Monte Carlo simulation
   GET  /baskets                      — AI-optimized stock baskets
   GET  /baskets/<name>               — Single basket detail
   GET  /price/<ticker>               — Real-time price via Finnhub
@@ -193,7 +195,7 @@ def lambda_handler(event, context):
         elif path.startswith("/watchlist"):
             return _handle_watchlist(http_method, path, body, user_id)
         elif path.startswith("/portfolio"):
-            return _handle_portfolio(http_method, path, body, user_id)
+            return _handle_portfolio(http_method, path, body, user_id, query_params)
         elif path.startswith("/strategy"):
             return _handle_strategy(http_method, path, body, user_id)
         elif path.startswith("/coach"):
@@ -2822,14 +2824,19 @@ def _handle_search(method, query_params):
 
 # ─── Portfolio Endpoints ───
 
-def _handle_portfolio(method, path, body, user_id):
+def _handle_portfolio(method, path, body, user_id, query_params=None):
     """Portfolio CRUD with sub-route dispatch."""
+    query_params = query_params or {}
     if "/parse-csv" in path and method == "POST":
         return _handle_parse_csv(body)
     elif "/health" in path and method == "GET":
         return _handle_portfolio_health(user_id)
     elif "/summary" in path and method == "GET":
         return _handle_portfolio_summary(user_id)
+    elif "/monte-carlo" in path and method == "GET":
+        return _handle_portfolio_monte_carlo(user_id, query_params)
+    elif "/analytics" in path and method == "GET":
+        return _handle_portfolio_analytics(user_id)
     elif method == "GET":
         return _handle_get_portfolio(user_id)
     elif method == "POST":
@@ -3332,6 +3339,124 @@ def _handle_portfolio_health(user_id):
         "suggestions": suggestions,
         "updatedAt": datetime.utcnow().isoformat(),
     })
+
+
+# ─── Portfolio Analytics Endpoints ───
+
+
+def _load_holdings_for_analytics(user_id):
+    """Load portfolio holdings from DynamoDB and normalize for analytics."""
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if not record or not record.get("holdings"):
+        return None
+    holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+    if not holdings_raw:
+        return None
+    # Normalize to analytics format
+    holdings = []
+    for h in holdings_raw:
+        holdings.append({
+            "ticker": h["ticker"],
+            "shares": float(h.get("shares", 0)),
+            "cost_basis": float(h.get("avgCost", h.get("cost_basis", 0))),
+        })
+    return holdings
+
+
+def _handle_portfolio_analytics(user_id):
+    """GET /portfolio/analytics — Compute comprehensive portfolio analytics.
+
+    Caches result in DynamoDB: PORTFOLIO_ANALYTICS#{userId} | LATEST, 1-hour TTL.
+    """
+    from datetime import datetime, timezone
+
+    # Check DynamoDB cache (1-hour TTL)
+    cache_pk = f"PORTFOLIO_ANALYTICS#{user_id}"
+    try:
+        cached = db.get_item(cache_pk, "LATEST")
+        if cached and cached.get("cachedAt"):
+            cache_time = datetime.fromisoformat(cached["cachedAt"].replace("Z", "+00:00"))
+            age_seconds = (datetime.now(timezone.utc) - cache_time).total_seconds()
+            if age_seconds < 3600:  # 1-hour TTL
+                result = cached.get("analytics", {})
+                # Convert Decimal to native types
+                result = _decimals_to_native(result)
+                return _response(200, result)
+    except Exception as e:
+        logger.warning(f"[Analytics] Cache read failed: {e}")
+
+    # Load holdings
+    holdings = _load_holdings_for_analytics(user_id)
+    if not holdings:
+        return _response(200, {
+            "portfolio_value": 0,
+            "risk_metrics": {},
+            "diversification": {"score": 0, "rating": "No Holdings", "recommendations": []},
+            "sector_breakdown": [],
+            "disclaimer": "For educational purposes only. Not investment advice.",
+        })
+
+    # Compute analytics
+    try:
+        import portfolio_analytics
+        result = portfolio_analytics.compute_portfolio_analytics(holdings)
+    except Exception as e:
+        logger.error(f"[Analytics] Computation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Analytics computation failed", "detail": str(e)})
+
+    # Cache result
+    try:
+        from decimal import Decimal
+
+        def _to_decimal(obj):
+            if isinstance(obj, float):
+                return Decimal(str(round(obj, 6)))
+            if isinstance(obj, dict):
+                return {k: _to_decimal(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_to_decimal(i) for i in obj]
+            return obj
+
+        db.put_item({
+            "PK": cache_pk,
+            "SK": "LATEST",
+            "analytics": _to_decimal(result),
+            "cachedAt": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning(f"[Analytics] Cache write failed: {e}")
+
+    return _response(200, result)
+
+
+def _handle_portfolio_monte_carlo(user_id, query_params):
+    """GET /portfolio/monte-carlo?months=12&simulations=1000 — Monte Carlo simulation."""
+    months = int(query_params.get("months", 12))
+    simulations = int(query_params.get("simulations", 1000))
+
+    # Clamp values
+    months = max(1, min(60, months))
+    simulations = max(100, min(5000, simulations))
+
+    holdings = _load_holdings_for_analytics(user_id)
+    if not holdings:
+        return _response(200, {
+            "error": "No holdings found",
+            "disclaimer": "For educational purposes only. Not investment advice.",
+        })
+
+    try:
+        import portfolio_analytics
+        result = portfolio_analytics.run_monte_carlo(holdings, num_simulations=simulations, months=months)
+    except Exception as e:
+        logger.error(f"[MonteCarlo] Computation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Monte Carlo simulation failed", "detail": str(e)})
+
+    return _response(200, result)
 
 
 # ─── Baskets Endpoint ───
