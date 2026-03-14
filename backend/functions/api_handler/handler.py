@@ -13,6 +13,9 @@ Routes:
   GET  /portfolio/health             — Portfolio health score (0-100)
   GET  /portfolio/analytics          — Full portfolio analytics (Sharpe, VaR, etc.)
   GET  /portfolio/monte-carlo        — Monte Carlo simulation
+  GET  /portfolio/tax-opportunities  — Tax-loss harvesting detection
+  GET  /portfolio/tax-summary        — Annual tax summary
+  GET  /portfolio/tax-lots/<ticker>  — Tax lot optimization comparison
   GET  /baskets                      — AI-optimized stock baskets
   GET  /baskets/<name>               — Single basket detail
   GET  /price/<ticker>               — Real-time price via Finnhub
@@ -2837,6 +2840,14 @@ def _handle_portfolio(method, path, body, user_id, query_params=None):
         return _handle_portfolio_monte_carlo(user_id, query_params)
     elif "/analytics" in path and method == "GET":
         return _handle_portfolio_analytics(user_id)
+    elif "/tax-lots/" in path and method == "GET":
+        # /portfolio/tax-lots/{ticker}
+        ticker = path.split("/tax-lots/")[-1].strip("/").upper()
+        return _handle_tax_lots(user_id, ticker, body)
+    elif "/tax-opportunities" in path and method == "GET":
+        return _handle_tax_opportunities(user_id)
+    elif "/tax-summary" in path and method == "GET":
+        return _handle_tax_summary(user_id)
     elif method == "GET":
         return _handle_get_portfolio(user_id)
     elif method == "POST":
@@ -3455,6 +3466,121 @@ def _handle_portfolio_monte_carlo(user_id, query_params):
         import traceback
         traceback.print_exc()
         return _response(500, {"error": "Monte Carlo simulation failed", "detail": str(e)})
+
+    return _response(200, result)
+
+
+# ─── Tax Optimization Endpoints ───
+
+
+def _handle_tax_opportunities(user_id):
+    """GET /portfolio/tax-opportunities — Detect tax-loss harvesting opportunities."""
+    holdings = _load_holdings_for_analytics(user_id)
+    if not holdings:
+        return _response(200, {
+            "total_unrealized_losses": 0,
+            "harvesting_opportunities": [],
+            "long_term_threshold_alerts": [],
+            "estimated_total_benefit": "$0",
+            "disclaimer": "Tax information is educational only. Consult a qualified tax professional.",
+        })
+
+    # Enrich with dateAdded from raw record
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if record and record.get("holdings"):
+        holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+        date_map = {h["ticker"]: h.get("dateAdded", "") for h in holdings_raw}
+        for h in holdings:
+            h["dateAdded"] = date_map.get(h["ticker"], "")
+
+    try:
+        import tax_optimizer
+        result = tax_optimizer.detect_tax_loss_opportunities(holdings)
+    except Exception as e:
+        logger.error(f"[Tax] TLH detection failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Tax analysis failed", "detail": str(e)})
+
+    return _response(200, result)
+
+
+def _handle_tax_summary(user_id):
+    """GET /portfolio/tax-summary — Annual tax summary overview."""
+    holdings = _load_holdings_for_analytics(user_id)
+    if not holdings:
+        return _response(200, {
+            "short_term": {"gains": 0, "losses": 0, "net": 0},
+            "long_term": {"gains": 0, "losses": 0, "net": 0},
+            "total_net": 0,
+            "disclaimer": "Tax information is educational only. Consult a qualified tax professional.",
+        })
+
+    # Enrich with dateAdded
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if record and record.get("holdings"):
+        holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+        date_map = {h["ticker"]: h.get("dateAdded", "") for h in holdings_raw}
+        for h in holdings:
+            h["dateAdded"] = date_map.get(h["ticker"], "")
+
+    try:
+        import tax_optimizer
+        result = tax_optimizer.get_tax_summary(holdings)
+    except Exception as e:
+        logger.error(f"[Tax] Summary failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Tax summary failed", "detail": str(e)})
+
+    return _response(200, result)
+
+
+def _handle_tax_lots(user_id, ticker, body):
+    """GET /portfolio/tax-lots/{ticker} — Compare tax lot methods."""
+    # Load holdings to find lots for this ticker
+    record = db.get_item(f"USER#{user_id}", "PORTFOLIO")
+    if not record or not record.get("holdings"):
+        return _response(200, {
+            "ticker": ticker,
+            "error": "No holdings found",
+            "disclaimer": "Tax information is educational only. Consult a qualified tax professional.",
+        })
+
+    holdings_raw = json.loads(record["holdings"]) if isinstance(record["holdings"], str) else record["holdings"]
+
+    # Find all lots for this ticker
+    lots = []
+    total_shares = 0.0
+    for h in holdings_raw:
+        if h.get("ticker", "").upper() == ticker:
+            shares = float(h.get("shares", 0))
+            total_shares += shares
+            lots.append({
+                "shares": shares,
+                "cost_basis": float(h.get("avgCost", h.get("cost_basis", 0))),
+                "date_acquired": h.get("dateAdded", ""),
+                "lot_id": h.get("id", h.get("ticker", "")),
+            })
+
+    if not lots:
+        return _response(404, {
+            "ticker": ticker,
+            "error": f"No holdings found for {ticker}",
+            "disclaimer": "Tax information is educational only. Consult a qualified tax professional.",
+        })
+
+    # Default: compare selling all shares
+    shares_to_sell = total_shares
+
+    try:
+        import tax_optimizer
+        result = tax_optimizer.compare_tax_lot_methods(ticker, shares_to_sell, lots)
+    except Exception as e:
+        logger.error(f"[Tax] Lot comparison failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return _response(500, {"error": "Lot comparison failed", "detail": str(e)})
 
     return _response(200, result)
 
