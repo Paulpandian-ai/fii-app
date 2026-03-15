@@ -460,8 +460,22 @@ export const getTaxLots = async (ticker: string) => {
 
 // ─── AI Coach (Prompt 3) ───
 
-export const postCoachMessage = async (message: string, ticker?: string) => {
-  const { data } = await api.post('/coach/message', { message, ticker });
+export const postCoachMessage = async (
+  message: string,
+  opts?: {
+    mode?: string;
+    ticker?: string;
+    budget?: number;
+    conversation_id?: string;
+  },
+) => {
+  const { data } = await api.post('/coach/message', {
+    message,
+    mode: opts?.mode,
+    ticker: opts?.ticker,
+    budget: opts?.budget,
+    conversation_id: opts?.conversation_id,
+  });
   return data;
 };
 
@@ -471,6 +485,32 @@ export const getCoachInsights = async () => {
 
 export const getCoachSuggestions = async () => {
   return _deduplicatedGet('/coach/suggestions');
+};
+
+// ─── Wealth Advisor ───
+
+export const getAdvisorHoldings = async () => {
+  return _deduplicatedGet('/advisor/holdings-analysis');
+};
+
+export const getAdvisorInvestmentIdeas = async (budget?: number) => {
+  const params: Record<string, string> = {};
+  if (budget) params.budget = String(budget);
+  return _deduplicatedGet('/advisor/investment-ideas', params);
+};
+
+export const getAdvisorResearch = async (ticker: string) => {
+  return _deduplicatedGet(`/advisor/research/${ticker}`);
+};
+
+export const getAdvisorTaxStrategy = async () => {
+  return _deduplicatedGet('/advisor/tax-strategy');
+};
+
+export const getAdvisorEvents = async (days?: number) => {
+  const params: Record<string, string> = {};
+  if (days) params.days = String(days);
+  return _deduplicatedGet('/advisor/events', params);
 };
 
 // ─── Earnings Calendar ───

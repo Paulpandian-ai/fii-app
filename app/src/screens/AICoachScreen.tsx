@@ -9,149 +9,132 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList, Prescription } from '../types';
+import type { RootStackParamList } from '../types';
 
-import { useStrategyStore } from '../store/strategyStore';
 import { usePortfolioStore } from '../store/portfolioStore';
-import { useCoachStore, type ChatMsg } from '../store/coachStore';
-import { getCoachWeekly, getAdvice, sendChatMessage, postCoachMessage, getCoachSuggestions } from '../services/api';
+import { type ChatMsg } from '../store/coachStore';
+import { postCoachMessage } from '../services/api';
 import { syncService } from '../services/SyncService';
-import { DisclaimerBanner } from '../components/DisclaimerBanner';
-import { AIContentDisclaimer } from '../components/AIContentDisclaimer';
-import { Skeleton } from '../components/Skeleton';
 
-const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string; badge: string }> = {
-  high: { bg: 'rgba(245,166,35,0.08)', border: 'rgba(245,166,35,0.2)', text: '#F5A623', badge: '#F5A623' },
-  medium: { bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.2)', text: '#FBBF24', badge: '#FBBF24' },
-  low: { bg: 'rgba(0,201,167,0.08)', border: 'rgba(0,201,167,0.2)', text: '#00C9A7', badge: '#00C9A7' },
+type CoachMode = 'holdings' | 'invest' | 'research' | 'tax' | 'events' | undefined;
+
+const MODE_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
+  holdings: { label: 'Holdings', icon: 'bar-chart-outline', color: '#00C9A7' },
+  invest: { label: 'Invest', icon: 'compass-outline', color: '#FBBF24' },
+  research: { label: 'Research', icon: 'flask-outline', color: '#60A5FA' },
+  tax: { label: 'Tax', icon: 'cash-outline', color: '#34D399' },
+  events: { label: 'Events', icon: 'calendar-outline', color: '#F59E0B' },
 };
 
-const DEFAULT_SUGGESTIONS = [
-  'What factors affect my stocks?',
-  'What factor exposures does my portfolio have?',
-  'How would a recession affect my portfolio?',
-  'How does my sector allocation compare to the S&P 500?',
-];
+const ALL_MODES: CoachMode[] = ['holdings', 'invest', 'research', 'tax', 'events'];
 
-const CHAT_CACHE_KEY = '@fii_coach_chat_screen_cache';
+const CHAT_CACHE_PREFIX = '@fii_coach_chat_';
+
+// Regex for tickers — 1-5 uppercase letters that appear as standalone words
+const TICKER_RE = /\b([A-Z]{1,5})\b/g;
+// Regex for numbers/percentages — highlight in teal
+const NUMBER_RE = /(\$[\d,]+\.?\d*|[\d,]+\.?\d*%|\d+\.\d+)/g;
 
 export const AICoachScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<RootStackParamList, 'AICoach'>>();
+
+  const initialMode = route.params?.mode as CoachMode;
+  const initialTicker = route.params?.ticker;
+  const initialMessage = route.params?.initialMessage;
 
   const holdings = usePortfolioStore((s) => s.holdings);
-  const hasPortfolio = holdings.length >= 3;
+  const knownTickers = new Set(holdings.map((h) => h.ticker));
 
-  const {
-    advice,
-    isAdviceLoading,
-    reportCard,
-    loadAdvice,
-    loadReportCard,
-  } = useStrategyStore();
-
-  const weekly = useCoachStore((s) => s.weekly);
-
-  const [activeTab, setActiveTab] = useState<'review' | 'prescriptions' | 'ask'>('review');
-
-  // Weekly review state
-  const [weeklyData, setWeeklyData] = useState<any>(null);
-  const [weeklyLoading, setWeeklyLoading] = useState(true);
-
-  // Chat state
+  const [mode, setMode] = useState<CoachMode>(initialMode);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
-  const chatScrollRef = useRef<ScrollView>(null);
-  const [sessionId] = useState(() => `coach_${Date.now()}`);
   const [followUpChips, setFollowUpChips] = useState<string[]>([]);
-  const [askSuggestions, setAskSuggestions] = useState<Array<{ label: string; message: string }>>(
-    DEFAULT_SUGGESTIONS.map((s) => ({ label: s, message: s }))
-  );
+  const [conversationId] = useState(() => `coach_${Date.now()}`);
+  const [autoSent, setAutoSent] = useState(false);
+  const chatScrollRef = useRef<ScrollView>(null);
 
-  // Load weekly review
+  // Typing indicator animation
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const data = await getCoachWeekly();
-        if (mounted && data) setWeeklyData(data);
-      } catch {
-        // silent
-      } finally {
-        if (mounted) setWeeklyLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
+    if (!sending) return;
+    const animate = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+        ]),
+      );
+    const a1 = animate(dot1, 0);
+    const a2 = animate(dot2, 150);
+    const a3 = animate(dot3, 300);
+    a1.start();
+    a2.start();
+    a3.start();
+    return () => { a1.stop(); a2.stop(); a3.stop(); };
+  }, [sending, dot1, dot2, dot3]);
 
-  // Load advice if not loaded
-  useEffect(() => {
-    if (!advice.length && !isAdviceLoading) {
-      loadAdvice();
-    }
-    if (!reportCard) {
-      loadReportCard();
-    }
-  }, [advice.length, isAdviceLoading, loadAdvice, reportCard, loadReportCard]);
+  // Cache key per mode
+  const cacheKey = `${CHAT_CACHE_PREFIX}${mode || 'general'}`;
 
-  // Load contextual suggestions
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const data = await getCoachSuggestions();
-        if (mounted && data?.suggestions?.length >= 4) {
-          setAskSuggestions(data.suggestions.slice(0, 4));
-        }
-      } catch {}
-    })();
-    return () => { mounted = false; };
-  }, []);
-
-  // Load chat history from local cache, then reconcile from cloud
+  // Load cached chat
   useEffect(() => {
     (async () => {
       try {
-        const cached = await AsyncStorage.getItem(CHAT_CACHE_KEY);
+        const cached = await AsyncStorage.getItem(cacheKey);
         if (cached) {
-          const parsed = JSON.parse(cached) as ChatMsg[];
-          setMessages(parsed.slice(-20));
+          setMessages(JSON.parse(cached).slice(-30));
         } else {
           setMessages([{
             role: 'assistant',
-            content: "Hi! I'm your FII AI Coach. Ask me anything about your portfolio, market conditions, or investment strategy. I'll use your holdings and FII data to give personalized answers.",
+            content: getWelcomeMessage(mode, initialTicker),
             timestamp: new Date().toISOString(),
           }]);
         }
       } catch {
         setMessages([{
           role: 'assistant',
-          content: "Hi! I'm your FII AI Coach. Ask me anything about your portfolio.",
+          content: getWelcomeMessage(mode, initialTicker),
           timestamp: new Date().toISOString(),
         }]);
       }
     })();
-  }, []);
+  }, [cacheKey, mode, initialTicker]);
 
-  // Cache chat history locally on change + sync to cloud
+  // Cache on change
   useEffect(() => {
     if (messages.length > 1) {
-      const trimmed = messages.slice(-20);
-      AsyncStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(trimmed)).catch(() => {});
+      AsyncStorage.setItem(cacheKey, JSON.stringify(messages.slice(-30))).catch(() => {});
     }
-  }, [messages]);
+  }, [messages, cacheKey]);
 
-  const scrollToBottom = () => {
-    setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 100);
-  };
+  // Auto-send initial message on first mount
+  useEffect(() => {
+    if (initialMessage && !autoSent && messages.length >= 1) {
+      setAutoSent(true);
+      // Small delay to let welcome message render
+      const timer = setTimeout(() => handleSendChat(initialMessage), 400);
+      return () => clearTimeout(timer);
+    }
+  }, [initialMessage, autoSent, messages.length]);
 
-  const handleSendChat = async (text?: string) => {
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 120);
+  }, []);
+
+  const handleSendChat = useCallback(async (text?: string) => {
     const msg = text || chatInput.trim();
     if (!msg || sending) return;
 
@@ -159,449 +142,383 @@ export const AICoachScreen: React.FC = () => {
     setMessages((prev) => [...prev, userMsg]);
     setChatInput('');
     setSending(true);
+    setFollowUpChips([]);
     scrollToBottom();
 
     try {
-      // Try new coach endpoint first, fallback to legacy
-      let res: any;
-      try {
-        res = await postCoachMessage(msg);
-      } catch {
-        res = await sendChatMessage(msg, { sessionId });
-      }
+      const res = await postCoachMessage(msg, {
+        mode: mode || undefined,
+        ticker: initialTicker || undefined,
+        conversation_id: conversationId,
+      });
+
       const assistantMsg: ChatMsg = {
         role: 'assistant',
         content: res.response || res.reply || "I couldn't generate a response. Please try again.",
         timestamp: new Date().toISOString(),
       };
-      // Extract follow-up chips if available
-      if (res.follow_ups?.length) {
-        setFollowUpChips(res.follow_ups.slice(0, 3));
-      } else {
-        setFollowUpChips([]);
+
+      if (res.follow_up_suggestions?.length) {
+        setFollowUpChips(res.follow_up_suggestions.slice(0, 4));
+      } else if (res.follow_ups?.length) {
+        setFollowUpChips(res.follow_ups.slice(0, 4));
       }
+
       setMessages((prev) => {
         const updated = [...prev, assistantMsg];
         syncService.syncToCloud('chat', 'POST', {
           messages: updated.slice(-20),
           context: 'coach',
+          mode: mode || 'general',
         });
         return updated;
       });
     } catch {
-      setMessages((prev) => [...prev, {
-        role: 'assistant',
-        content: "Sorry, I'm having trouble connecting. Please try again in a moment.",
-        timestamp: new Date().toISOString(),
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: "Sorry, I'm having trouble connecting. Please try again in a moment.",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } finally {
       setSending(false);
       scrollToBottom();
     }
-  };
+  }, [chatInput, sending, mode, initialTicker, conversationId, scrollToBottom]);
 
-  const tabs = [
-    { id: 'review' as const, label: 'Weekly Review', icon: 'newspaper' as const },
-    { id: 'prescriptions' as const, label: 'Insights', icon: 'medical' as const },
-    { id: 'ask' as const, label: 'Ask FII', icon: 'chatbubbles' as const },
-  ];
+  const switchMode = useCallback((newMode: CoachMode) => {
+    if (newMode === mode) return;
+    setMode(newMode);
+    setFollowUpChips([]);
+  }, [mode]);
 
-  // Limit to 5 active prescriptions
-  const activePrescriptions = advice.slice(0, 5);
+  // Build header title
+  const headerTitle = mode
+    ? MODE_CONFIG[mode]?.label
+      ? `${MODE_CONFIG[mode].label}${mode === 'research' && initialTicker ? `: ${initialTicker}` : ''}`
+      : 'AI Coach'
+    : 'AI Coach';
 
   return (
     <LinearGradient colors={['#0D1B3E', '#1A1A2E']} style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI Coach</Text>
-        {(isAdviceLoading || weeklyLoading) && <ActivityIndicator color="#FBBF24" size="small" />}
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitle}>{headerTitle}</Text>
+          {mode && (
+            <View style={[styles.modeBadge, { backgroundColor: `${MODE_CONFIG[mode]?.color || '#60A5FA'}20` }]}>
+              <Ionicons name={MODE_CONFIG[mode]?.icon as any} size={12} color={MODE_CONFIG[mode]?.color} />
+              <Text style={[styles.modeBadgeText, { color: MODE_CONFIG[mode]?.color }]}>
+                {MODE_CONFIG[mode]?.label}
+              </Text>
+            </View>
+          )}
+        </View>
+        {sending && <ActivityIndicator color="#FBBF24" size="small" />}
       </View>
 
-      {/* Tab selector */}
-      <View style={styles.tabBar}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab.id}
-            style={[styles.tab, activeTab === tab.id && styles.tabActive]}
-            onPress={() => setActiveTab(tab.id)}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={tab.icon as any}
-              size={16}
-              color={activeTab === tab.id ? '#FBBF24' : 'rgba(255,255,255,0.4)'}
-            />
-            <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Mode tabs */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.modeTabsScroll}
+        contentContainerStyle={styles.modeTabsContent}
+      >
+        {ALL_MODES.map((m) => {
+          const cfg = MODE_CONFIG[m!];
+          const active = m === mode;
+          return (
+            <TouchableOpacity
+              key={m}
+              style={[styles.modeTab, active && { backgroundColor: `${cfg.color}18`, borderColor: `${cfg.color}40` }]}
+              onPress={() => switchMode(m)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={cfg.icon as any} size={14} color={active ? cfg.color : 'rgba(255,255,255,0.35)'} />
+              <Text style={[styles.modeTabText, active && { color: cfg.color }]}>
+                {cfg.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
-      {/* ═══ 4A. WEEKLY PORTFOLIO REVIEW ═══ */}
-      {activeTab === 'review' && (
+      {/* Chat area */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={0}
+      >
         <ScrollView
+          ref={chatScrollRef}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={styles.chatScrollContent}
+          onContentSizeChange={scrollToBottom}
         >
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Weekly Portfolio Review</Text>
-            <Text style={styles.sectionSubtitle}>
-              Auto-generated every Monday based on your portfolio
-            </Text>
-
-            {weeklyLoading ? (
-              <View style={{ gap: 12 }}>
-                <Skeleton width="100%" height={120} borderRadius={14} />
-                <Skeleton width="100%" height={80} borderRadius={14} />
-              </View>
-            ) : weeklyData ? (
-              <View style={styles.reviewContainer}>
-                {/* Summary card */}
-                <View style={styles.reviewCard}>
-                  <View style={styles.reviewCardHeader}>
-                    <Text style={{ fontSize: 24 }}>📊</Text>
-                    <Text style={styles.reviewCardTitle}>This Week's Summary</Text>
-                  </View>
-
-                  {/* Weekly stats */}
-                  <View style={styles.reviewStats}>
-                    <View style={styles.reviewStat}>
-                      <Text style={styles.reviewStatLabel}>Portfolio Change</Text>
-                      <Text
-                        style={[
-                          styles.reviewStatValue,
-                          {
-                            color: (weeklyData.weeklyChangePct ?? 0) >= 0 ? '#00C9A7' : '#F5A623',
-                          },
-                        ]}
-                      >
-                        {(weeklyData.weeklyChangePct ?? 0) >= 0 ? '+' : ''}
-                        {(weeklyData.weeklyChangePct ?? 0).toFixed(2)}%
-                      </Text>
-                    </View>
-                    <View style={styles.reviewStatDivider} />
-                    <View style={styles.reviewStat}>
-                      <Text style={styles.reviewStatLabel}>Signals Changed</Text>
-                      <Text style={styles.reviewStatValue}>
-                        {weeklyData.signalsChanged ?? 0}
-                      </Text>
-                    </View>
-                    <View style={styles.reviewStatDivider} />
-                    <View style={styles.reviewStat}>
-                      <Text style={styles.reviewStatLabel}>Coach Score</Text>
-                      <Text style={[styles.reviewStatValue, { color: '#FBBF24' }]}>
-                        {weeklyData.score ?? '--'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* AI commentary */}
-                  {weeklyData.claudeLine && (
-                    <View style={styles.aiCommentary}>
-                      <View style={styles.aiCommentaryHeader}>
-                        <Ionicons name="sparkles" size={14} color="#60A5FA" />
-                        <Text style={styles.aiCommentaryLabel}>AI Analysis</Text>
-                      </View>
-                      <Text style={styles.aiCommentaryText}>{weeklyData.claudeLine}</Text>
-                    </View>
-                  )}
-
-                  {weeklyData.signalChangesText && (
-                    <Text style={styles.signalChangesText}>{weeklyData.signalChangesText}</Text>
-                  )}
-                </View>
-
-                {/* What to watch */}
-                <View style={styles.watchSection}>
-                  <Text style={styles.watchTitle}>What to Watch This Week</Text>
-                  <View style={styles.watchItems}>
-                    <View style={styles.watchItem}>
-                      <Ionicons name="eye-outline" size={16} color="#60A5FA" />
-                      <Text style={styles.watchItemText}>
-                        Monitor holdings with recent score changes
-                      </Text>
-                    </View>
-                    <View style={styles.watchItem}>
-                      <Ionicons name="trending-up" size={16} color="#00C9A7" />
-                      <Text style={styles.watchItemText}>
-                        Check earnings calendar for your holdings
-                      </Text>
-                    </View>
-                    <View style={styles.watchItem}>
-                      <Ionicons name="shield-checkmark" size={16} color="#FBBF24" />
-                      <Text style={styles.watchItemText}>
-                        Review rebalancing insights from factor analysis
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.reviewCard}>
-                <View style={styles.reviewCardHeader}>
-                  <Text style={{ fontSize: 24 }}>📊</Text>
-                  <Text style={styles.reviewCardTitle}>Weekly Review</Text>
-                </View>
-                <Text style={styles.reviewPlaceholder}>
-                  {hasPortfolio
-                    ? 'Your weekly review will appear here every Monday. Check back soon!'
-                    : 'Add holdings to your portfolio to get a personalized weekly review.'}
-                </Text>
-              </View>
-            )}
-
-            <Text style={styles.aiDisclaimer}>
-              For educational purposes only. Not investment advice.
-            </Text>
-          </View>
-
-          <DisclaimerBanner />
-        </ScrollView>
-      )}
-
-      {/* ═══ 4B. INSIGHTS ═══ */}
-      {activeTab === 'prescriptions' && (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Insights</Text>
-            <Text style={styles.sectionSubtitle}>
-              AI-generated observations and educational insights for your portfolio
-            </Text>
-
-            {isAdviceLoading && !advice.length ? (
-              <View style={{ gap: 10 }}>
-                <Skeleton width="100%" height={120} borderRadius={14} />
-                <Skeleton width="100%" height={120} borderRadius={14} />
-                <Skeleton width="100%" height={120} borderRadius={14} />
-              </View>
-            ) : activePrescriptions.length > 0 ? (
-              <View style={styles.prescriptionsContainer}>
-                {activePrescriptions.map((rx) => {
-                  const colors = SEVERITY_COLORS[rx.severity] || SEVERITY_COLORS.low;
-                  return (
-                    <View
-                      key={rx.id}
-                      style={[
-                        styles.prescriptionCard,
-                        { backgroundColor: colors.bg, borderColor: colors.border },
-                      ]}
-                    >
-                      {/* Priority badge */}
-                      <View style={styles.prescriptionHeader}>
-                        <View style={[styles.priorityBadge, { backgroundColor: colors.badge }]}>
-                          <Text style={styles.priorityText}>
-                            {rx.severity.toUpperCase()}
-                          </Text>
-                        </View>
-                        <Text style={styles.prescriptionTitle} numberOfLines={1}>
-                          {rx.title}
-                        </Text>
-                      </View>
-
-                      {/* Diagnosis */}
-                      <View style={styles.prescriptionSection}>
-                        <Text style={styles.prescriptionLabel}>OBSERVATION</Text>
-                        <Text style={styles.prescriptionText}>{rx.diagnosis}</Text>
-                      </View>
-
-                      {/* Prescription */}
-                      <View style={styles.prescriptionSection}>
-                        <Text style={styles.prescriptionLabel}>INSIGHT</Text>
-                        <Text style={styles.prescriptionText}>{rx.prescription}</Text>
-                      </View>
-
-                      {/* Expected Impact */}
-                      <View style={styles.prescriptionSection}>
-                        <Text style={styles.prescriptionLabel}>EXPECTED IMPACT</Text>
-                        <Text style={[styles.prescriptionText, { color: '#00C9A7' }]}>
-                          {rx.impact}
-                        </Text>
-                      </View>
-
-                      {/* Apply button */}
-                      <TouchableOpacity
-                        style={styles.applyTreatmentButton}
-                        activeOpacity={0.7}
-                        onPress={() => {
-                          // Navigate to relevant screen based on prescription
-                          navigation.navigate('WealthAdvisor');
-                        }}
-                      >
-                        <Ionicons name="checkmark-circle" size={16} color="#60A5FA" />
-                        <Text style={styles.applyTreatmentText}>Learn More</Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <View style={styles.noPrescriptions}>
-                <Ionicons name="checkmark-circle" size={40} color="#00C9A7" />
-                <Text style={styles.noPrescriptionsTitle}>All Clear!</Text>
-                <Text style={styles.noPrescriptionsSubtitle}>
-                  {hasPortfolio
-                    ? 'No active prescriptions right now. Your portfolio looks healthy!'
-                    : 'Add holdings to get AI-powered portfolio insights.'}
-                </Text>
-              </View>
-            )}
-
-            <AIContentDisclaimer />
-
-            <Text style={styles.aiDisclaimer}>
-              For educational purposes only. Not investment advice.
-            </Text>
-          </View>
-
-          <DisclaimerBanner />
-        </ScrollView>
-      )}
-
-      {/* ═══ 4C. ASK FII ═══ */}
-      {activeTab === 'ask' && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ flex: 1 }}
-          keyboardVerticalOffset={0}
-        >
-          <ScrollView
-            ref={chatScrollRef}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.chatScrollContent}
-            onContentSizeChange={scrollToBottom}
-          >
-            {messages.map((msg, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.msgRow,
-                  msg.role === 'user' ? styles.msgRowUser : styles.msgRowAssistant,
-                ]}
-              >
-                {msg.role === 'assistant' && (
-                  <View style={styles.aiAvatar}>
-                    <Ionicons name="sparkles" size={14} color="#FBBF24" />
-                  </View>
-                )}
-                <View
-                  style={[
-                    styles.bubble,
-                    msg.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant,
-                  ]}
-                >
-                  <Text style={[styles.bubbleText, msg.role === 'user' && styles.bubbleTextUser]}>
-                    {msg.content}
-                  </Text>
-                </View>
-              </View>
-            ))}
-
-            {sending && (
-              <View style={[styles.msgRow, styles.msgRowAssistant]}>
+          {messages.map((msg, idx) => (
+            <View
+              key={idx}
+              style={[
+                styles.msgRow,
+                msg.role === 'user' ? styles.msgRowUser : styles.msgRowAssistant,
+              ]}
+            >
+              {msg.role === 'assistant' && (
                 <View style={styles.aiAvatar}>
                   <Ionicons name="sparkles" size={14} color="#FBBF24" />
                 </View>
-                <View style={[styles.bubble, styles.bubbleAssistant]}>
-                  <View style={styles.typingDots}>
-                    <View style={[styles.dot, { opacity: 0.4 }]} />
-                    <View style={[styles.dot, { opacity: 0.6 }]} />
-                    <View style={[styles.dot, { opacity: 0.8 }]} />
-                  </View>
+              )}
+              <View
+                style={[
+                  styles.bubble,
+                  msg.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant,
+                ]}
+              >
+                {msg.role === 'assistant' ? (
+                  <FormattedText
+                    text={msg.content}
+                    knownTickers={knownTickers}
+                    onTickerPress={(t) =>
+                      navigation.navigate('SignalDetail', { ticker: t })
+                    }
+                  />
+                ) : (
+                  <Text style={[styles.bubbleText, styles.bubbleTextUser]}>
+                    {msg.content}
+                  </Text>
+                )}
+              </View>
+            </View>
+          ))}
+
+          {/* Typing indicator */}
+          {sending && (
+            <View style={[styles.msgRow, styles.msgRowAssistant]}>
+              <View style={styles.aiAvatar}>
+                <Ionicons name="sparkles" size={14} color="#FBBF24" />
+              </View>
+              <View style={[styles.bubble, styles.bubbleAssistant]}>
+                <View style={styles.typingDots}>
+                  <Animated.View style={[styles.dot, { opacity: dot1 }]} />
+                  <Animated.View style={[styles.dot, { opacity: dot2 }]} />
+                  <Animated.View style={[styles.dot, { opacity: dot3 }]} />
                 </View>
               </View>
+            </View>
+          )}
+
+          {/* Sources pill for last assistant message */}
+          {messages.length > 1 && messages[messages.length - 1]?.role === 'assistant' && !sending && mode && (
+            <View style={styles.sourcesPill}>
+              <Ionicons name="document-text-outline" size={12} color="rgba(255,255,255,0.35)" />
+              <Text style={styles.sourcesText}>
+                Data: {getSourceLabel(mode)}
+              </Text>
+            </View>
+          )}
+
+          {/* Follow-up chips */}
+          {followUpChips.length > 0 && !sending && (
+            <View style={styles.followUpRow}>
+              {followUpChips.map((chip, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={styles.followUpChip}
+                  onPress={() => {
+                    setFollowUpChips([]);
+                    handleSendChat(chip);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.followUpText} numberOfLines={1}>{chip}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Input bar */}
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.textInput}
+            placeholder={getPlaceholder(mode)}
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            value={chatInput}
+            onChangeText={setChatInput}
+            multiline
+            maxLength={1000}
+            editable={!sending}
+            onSubmitEditing={() => handleSendChat()}
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, (!chatInput.trim() || sending) && styles.sendBtnDisabled]}
+            onPress={() => handleSendChat()}
+            disabled={!chatInput.trim() || sending}
+          >
+            {sending ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <Ionicons name="send" size={18} color="#FFF" />
             )}
+          </TouchableOpacity>
+        </View>
 
-            {/* Follow-up chips */}
-            {followUpChips.length > 0 && !sending && (
-              <View style={styles.followUpRow}>
-                {followUpChips.map((chip, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={styles.followUpChip}
-                    onPress={() => {
-                      setFollowUpChips([]);
-                      handleSendChat(chip);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.followUpText} numberOfLines={1}>{chip}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* Suggested questions */}
-            {messages.length <= 1 && (
-              <View style={styles.suggestions}>
-                <Text style={styles.suggestionsLabel}>Ask about your portfolio:</Text>
-                {askSuggestions.map((q, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={styles.suggestionChip}
-                    onPress={() => handleSendChat(q.message || q.label)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.suggestionText}>{q.label}</Text>
-                    <Ionicons name="arrow-forward" size={12} color="rgba(255,255,255,0.3)" />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Input bar */}
-          <View style={styles.inputBar}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Ask anything about your portfolio..."
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              value={chatInput}
-              onChangeText={setChatInput}
-              multiline
-              maxLength={1000}
-              editable={!sending}
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!chatInput.trim() || sending) && styles.sendBtnDisabled]}
-              onPress={() => handleSendChat()}
-              disabled={!chatInput.trim() || sending}
-            >
-              {sending ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <Ionicons name="send" size={18} color="#FFF" />
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.chatDisclaimer}>
-            <Ionicons name="information-circle-outline" size={12} color="rgba(255,255,255,0.2)" />
-            <Text style={styles.chatDisclaimerText}>
-              For educational purposes only. Not investment advice.
-            </Text>
-          </View>
-        </KeyboardAvoidingView>
-      )}
+        <View style={styles.chatDisclaimer}>
+          <Ionicons name="information-circle-outline" size={12} color="rgba(255,255,255,0.2)" />
+          <Text style={styles.chatDisclaimerText}>
+            For educational purposes only. Not investment advice.
+          </Text>
+        </View>
+      </KeyboardAvoidingView>
     </LinearGradient>
   );
 };
 
+// ─── Formatted text with bold, bullets, teal numbers, tappable tickers ───
+
+const FormattedText: React.FC<{
+  text: string;
+  knownTickers: Set<string>;
+  onTickerPress: (ticker: string) => void;
+}> = ({ text, knownTickers, onTickerPress }) => {
+  // Split into lines for basic formatting
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+
+  lines.forEach((line, lineIdx) => {
+    if (lineIdx > 0) elements.push(<Text key={`br-${lineIdx}`}>{'\n'}</Text>);
+
+    const trimmed = line.trimStart();
+    const isBullet = trimmed.startsWith('- ') || trimmed.startsWith('• ') || /^\d+\.\s/.test(trimmed);
+    const isBold = trimmed.startsWith('**') && trimmed.endsWith('**');
+
+    let content = line;
+    if (isBullet) {
+      content = '  • ' + trimmed.replace(/^[-•]\s*/, '').replace(/^\d+\.\s*/, '');
+    }
+    if (isBold) {
+      content = content.replace(/\*\*/g, '');
+    }
+
+    // Split by bold markers within line
+    const parts = content.split(/(\*\*[^*]+\*\*)/g);
+
+    parts.forEach((part, partIdx) => {
+      const key = `${lineIdx}-${partIdx}`;
+      const boldMatch = part.match(/^\*\*(.+)\*\*$/);
+
+      if (boldMatch) {
+        elements.push(
+          <Text key={key} style={formattedStyles.bold}>{boldMatch[1]}</Text>,
+        );
+        return;
+      }
+
+      // Highlight numbers and tickers
+      const tokens = part.split(/((?:\$[\d,]+\.?\d*|[\d,]+\.?\d*%|\d+\.\d+)|\b[A-Z]{1,5}\b)/g);
+      tokens.forEach((token, tokIdx) => {
+        const tKey = `${key}-${tokIdx}`;
+        if (NUMBER_RE.test(token)) {
+          NUMBER_RE.lastIndex = 0;
+          elements.push(
+            <Text key={tKey} style={formattedStyles.number}>{token}</Text>,
+          );
+        } else if (TICKER_RE.test(token) && knownTickers.has(token)) {
+          TICKER_RE.lastIndex = 0;
+          elements.push(
+            <Text
+              key={tKey}
+              style={formattedStyles.ticker}
+              onPress={() => onTickerPress(token)}
+            >
+              {token}
+            </Text>,
+          );
+        } else {
+          elements.push(<Text key={tKey}>{token}</Text>);
+        }
+      });
+    });
+  });
+
+  return <Text style={formattedStyles.base}>{elements}</Text>;
+};
+
+const formattedStyles = StyleSheet.create({
+  base: { color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 20 },
+  bold: { fontWeight: '700', color: '#FFFFFF' },
+  number: { color: '#00C9A7', fontWeight: '600' },
+  ticker: { color: '#60A5FA', fontWeight: '700', textDecorationLine: 'underline' },
+});
+
+// ─── Helpers ───
+
+function getWelcomeMessage(mode: CoachMode, ticker?: string): string {
+  switch (mode) {
+    case 'holdings':
+      return "I'll analyze your holdings with their FII scores, risk factors, and growth factors. What would you like to know?";
+    case 'invest':
+      return "Let's explore investment ideas based on your portfolio gaps. I'll look at which sectors you're missing and suggest options to consider.";
+    case 'research':
+      return ticker
+        ? `Let's dive deep into ${ticker}. I have its factor analysis, financials, stress tests, and peer comparison ready.`
+        : "Search for a stock and I'll provide a full research brief with bull/bear cases, factor analysis, and peer comparison.";
+    case 'tax':
+      return "I'll walk you through your tax optimization opportunities. I have your unrealized gains/losses and potential harvesting strategies ready. Note: This is tax education, not tax advice.";
+    case 'events':
+      return "Let's review upcoming events that could affect your portfolio — earnings dates, Fed meetings, and more. I'll explain what each one could mean.";
+    default:
+      return "Hi! I'm your FII AI Coach. Ask me anything about your portfolio, stocks, or investment strategy.";
+  }
+}
+
+function getPlaceholder(mode: CoachMode): string {
+  switch (mode) {
+    case 'holdings':
+      return 'Ask about your holdings...';
+    case 'invest':
+      return 'Ask about investment ideas...';
+    case 'research':
+      return 'Ask about this stock...';
+    case 'tax':
+      return 'Ask about tax strategy...';
+    case 'events':
+      return 'Ask about upcoming events...';
+    default:
+      return 'Ask anything about your portfolio...';
+  }
+}
+
+function getSourceLabel(mode: CoachMode): string {
+  switch (mode) {
+    case 'holdings':
+      return 'Portfolio analysis, FII scores';
+    case 'invest':
+      return 'Gap analysis, sector weights';
+    case 'research':
+      return 'Factor analysis, financials, peers';
+    case 'tax':
+      return 'Tax lots, unrealized P&L';
+    case 'events':
+      return 'Earnings dates, FOMC calendar';
+    default:
+      return 'Portfolio data';
+  }
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 56,
-    paddingBottom: 12,
+    paddingBottom: 8,
     gap: 12,
   },
   backButton: {
@@ -612,260 +529,51 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerTitleContainer: { flex: 1 },
   headerTitle: {
     color: '#FFFFFF',
     fontSize: 22,
     fontWeight: '800',
-    flex: 1,
   },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-
-  // ─── Tab Bar ───
-  tabBar: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
+  modeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 4,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  tabActive: {
-    backgroundColor: 'rgba(251,191,36,0.15)',
-  },
-  tabText: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    color: '#FBBF24',
-  },
-
-  // ─── Section ───
-  section: {
-    marginHorizontal: 16,
-    marginTop: 16,
-  },
-  sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  sectionSubtitle: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 13,
-    marginTop: 4,
-    marginBottom: 16,
-  },
-
-  // ─── Weekly Review ───
-  reviewContainer: {
-    gap: 16,
-  },
-  reviewCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  reviewCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
-  },
-  reviewCardTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  reviewStats: {
-    flexDirection: 'row',
-    marginBottom: 14,
-  },
-  reviewStat: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  reviewStatDivider: {
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  reviewStatLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 10,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  reviewStatValue: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  aiCommentary: {
-    backgroundColor: 'rgba(96,165,250,0.08)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-  },
-  aiCommentaryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  aiCommentaryLabel: {
-    color: '#60A5FA',
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  aiCommentaryText: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  signalChangesText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  reviewPlaceholder: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    paddingVertical: 10,
-  },
-
-  // ─── Watch Section ───
-  watchSection: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 14,
-    padding: 16,
-  },
-  watchTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  watchItems: {
-    gap: 10,
-  },
-  watchItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  watchItemText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 18,
-  },
-
-  // ─── Prescriptions ───
-  prescriptionsContainer: {
-    gap: 12,
-  },
-  prescriptionCard: {
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-  },
-  prescriptionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
-  },
-  priorityBadge: {
-    borderRadius: 6,
+    alignSelf: 'flex-start',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginTop: 2,
   },
-  priorityText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+  modeBadgeText: { fontSize: 11, fontWeight: '600' },
+
+  // ─── Mode tabs ───
+  modeTabsScroll: { maxHeight: 40, marginBottom: 4 },
+  modeTabsContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+    alignItems: 'center',
   },
-  prescriptionTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-  },
-  prescriptionSection: {
-    marginBottom: 10,
-  },
-  prescriptionLabel: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 3,
-  },
-  prescriptionText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  applyTreatmentButton: {
+  modeTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(96,165,250,0.12)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    marginTop: 4,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.25)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  applyTreatmentText: {
-    color: '#60A5FA',
-    fontSize: 14,
+  modeTabText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
     fontWeight: '600',
   },
-  noPrescriptions: {
-    alignItems: 'center',
-    padding: 30,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 14,
-  },
-  noPrescriptionsTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-  noPrescriptionsSubtitle: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
-  },
 
-  // ─── Ask FII Chat ───
+  // ─── Chat ───
   chatScrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 16,
   },
   msgRow: {
@@ -873,12 +581,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     maxWidth: '85%',
   },
-  msgRowUser: {
-    alignSelf: 'flex-end',
-  },
-  msgRowAssistant: {
-    alignSelf: 'flex-start',
-  },
+  msgRowUser: { alignSelf: 'flex-end' },
+  msgRowAssistant: { alignSelf: 'flex-start' },
   aiAvatar: {
     width: 28,
     height: 28,
@@ -907,25 +611,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  bubbleTextUser: {
-    color: '#FFFFFF',
-  },
-  typingDots: {
-    flexDirection: 'row',
-    gap: 4,
-    paddingVertical: 4,
-  },
+  bubbleTextUser: { color: '#FFFFFF' },
+
+  // ─── Typing ───
+  typingDots: { flexDirection: 'row', gap: 4, paddingVertical: 4 },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
+
+  // ─── Sources pill ───
+  sourcesPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    marginLeft: 36,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  sourcesText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+  },
+
+  // ─── Follow-ups ───
   followUpRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginTop: 8,
+    marginTop: 4,
     marginBottom: 4,
   },
   followUpChip: {
@@ -941,30 +663,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  suggestions: {
-    marginTop: 16,
-  },
-  suggestionsLabel: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  suggestionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  suggestionText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 13,
-    flex: 1,
-  },
+
+  // ─── Input ───
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -992,9 +692,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendBtnDisabled: {
-    opacity: 0.3,
-  },
+  sendBtnDisabled: { opacity: 0.3 },
   chatDisclaimer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1006,13 +704,5 @@ const styles = StyleSheet.create({
   chatDisclaimerText: {
     color: 'rgba(255,255,255,0.2)',
     fontSize: 10,
-  },
-
-  // ─── Shared ───
-  aiDisclaimer: {
-    color: 'rgba(255,255,255,0.2)',
-    fontSize: 10,
-    marginTop: 10,
-    fontStyle: 'italic',
   },
 });
