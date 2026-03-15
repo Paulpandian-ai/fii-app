@@ -4,8 +4,15 @@ Context-aware investment education coach powered by Claude that uses the
 user's portfolio data, stock analysis, tax opportunities, and factor scores
 to provide educational responses.
 
+Supports 5 specialized conversation modes:
+  - holdings: Portfolio analysis with risk/growth factors
+  - invest: Investment suggestions based on portfolio gaps
+  - research: Deep-dive research on a specific stock
+  - tax: Tax optimization strategy and education
+  - events: Upcoming events watchlist for portfolio
+
 Functions:
-  - generate_coach_response(user_message, context) — Main chat response
+  - generate_coach_response(user_message, context, mode, ...) — Main chat response
   - generate_proactive_insights(portfolio, analytics) — Unsolicited insights
   - generate_suggestion_chips(context) — Contextual suggestion chips
 """
@@ -41,6 +48,42 @@ RULES:
 - End substantive responses with: 'For educational purposes only. Not investment advice.'
 - Be conversational, warm, but data-driven
 - If you don't have data for something, say so honestly"""
+
+# ─── Mode-Specific System Prompt Additions ───
+
+MODE_SYSTEM_PROMPTS = {
+    "holdings": (
+        "The user wants to understand their current portfolio. You have "
+        "their complete holdings with FII scores, risk factors, and growth "
+        "factors. Discuss each holding's strengths and risks. Identify "
+        "the portfolio's biggest vulnerability and opportunity."
+    ),
+    "invest": (
+        "The user is considering new investments. You have analysis of "
+        "their portfolio gaps and stock suggestions. Explain WHY sector "
+        "diversification matters using their specific numbers. Present "
+        "alternatives as educational options, not recommendations."
+    ),
+    "research": (
+        "The user wants to understand a specific stock deeply. You have "
+        "its full factor analysis, financial metrics, stress tests, and "
+        "peer comparison. Present the bull case and bear case. Compare "
+        "to peers. Reference specific data points."
+    ),
+    "tax": (
+        "The user wants to understand tax optimization. You have their "
+        "unrealized gains/losses and potential harvesting opportunities. "
+        "Explain concepts clearly with dollar examples. Always note this "
+        "is tax education, not tax advice."
+    ),
+    "events": (
+        "The user wants to know what events to watch. You have their "
+        "upcoming earnings dates, Fed meetings, and score changes. "
+        "Explain what each event could mean for their specific holdings."
+    ),
+}
+
+VALID_MODES = {"holdings", "invest", "research", "tax", "events"}
 
 
 def _get_api_key() -> str:
@@ -184,10 +227,251 @@ def _format_conversation_history(history: list[dict]) -> list[dict]:
     return messages
 
 
+# ─── Mode Context Formatters ───
+
+
+def _format_holdings_context(data: dict) -> str:
+    """Format holdings analysis data for Claude context."""
+    parts = ["[HOLDINGS ANALYSIS]"]
+
+    summary = data.get("portfolio_summary", {})
+    if summary:
+        parts.append(
+            f"Total Value: ${summary.get('total_value', 0):,.0f} | "
+            f"P&L: ${summary.get('total_pnl', 0):,.0f} ({summary.get('total_pnl_pct', 0):.1f}%)"
+        )
+        if summary.get("strongest_holding"):
+            parts.append(f"Strongest: {summary['strongest_holding']}")
+        if summary.get("weakest_holding"):
+            parts.append(f"Weakest: {summary['weakest_holding']}")
+        if summary.get("biggest_risk"):
+            parts.append(f"Biggest Risk: {summary['biggest_risk']}")
+        if summary.get("biggest_opportunity"):
+            parts.append(f"Biggest Opportunity: {summary['biggest_opportunity']}")
+
+    holdings_analysis = data.get("holdings_analysis", [])
+    for h in holdings_analysis[:15]:
+        ticker = h.get("ticker", "?")
+        score = h.get("fii_score", "N/A")
+        signal = h.get("signal", "")
+        value = h.get("current_value", 0)
+        pnl_pct = h.get("gain_loss_pct", 0)
+        risk_factors = h.get("risk_factors", [])
+        growth_factors = h.get("growth_factors", [])
+
+        line = f"  {ticker}: FII {score}/10 ({signal}), ${value:,.0f} ({pnl_pct:+.1f}%)"
+        if risk_factors:
+            line += f" | Risks: {', '.join(rf[:50] for rf in risk_factors[:2])}"
+        if growth_factors:
+            line += f" | Growth: {', '.join(gf[:50] for gf in growth_factors[:2])}"
+        parts.append(line)
+
+    return "\n".join(parts)
+
+
+def _format_invest_context(data: dict) -> str:
+    """Format investment suggestion data for Claude context."""
+    parts = [f"[INVESTMENT ANALYSIS — Budget: ${data.get('budget', 0):,.0f}]"]
+
+    suggestions = data.get("suggestions", {})
+
+    # Sector gaps
+    fill_gaps = suggestions.get("fill_gaps", [])
+    if fill_gaps:
+        parts.append("\nSector Gaps to Fill:")
+        for gap in fill_gaps[:5]:
+            sector = gap.get("sector", "")
+            current = gap.get("current_weight", 0)
+            target = gap.get("sp500_weight", 0)
+            ticker = gap.get("suggested_ticker", "")
+            name = gap.get("suggested_name", "")
+            score = gap.get("fii_score", "N/A")
+            parts.append(
+                f"  {sector}: You have {current:.1f}% vs S&P {target:.1f}% "
+                f"→ Consider {ticker} ({name}, FII {score}/10)"
+            )
+
+    # Concentration reduction
+    reduce_conc = suggestions.get("reduce_concentration", [])
+    if reduce_conc:
+        parts.append("\nConcentration Reduction:")
+        for rc in reduce_conc[:3]:
+            parts.append(f"  {rc.get('ticker', '')}: {rc.get('message', '')}")
+
+    # Quality upgrades
+    upgrades = suggestions.get("upgrade_quality", [])
+    if upgrades:
+        parts.append("\nQuality Upgrades:")
+        for ug in upgrades[:3]:
+            parts.append(
+                f"  Replace {ug.get('current_ticker', '')} (FII {ug.get('current_score', 'N/A')}) "
+                f"→ {ug.get('suggested_ticker', '')} (FII {ug.get('suggested_score', 'N/A')})"
+            )
+
+    impact = data.get("impact_if_followed", {})
+    if impact:
+        parts.append(f"\nProjected Impact: Diversification {impact.get('diversification_change', '')}, "
+                      f"Avg FII Score {impact.get('avg_score_change', '')}")
+
+    return "\n".join(parts)
+
+
+def _format_research_context(data: dict) -> str:
+    """Format stock research data for Claude context."""
+    ticker = data.get("ticker", "?")
+    parts = [f"[RESEARCH BRIEF — {ticker}]"]
+
+    # Signal overview
+    signal = data.get("signal", {})
+    if signal:
+        score = signal.get("compositeScore", signal.get("composite_score", "N/A"))
+        label = signal.get("score_label", signal.get("signal", ""))
+        parts.append(f"FII Score: {score}/10 ({label})")
+
+    # Factor breakdown
+    factors = data.get("factors", data.get("factor_details", {}))
+    if factors:
+        parts.append("\nFactor Analysis:")
+        for dim_name, dim_data in factors.items():
+            if isinstance(dim_data, dict):
+                score = dim_data.get("score", "N/A")
+                findings = dim_data.get("key_findings", dim_data.get("findings", []))
+                line = f"  {dim_name}: {score}/10"
+                if findings and isinstance(findings, list):
+                    line += f" — {findings[0][:80]}" if findings else ""
+                parts.append(line)
+
+    # Financial metrics
+    metrics = data.get("metrics", data.get("financial_metrics", {}))
+    if metrics:
+        parts.append("\nKey Metrics:")
+        for key in ["pe_ratio", "revenue_growth", "profit_margin", "debt_to_equity",
+                     "free_cash_flow", "roe", "market_cap"]:
+            val = metrics.get(key)
+            if val is not None:
+                label = key.replace("_", " ").title()
+                parts.append(f"  {label}: {val}")
+
+    # Stress test
+    stress = data.get("stress_test", data.get("stress_tests", {}))
+    if stress:
+        scenarios = stress.get("scenarios", [])
+        if scenarios:
+            parts.append("\nStress Scenarios:")
+            for s in scenarios[:4]:
+                parts.append(
+                    f"  {s.get('name', '')}: {s.get('impact_pct', 0):+.1f}% "
+                    f"(${s.get('impact_dollars', 0):+,.0f} on $10K)"
+                )
+
+    # Peer comparison
+    peers = data.get("peers", data.get("peer_comparison", []))
+    if peers:
+        parts.append("\nPeer Comparison:")
+        for p in peers[:5]:
+            parts.append(
+                f"  {p.get('ticker', '')}: FII {p.get('score', 'N/A')}/10 — {p.get('signal', '')}"
+            )
+
+    # Portfolio context (if user holds this stock)
+    portfolio_ctx = data.get("portfolio_context", {})
+    if portfolio_ctx.get("in_portfolio"):
+        parts.append(
+            f"\nIn Portfolio: {portfolio_ctx.get('shares', 0)} shares, "
+            f"${portfolio_ctx.get('value', 0):,.0f}, "
+            f"{portfolio_ctx.get('weight', 0):.1f}% of portfolio"
+        )
+
+    return "\n".join(parts)
+
+
+def _format_tax_context(data: dict) -> str:
+    """Format tax strategy data for Claude context."""
+    parts = ["[TAX STRATEGY ANALYSIS]"]
+
+    summary = data.get("tax_summary", {})
+    if summary:
+        parts.append(
+            f"Unrealized Gains: ${summary.get('total_unrealized_gains', 0):,.0f} | "
+            f"Unrealized Losses: ${abs(summary.get('total_unrealized_losses', 0)):,.0f} | "
+            f"Net: ${summary.get('net_position', 0):,.0f}"
+        )
+        parts.append(
+            f"Harvestable Losses: ${abs(summary.get('harvestable_losses', 0)):,.0f} | "
+            f"Estimated Savings: {summary.get('estimated_tax_savings_range', '$0')}"
+        )
+
+    actionable = data.get("actionable_items", [])
+    if actionable:
+        parts.append("\nActionable Items:")
+        for item in actionable[:8]:
+            ticker = item.get("ticker", "")
+            action = item.get("action", "")
+            reason = item.get("reason", "")
+            amount = item.get("amount", "")
+            line = f"  {ticker}: {action}"
+            if reason:
+                line += f" — {reason}"
+            if amount:
+                line += f" (${abs(float(amount)) if isinstance(amount, (int, float)) else amount})"
+            parts.append(line)
+
+    year_end = data.get("year_end_planning", {})
+    if year_end:
+        parts.append("\nYear-End Planning:")
+        for key, val in year_end.items():
+            if val:
+                parts.append(f"  {key.replace('_', ' ').title()}: {val}")
+
+    parts.append("\n⚠️ TAX EDUCATION ONLY — Consult a tax professional for advice.")
+
+    return "\n".join(parts)
+
+
+def _format_events_context(data: dict) -> str:
+    """Format events watchlist data for Claude context."""
+    parts = ["[EVENTS WATCHLIST]"]
+
+    events = data.get("upcoming_events", [])
+    if events:
+        for evt in events[:15]:
+            date = evt.get("date", "")
+            title = evt.get("title", "")
+            evt_type = evt.get("type", "")
+            ticker = evt.get("ticker", "")
+            impact = evt.get("potential_impact", "")
+
+            line = f"  {date} | {title}"
+            if ticker:
+                line += f" ({ticker})"
+            if evt_type:
+                line += f" [{evt_type}]"
+            if impact:
+                line += f" — Impact: {impact}"
+            parts.append(line)
+    else:
+        parts.append("  No upcoming events in the next 30 days.")
+
+    calendar = data.get("weekly_calendar", {})
+    if calendar:
+        parts.append("\nWeekly Calendar:")
+        for week, week_events in calendar.items():
+            if week_events:
+                parts.append(f"  {week}: {len(week_events)} events")
+
+    return "\n".join(parts)
+
+
 # ─── Part A: Context-Aware Coach Engine ───
 
 
-def generate_coach_response(user_message: str, context: dict) -> dict:
+def generate_coach_response(
+    user_message: str,
+    context: dict,
+    mode: Optional[str] = None,
+    ticker: Optional[str] = None,
+    budget: Optional[float] = None,
+) -> dict:
     """Generate a context-aware coach response using Claude.
 
     Args:
@@ -200,20 +484,39 @@ def generate_coach_response(user_message: str, context: dict) -> dict:
             - factor_summary: 6-dimension factors for the stock
             - stress_test: stress results for the stock
             - conversation_history: last 10 messages
+            - mode_data: pre-computed data from wealth_advisor for the active mode
+        mode: One of 'holdings', 'invest', 'research', 'tax', 'events', or None.
+        ticker: Stock ticker for research mode.
+        budget: Investment budget for invest mode.
 
     Returns:
-        Dict with response, follow_up_suggestions, and disclaimer.
+        Dict with response, follow_up_suggestions, mode, and disclaimer.
     """
     try:
         client = _get_client()
 
-        # Build context-enriched prompt
-        portfolio_context = _format_portfolio_context(context)
+        # Build system prompt with mode-specific addition
+        system_prompt = COACH_SYSTEM_PROMPT
+        if mode and mode in MODE_SYSTEM_PROMPTS:
+            system_prompt += f"\n\n{MODE_SYSTEM_PROMPTS[mode]}"
 
-        enriched_message = ""
+        # Build context-enriched message
+        enriched_parts = []
+
+        # Always include basic portfolio context
+        portfolio_context = _format_portfolio_context(context)
         if portfolio_context:
-            enriched_message += portfolio_context + "\n\n"
-        enriched_message += f"[QUESTION] {user_message}"
+            enriched_parts.append(portfolio_context)
+
+        # Add mode-specific data context
+        mode_data = context.get("mode_data")
+        if mode_data and mode:
+            mode_context = _format_mode_context(mode, mode_data)
+            if mode_context:
+                enriched_parts.append(mode_context)
+
+        enriched_parts.append(f"[QUESTION] {user_message}")
+        enriched_message = "\n\n".join(enriched_parts)
 
         # Build conversation messages
         messages = _format_conversation_history(
@@ -230,7 +533,7 @@ def generate_coach_response(user_message: str, context: dict) -> dict:
             system=[
                 {
                     "type": "text",
-                    "text": COACH_SYSTEM_PROMPT,
+                    "text": system_prompt,
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
@@ -239,12 +542,13 @@ def generate_coach_response(user_message: str, context: dict) -> dict:
 
         response_text = message.content[0].text.strip()
 
-        # Generate follow-up suggestions based on context
-        suggestions = _generate_follow_ups(user_message, context)
+        # Generate follow-up suggestions based on mode
+        suggestions = _generate_follow_ups(user_message, context, mode=mode)
 
         return {
             "response": response_text,
             "follow_up_suggestions": suggestions,
+            "mode": mode or "general",
             "model": "claude-haiku-4-5-20251001",
             "disclaimer": COACH_DISCLAIMER,
         }
@@ -262,49 +566,127 @@ def generate_coach_response(user_message: str, context: dict) -> dict:
                 "What are my tax opportunities?",
                 "Explain my portfolio risk",
             ],
+            "mode": mode or "general",
             "error": str(e),
             "disclaimer": COACH_DISCLAIMER,
         }
 
 
-def _generate_follow_ups(user_message: str, context: dict) -> list[str]:
-    """Generate contextual follow-up suggestion chips."""
+def _format_mode_context(mode: str, data: dict) -> str:
+    """Route mode data to the appropriate formatter."""
+    formatters = {
+        "holdings": _format_holdings_context,
+        "invest": _format_invest_context,
+        "research": _format_research_context,
+        "tax": _format_tax_context,
+        "events": _format_events_context,
+    }
+    formatter = formatters.get(mode)
+    if formatter and data:
+        try:
+            return formatter(data)
+        except Exception as e:
+            logger.warning(f"[Coach] Failed to format {mode} context: {e}")
+    return ""
+
+
+def _generate_follow_ups(
+    user_message: str,
+    context: dict,
+    mode: Optional[str] = None,
+) -> list[str]:
+    """Generate contextual follow-up suggestion chips based on mode."""
     suggestions = []
     msg_lower = user_message.lower()
 
-    # Stock-specific follow-ups
-    signal = context.get("stock_signal", {})
-    if signal:
-        ticker = signal.get("ticker", "")
+    # Mode-specific follow-ups
+    if mode == "holdings":
+        if "risk" not in msg_lower:
+            suggestions.append("Which of my holdings has the most risk?")
+        if "growth" not in msg_lower:
+            suggestions.append("Which holdings have the strongest growth factors?")
+        if "weak" not in msg_lower and "worst" not in msg_lower:
+            suggestions.append("What's my portfolio's biggest vulnerability?")
+        if "rebalance" not in msg_lower:
+            suggestions.append("Should I consider rebalancing?")
+
+    elif mode == "invest":
+        if "sector" not in msg_lower:
+            suggestions.append("Which sectors am I missing?")
+        if "why" not in msg_lower:
+            suggestions.append("Why are these sectors important?")
+        if "risk" not in msg_lower:
+            suggestions.append("What's the risk of not diversifying?")
+        if "alternative" not in msg_lower:
+            suggestions.append("Are there alternative picks?")
+
+    elif mode == "research":
+        ticker = context.get("stock_signal", {}).get("ticker", "")
+        if not ticker:
+            # Try mode_data
+            mode_data = context.get("mode_data", {})
+            ticker = mode_data.get("ticker", "")
         if ticker:
-            if "risk" not in msg_lower:
-                suggestions.append(f"What are the risks for {ticker}?")
-            if "factor" not in msg_lower and "score" not in msg_lower:
-                suggestions.append(f"Explain {ticker}'s factor scores")
-            if "stress" not in msg_lower:
+            if "bull" not in msg_lower and "bear" not in msg_lower:
+                suggestions.append(f"What's the bull and bear case for {ticker}?")
+            if "peer" not in msg_lower and "compare" not in msg_lower:
+                suggestions.append(f"How does {ticker} compare to peers?")
+            if "stress" not in msg_lower and "recession" not in msg_lower:
                 suggestions.append(f"How would {ticker} do in a recession?")
+            if "factor" not in msg_lower:
+                suggestions.append(f"Explain {ticker}'s factor scores")
 
-    # Portfolio follow-ups
-    analytics = context.get("portfolio_analytics", {})
-    if analytics:
-        div = analytics.get("diversification", {})
-        if div.get("score", 100) < 70 and "diversif" not in msg_lower:
-            suggestions.append("How can I improve diversification?")
-        if "sharpe" not in msg_lower and "risk" not in msg_lower:
-            suggestions.append("How risky is my portfolio?")
+    elif mode == "tax":
+        if "harvest" not in msg_lower:
+            suggestions.append("Walk me through tax-loss harvesting")
+        if "wash" not in msg_lower:
+            suggestions.append("What are wash sale rules?")
+        if "lot" not in msg_lower:
+            suggestions.append("How does tax lot selection work?")
+        if "deadline" not in msg_lower:
+            suggestions.append("What are important tax deadlines?")
 
-    # Tax follow-ups
-    tax = context.get("tax_opportunities", {})
-    if tax and tax.get("total_unrealized_losses", 0) < -500:
-        if "tax" not in msg_lower:
-            suggestions.append("What are my tax opportunities?")
+    elif mode == "events":
+        if "earnings" not in msg_lower:
+            suggestions.append("Which earnings should I watch most closely?")
+        if "fed" not in msg_lower:
+            suggestions.append("How do Fed meetings affect my portfolio?")
+        if "prepare" not in msg_lower:
+            suggestions.append("How should I prepare for upcoming events?")
+        if "impact" not in msg_lower:
+            suggestions.append("Which event has the biggest potential impact?")
 
-    # Generic if few suggestions
-    if len(suggestions) < 2:
-        if "diversif" not in msg_lower:
-            suggestions.append("How diversified am I?")
-        if "compare" not in msg_lower:
-            suggestions.append("Compare my portfolio to the S&P 500")
+    else:
+        # Default/general mode — original follow-up logic
+        signal = context.get("stock_signal", {})
+        if signal:
+            ticker = signal.get("ticker", "")
+            if ticker:
+                if "risk" not in msg_lower:
+                    suggestions.append(f"What are the risks for {ticker}?")
+                if "factor" not in msg_lower and "score" not in msg_lower:
+                    suggestions.append(f"Explain {ticker}'s factor scores")
+                if "stress" not in msg_lower:
+                    suggestions.append(f"How would {ticker} do in a recession?")
+
+        analytics = context.get("portfolio_analytics", {})
+        if analytics:
+            div = analytics.get("diversification", {})
+            if div.get("score", 100) < 70 and "diversif" not in msg_lower:
+                suggestions.append("How can I improve diversification?")
+            if "sharpe" not in msg_lower and "risk" not in msg_lower:
+                suggestions.append("How risky is my portfolio?")
+
+        tax = context.get("tax_opportunities", {})
+        if tax and tax.get("total_unrealized_losses", 0) < -500:
+            if "tax" not in msg_lower:
+                suggestions.append("What are my tax opportunities?")
+
+        if len(suggestions) < 2:
+            if "diversif" not in msg_lower:
+                suggestions.append("How diversified am I?")
+            if "compare" not in msg_lower:
+                suggestions.append("Compare my portfolio to the S&P 500")
 
     return suggestions[:4]
 

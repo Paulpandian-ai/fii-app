@@ -5497,12 +5497,29 @@ def _gather_coach_context(user_id, ticker=None):
 
 
 def _handle_coach_message(body, user_id):
-    """POST /coach/message — AI coach chat with full app context."""
+    """POST /coach/message — AI coach chat with full app context.
+
+    Body params:
+        message (str): User's question or message (required).
+        mode (str): One of 'holdings', 'invest', 'research', 'tax', 'events' (optional).
+        ticker (str): Stock ticker for research mode (optional).
+        budget (float): Investment budget for invest mode (optional, default 5000).
+        conversation_id (str): Conversation ID for history grouping (optional).
+    """
     user_message = body.get("message", "").strip()
     if not user_message:
         return _response(400, {"error": "Message is required"})
 
+    mode = body.get("mode", "").lower().strip() or None
+    if mode and mode not in ("holdings", "invest", "research", "tax", "events"):
+        return _response(400, {"error": f"Invalid mode: {mode}. Must be one of: holdings, invest, research, tax, events"})
+
     ticker = body.get("ticker", "").upper() or None
+    budget = body.get("budget", 5000)
+    try:
+        budget = float(budget)
+    except (TypeError, ValueError):
+        budget = 5000.0
 
     # Auto-detect ticker from message if not provided
     if not ticker:
@@ -5517,13 +5534,38 @@ def _handle_coach_message(body, user_id):
         except Exception:
             pass
 
-    # Gather context
+    # Gather base context
     context = _gather_coach_context(user_id, ticker)
+
+    # Gather mode-specific data from wealth_advisor
+    if mode:
+        try:
+            import wealth_advisor
+            holdings = context.get("portfolio_holdings", [])
+
+            if mode == "holdings":
+                context["mode_data"] = wealth_advisor.analyze_holdings(holdings, user_id)
+            elif mode == "invest":
+                context["mode_data"] = wealth_advisor.suggest_investments(holdings, budget=budget)
+            elif mode == "research":
+                if ticker:
+                    context["mode_data"] = wealth_advisor.research_stock(ticker, user_id=user_id)
+                else:
+                    context["mode_data"] = {}
+            elif mode == "tax":
+                context["mode_data"] = wealth_advisor.get_tax_strategy(holdings, user_id)
+            elif mode == "events":
+                context["mode_data"] = wealth_advisor.get_events_watchlist(holdings)
+        except Exception as e:
+            logger.warning(f"[Coach] Failed to gather {mode} mode data: {e}")
+            context["mode_data"] = {}
 
     # Generate response
     try:
         import ai_coach
-        result = ai_coach.generate_coach_response(user_message, context)
+        result = ai_coach.generate_coach_response(
+            user_message, context, mode=mode, ticker=ticker, budget=budget,
+        )
     except Exception as e:
         logger.error(f"[Coach] Message handler failed: {e}")
         import traceback
@@ -5535,6 +5577,7 @@ def _handle_coach_message(body, user_id):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         ts = now.isoformat()
+        conversation_id = body.get("conversation_id", "")
 
         # Save user message
         db.put_item({
@@ -5543,6 +5586,8 @@ def _handle_coach_message(body, user_id):
             "role": "user",
             "content": user_message,
             "ticker": ticker or "",
+            "mode": mode or "",
+            "conversation_id": conversation_id,
             "timestamp": ts,
             "TTL": int(now.timestamp()) + (30 * 24 * 3600),  # 30-day TTL
         })
@@ -5553,6 +5598,8 @@ def _handle_coach_message(body, user_id):
             "SK": f"MSG#{ts}#assistant",
             "role": "assistant",
             "content": result.get("response", ""),
+            "mode": mode or "",
+            "conversation_id": conversation_id,
             "timestamp": ts,
             "TTL": int(now.timestamp()) + (30 * 24 * 3600),
         })
