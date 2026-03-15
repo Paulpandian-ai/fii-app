@@ -513,6 +513,27 @@ export const getAdvisorEvents = async (days?: number) => {
   return _deduplicatedGet('/advisor/events', params);
 };
 
+// ─── Backtesting ───
+
+export const getPrecomputedBacktests = async () => {
+  return _deduplicatedGet('/advisor/backtest/precomputed');
+};
+
+export const runAdvisorBacktest = async (params: {
+  strategy: string;
+  min_score?: number;
+  top_n?: number;
+  start_date?: string;
+  end_date?: string;
+  initial_capital?: number;
+  rebalance_frequency?: string;
+  benchmark?: string;
+  sectors?: string | string[];
+}) => {
+  const { data } = await api.post('/advisor/backtest', params);
+  return data;
+};
+
 // ─── Earnings Calendar ───
 
 export const getEarningsCalendar = async () => {

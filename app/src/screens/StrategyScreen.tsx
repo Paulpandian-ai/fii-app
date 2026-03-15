@@ -26,6 +26,7 @@ import {
   getScreener,
 } from '../services/api';
 import { Skeleton } from '../components/Skeleton';
+import { BacktestCard } from '../components/BacktestCard';
 
 const ACCENT = {
   holdings: '#00C9A7',
@@ -489,6 +490,9 @@ export const StrategyScreen: React.FC = () => {
             </>
           )}
         </AdvisorCard>
+
+        {/* ═══ 4.5. BACKTEST CARD ═══ */}
+        <BacktestCard />
 
         {/* ═══ 5. EVENTS TO WATCH CARD ═══ */}
         <AdvisorCard accent={ACCENT.events}>

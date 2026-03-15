@@ -4237,6 +4237,21 @@ def _handle_advisor(method, path, body, user_id, query_params):
             result = wealth_advisor.get_events_watchlist(holdings, days)
             return _response(200, result)
 
+        elif "/backtest/precomputed" in path and method == "GET":
+            import backtester
+            results = backtester.get_precomputed_backtests()
+            return _response(200, {"strategies": results})
+
+        elif "/backtest" in path and method == "POST":
+            import backtester
+            params = body or {}
+            if not params.get("strategy"):
+                return _response(400, {"error": "Missing 'strategy' field"})
+            if params.get("strategy") == "user_portfolio":
+                params["user_id"] = user_id
+            result = backtester.run_backtest(params)
+            return _response(200, result)
+
         else:
             return _response(404, {"error": "Advisor endpoint not found"})
 
