@@ -721,29 +721,36 @@ ALL_SECURITIES: list[str] = STOCK_UNIVERSE + ETF_TICKERS
 ETF_SET: frozenset[str] = frozenset(ETF_TICKERS)
 
 # ─── Tier System ───
-# TIER_1 (top 50 by market cap): Full Claude AI analysis + all engines
-# TIER_2 (stocks 51-200): Price + technicals + fundamentals (no Claude AI)
-# TIER_3 (stocks 201+): Price + technicals only
+# TIER_1 (top ~90 by market cap): Full Claude AI analysis (Sonnet) + all engines
+# TIER_2 (all remaining non-ETF stocks): Full analysis with Haiku
+# TIER_3: EMPTY — every stock gets full analysis for final submission
 # ETF_TIER: Price + technicals + holdings composition
 
 TIER_1: list[str] = [
-    # Top 50 by approximate market cap
+    # Top mega-caps — these get Sonnet for deep analysis
     "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "BRK.B", "AVGO", "TSLA", "LLY",
     "JPM", "V", "UNH", "MA", "ORCL", "COST", "HD", "NFLX", "CRM", "ABBV",
     "AMD", "BAC", "WMT", "PG", "MRK", "ADBE", "TMO", "ACN", "CSCO", "PEP",
     "LIN", "MCD", "ABT", "WFC", "GE", "IBM", "INTU", "CAT", "PM", "NOW",
     "TXN", "GS", "QCOM", "ISRG", "BKNG", "AXP", "AMGN", "RTX", "BA", "SPGI",
+    # Additional mega-caps for full Sonnet coverage
+    "XOM", "JNJ", "KO", "DHR", "NEE",
+    "UNP", "HON", "LOW", "UPS", "BLK",
+    "DE", "SYK", "MDLZ", "ADI", "GILD", "MMC", "CB",
 ]
-TIER_2: list[str] = [t for t in STOCK_UNIVERSE[: 200] if t not in TIER_1 and t not in ETF_SET]
-# Fill to get exactly 150 in tier 2 if needed
-if len(TIER_2) < 150:
-    _remaining = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in TIER_2 and t not in ETF_SET]
-    TIER_2.extend(_remaining[:150 - len(TIER_2)])
-TIER_3: list[str] = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in TIER_2 and t not in ETF_SET]
+
+# TIER_2 gets ALL remaining non-ETF stocks — full analysis with Haiku
+TIER_2: list[str] = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in ETF_SET]
+
+# TIER_3 is EMPTY — no stock should be technical-only
+TIER_3: list[str] = []
 
 TIER_1_SET: frozenset[str] = frozenset(TIER_1)
 TIER_2_SET: frozenset[str] = frozenset(TIER_2)
 TIER_3_SET: frozenset[str] = frozenset(TIER_3)
+
+# All non-ETF tickers for batch processing
+ALL_NON_ETF: list[str] = [t for t in STOCK_UNIVERSE if t not in ETF_SET]
 
 # Legacy aliases
 FULL_ANALYSIS_TICKERS = TIER_1
@@ -758,7 +765,7 @@ def get_tier(ticker: str) -> str:
         return "TIER_1"
     if ticker in TIER_2_SET:
         return "TIER_2"
-    return "TIER_3"
+    return "TIER_2"  # Default to TIER_2 — no stock should be TIER_3
 
 
 # ─── GICS Sector List ───

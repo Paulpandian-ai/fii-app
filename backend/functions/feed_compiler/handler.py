@@ -189,30 +189,90 @@ def _compile_feed() -> list[dict]:
 
 
 def _precompute_financial_metrics() -> dict:
-    """Batch precompute 69 financial metrics for the full stock universe.
+    """Batch precompute financial metrics for stocks missing or with stale data.
 
     Runs after feed compilation (daily at 6:30AM ET).
-    Steps:
-        1. Compute sector medians for all GICS sectors
-        2. For each stock, compute_all_metrics() with rate limiting
-        3. Store results in DynamoDB (FINANCIALS#{ticker} | LATEST)
-        4. Log completion stats
+    Only processes stocks that don't have FINANCIALS# records or
+    records older than 7 days. Processes in batches of 20 with
+    2-second delays between batches (Finnhub rate limiting).
 
-    Rate limiting: max 5 concurrent yfinance fetches, 1s delay per 50-stock batch.
-    Expected duration: ~30 minutes for 503 stocks.
+    Rate limiting: max 5 concurrent fetches, 2s delay per 20-stock batch.
     """
     try:
+        from models import ALL_NON_ETF
         from financial_metrics import batch_compute_all
 
-        logger.info("[FeedCompiler] Starting financial metrics precompute...")
-        result = batch_compute_all()
+        # Find stocks needing financial metrics update
+        stale_cutoff = datetime.now(timezone.utc).timestamp() - (7 * 24 * 3600)
+        needs_update = []
+
+        for ticker in ALL_NON_ETF:
+            try:
+                item = db.get_item(f"FINANCIALS#{ticker}", "LATEST")
+                if not item:
+                    needs_update.append(ticker)
+                    continue
+                # Check staleness
+                updated_at = item.get("lastUpdated", "")
+                if updated_at:
+                    try:
+                        ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00")).timestamp()
+                        if ts < stale_cutoff:
+                            needs_update.append(ticker)
+                    except (ValueError, TypeError):
+                        needs_update.append(ticker)
+                else:
+                    needs_update.append(ticker)
+            except Exception:
+                needs_update.append(ticker)
+
+        total_universe = len(ALL_NON_ETF)
+        already_fresh = total_universe - len(needs_update)
+        logger.info(
+            f"[FeedCompiler] Financial metrics: {already_fresh}/{total_universe} fresh, "
+            f"{len(needs_update)} need update"
+        )
+
+        if not needs_update:
+            return {
+                "computed": 0,
+                "total": total_universe,
+                "already_fresh": already_fresh,
+                "message": "All stocks have fresh financial metrics",
+            }
+
+        # Process in batches of 20 with 2-second delays
+        METRICS_BATCH_SIZE = 20
+        computed = 0
+        failed = 0
+
+        for i in range(0, len(needs_update), METRICS_BATCH_SIZE):
+            batch = needs_update[i:i + METRICS_BATCH_SIZE]
+            result = batch_compute_all(tickers=batch)
+            computed += result.get("computed", 0)
+            failed += result.get("failed", 0)
+
+            done = min(i + METRICS_BATCH_SIZE, len(needs_update))
+            logger.info(
+                f"[FeedCompiler] Financial metrics: {done}/{len(needs_update)} complete"
+            )
+
+            # Rate limiting between batches
+            if i + METRICS_BATCH_SIZE < len(needs_update):
+                import time as _time
+                _time.sleep(2)
+
         logger.info(
             f"[FeedCompiler] Financial metrics precompute complete: "
-            f"{result.get('computed', 0)}/{result.get('total', 0)} computed, "
-            f"{result.get('failed', 0)} failed, "
-            f"{result.get('duration_seconds', 0)}s elapsed"
+            f"{computed}/{len(needs_update)} computed, {failed} failed"
         )
-        return result
+        return {
+            "computed": computed,
+            "failed": failed,
+            "total": total_universe,
+            "already_fresh": already_fresh,
+            "needed_update": len(needs_update),
+        }
     except Exception as e:
         logger.error(f"[FeedCompiler] Financial metrics precompute failed: {e}")
         traceback.print_exc()

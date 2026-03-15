@@ -6271,6 +6271,62 @@ def _save_agent_config(agent_id, config):
     })
 
 
+def _verify_data_completeness() -> dict:
+    """Check how many stocks have complete data across all record types."""
+    from models import ALL_NON_ETF, ETF_TICKERS
+
+    all_tickers = ALL_NON_ETF
+    total = len(all_tickers)
+
+    record_types = {
+        "SIGNAL": 0,
+        "FACTOR_SUMMARY": 0,
+        "FINANCIALS": 0,
+        "STRESS": 0,
+    }
+    missing = {k: [] for k in record_types}
+
+    for ticker in all_tickers:
+        for record_type in record_types:
+            try:
+                item = db.get_item(f"{record_type}#{ticker}", "LATEST")
+                if item:
+                    record_types[record_type] += 1
+                else:
+                    missing[record_type].append(ticker)
+            except Exception:
+                missing[record_type].append(ticker)
+
+    coverage = {}
+    for record_type, count in record_types.items():
+        pct = round(100 * count / total, 1) if total > 0 else 0
+        coverage[record_type] = {
+            "count": count,
+            "total": total,
+            "coverage_pct": pct,
+            "missing_count": total - count,
+            "missing_sample": missing[record_type][:20],
+        }
+
+    # Overall completeness: stock has all 4 record types
+    fully_complete = 0
+    for ticker in all_tickers:
+        has_all = True
+        for record_type in record_types:
+            if ticker in missing[record_type]:
+                has_all = False
+                break
+        if has_all:
+            fully_complete += 1
+
+    return {
+        "total_stocks": total,
+        "fully_complete": fully_complete,
+        "fully_complete_pct": round(100 * fully_complete / total, 1) if total > 0 else 0,
+        "coverage_by_type": coverage,
+    }
+
+
 def _handle_admin(method, path, body, query_params):
     """Routes: /admin/agents, /admin/agents/{id}/run, /admin/agents/{id}/history, /admin/agents/{id}/config."""
     from datetime import datetime, timezone
@@ -6464,6 +6520,15 @@ def _handle_admin(method, path, body, query_params):
         except Exception as e:
             logger.error(f"[Admin] Quality report error: {e}")
             return _response(500, {"error": f"Quality report error: {e}"})
+
+    # GET /admin/data-coverage — verify data completeness across all stocks
+    if len(parts) == 2 and parts[1] == "data-coverage" and method == "GET":
+        try:
+            coverage = _verify_data_completeness()
+            return _response(200, coverage)
+        except Exception as e:
+            logger.error(f"[Admin] Data coverage error: {e}")
+            return _response(500, {"error": f"Data coverage error: {e}"})
 
     return _response(404, {"error": "Admin route not found"})
 

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 # ─── Enums ───
 
 class Signal(str, Enum):
+    """Legacy enum — prefer ScoreLabel for user-facing output."""
     BUY = "BUY"
     HOLD = "HOLD"
     SELL = "SELL"
@@ -82,6 +83,46 @@ CATEGORY_FACTOR_MAP = {
     "correlations": ["E1", "E2", "E3"],
     "risk_performance": ["F1", "F2", "F3"],
 }
+
+# ─── New 6-Dimension Factor Weights (for forced distribution scoring) ───
+# Maps to the 18 sub-factors grouped into 6 dimensions.
+DIMENSION_WEIGHTS = {
+    "supply_chain_upstream": 0.17,    # A1, A2, A3
+    "supply_chain_downstream": 0.17,  # B1, B2, B3
+    "geopolitical": 0.15,             # C1, C2, C3
+    "monetary": 0.15,                 # D1, D2, D3
+    "correlations": 0.18,             # E1, E2, E3
+    "risk_performance": 0.18,         # F1, F2, F3
+}
+
+DIMENSION_FACTOR_MAP = {
+    "supply_chain_upstream": ["A1", "A2", "A3"],
+    "supply_chain_downstream": ["B1", "B2", "B3"],
+    "geopolitical": ["C1", "C2", "C3"],
+    "monetary": ["D1", "D2", "D3"],
+    "correlations": ["E1", "E2", "E3"],
+    "risk_performance": ["F1", "F2", "F3"],
+}
+
+# ─── Forced Distribution Buckets ───
+# (fii_score, cumulative_percentile_upper)
+# Score 10 = top 5%, Score 9 = next 10%, etc.
+FORCED_DISTRIBUTION = [
+    (10, 5),    # top 5%
+    (9, 15),    # next 10%
+    (8, 30),    # next 15%
+    (7, 45),    # next 15%
+    (6, 55),    # next 10%
+    (5, 65),    # next 10%
+    (4, 80),    # next 15%
+    (3, 90),    # next 10%
+    (2, 95),    # next 5%
+    (1, 100),   # bottom 5%
+]
+
+# Stability buffer: only change displayed score if the underlying
+# percentile moves more than this many points past a bucket boundary
+STABILITY_BUFFER_POINTS = 0.5
 
 
 # ─── Full S&P 500 Universe (503 stocks) + 20 ETFs ───
@@ -680,29 +721,36 @@ ALL_SECURITIES: list[str] = STOCK_UNIVERSE + ETF_TICKERS
 ETF_SET: frozenset[str] = frozenset(ETF_TICKERS)
 
 # ─── Tier System ───
-# TIER_1 (top 50 by market cap): Full Claude AI analysis + all engines
-# TIER_2 (stocks 51-200): Price + technicals + fundamentals (no Claude AI)
-# TIER_3 (stocks 201+): Price + technicals only
+# TIER_1 (top ~90 by market cap): Full Claude AI analysis (Sonnet) + all engines
+# TIER_2 (all remaining non-ETF stocks): Full analysis with Haiku
+# TIER_3: EMPTY — every stock gets full analysis for final submission
 # ETF_TIER: Price + technicals + holdings composition
 
 TIER_1: list[str] = [
-    # Top 50 by approximate market cap
+    # Top mega-caps — these get Sonnet for deep analysis
     "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "BRK.B", "AVGO", "TSLA", "LLY",
     "JPM", "V", "UNH", "MA", "ORCL", "COST", "HD", "NFLX", "CRM", "ABBV",
     "AMD", "BAC", "WMT", "PG", "MRK", "ADBE", "TMO", "ACN", "CSCO", "PEP",
     "LIN", "MCD", "ABT", "WFC", "GE", "IBM", "INTU", "CAT", "PM", "NOW",
     "TXN", "GS", "QCOM", "ISRG", "BKNG", "AXP", "AMGN", "RTX", "BA", "SPGI",
+    # Additional mega-caps for full Sonnet coverage
+    "XOM", "JNJ", "KO", "DHR", "NEE",
+    "UNP", "HON", "LOW", "UPS", "BLK",
+    "DE", "SYK", "MDLZ", "ADI", "GILD", "MMC", "CB",
 ]
-TIER_2: list[str] = [t for t in STOCK_UNIVERSE[: 200] if t not in TIER_1 and t not in ETF_SET]
-# Fill to get exactly 150 in tier 2 if needed
-if len(TIER_2) < 150:
-    _remaining = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in TIER_2 and t not in ETF_SET]
-    TIER_2.extend(_remaining[:150 - len(TIER_2)])
-TIER_3: list[str] = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in TIER_2 and t not in ETF_SET]
+
+# TIER_2 gets ALL remaining non-ETF stocks — full analysis with Haiku
+TIER_2: list[str] = [t for t in STOCK_UNIVERSE if t not in TIER_1 and t not in ETF_SET]
+
+# TIER_3 is EMPTY — no stock should be technical-only
+TIER_3: list[str] = []
 
 TIER_1_SET: frozenset[str] = frozenset(TIER_1)
 TIER_2_SET: frozenset[str] = frozenset(TIER_2)
 TIER_3_SET: frozenset[str] = frozenset(TIER_3)
+
+# All non-ETF tickers for batch processing
+ALL_NON_ETF: list[str] = [t for t in STOCK_UNIVERSE if t not in ETF_SET]
 
 # Legacy aliases
 FULL_ANALYSIS_TICKERS = TIER_1
@@ -717,7 +765,7 @@ def get_tier(ticker: str) -> str:
         return "TIER_1"
     if ticker in TIER_2_SET:
         return "TIER_2"
-    return "TIER_3"
+    return "TIER_2"  # Default to TIER_2 — no stock should be TIER_3
 
 
 # ─── GICS Sector List ───
@@ -985,9 +1033,9 @@ def compute_composite_score(factor_scores: dict[str, float]) -> float:
 
 
 def determine_signal(score: float, mean: float = 5.0, stddev: float = 1.5) -> Signal:
-    """Determine BUY/HOLD/SELL signal from composite score.
+    """Determine signal from composite score (internal use).
 
-    Uses mean +/- 0.5*stddev thresholds for ~25% BUY, 50% HOLD, 25% SELL distribution.
+    Uses mean +/- 0.5*stddev thresholds for distribution.
     Default mean=5.0, stddev=1.5 gives thresholds of 4.25 and 5.75.
     """
     buy_threshold = mean + 0.5 * stddev
@@ -998,6 +1046,31 @@ def determine_signal(score: float, mean: float = 5.0, stddev: float = 1.5) -> Si
         return Signal.BUY
     else:
         return Signal.HOLD
+
+
+def determine_score_label(score: float) -> ScoreLabel:
+    """Map a 1-10 composite score to an educational score label.
+
+    Use this instead of determine_signal() for all user-facing output.
+    """
+    if score >= 8.0:
+        return ScoreLabel.STRONG
+    elif score >= 6.5:
+        return ScoreLabel.FAVORABLE
+    elif score >= 4.5:
+        return ScoreLabel.NEUTRAL
+    elif score >= 3.0:
+        return ScoreLabel.WEAK
+    else:
+        return ScoreLabel.CAUTION
+
+
+# Mapping from legacy Signal to educational ScoreLabel
+SIGNAL_TO_LABEL = {
+    Signal.BUY: ScoreLabel.FAVORABLE,
+    Signal.HOLD: ScoreLabel.NEUTRAL,
+    Signal.SELL: ScoreLabel.CAUTION,
+}
 
 
 def normalize_signals(scores: list[float]) -> tuple[float, float]:
@@ -1037,3 +1110,161 @@ def determine_confidence(factor_scores: dict[str, float]) -> Confidence:
         return Confidence.MEDIUM
     else:
         return Confidence.HIGH
+
+
+# ─── Score Label Utilities ───
+
+def score_to_label(score: int) -> str:
+    """Convert FII score (1-10) to educational score label.
+
+    Score 9-10 -> "Strong"
+    Score 7-8  -> "Favorable"
+    Score 5-6  -> "Neutral"
+    Score 3-4  -> "Weak"
+    Score 1-2  -> "Caution"
+    """
+    score = int(score) if score else 5
+    if score >= 9:
+        return ScoreLabel.STRONG.value
+    elif score >= 7:
+        return ScoreLabel.FAVORABLE.value
+    elif score >= 5:
+        return ScoreLabel.NEUTRAL.value
+    elif score >= 3:
+        return ScoreLabel.WEAK.value
+    else:
+        return ScoreLabel.CAUTION.value
+
+
+def compute_dimension_scores(factor_scores: dict[str, float]) -> dict[str, float]:
+    """Compute per-dimension average scores from the 18 sub-factor scores.
+
+    Args:
+        factor_scores: Dict mapping factor IDs (A1-F3) to scores (-2 to +2).
+
+    Returns:
+        Dict mapping dimension names to average raw scores.
+    """
+    dimension_scores = {}
+    for dim_name, factor_ids in DIMENSION_FACTOR_MAP.items():
+        scores = [factor_scores.get(fid, 0.0) for fid in factor_ids]
+        dimension_scores[dim_name] = sum(scores) / len(scores) if scores else 0.0
+    return dimension_scores
+
+
+def compute_weighted_composite(dimension_scores: dict[str, float]) -> float:
+    """Compute weighted composite from 6-dimension scores using DIMENSION_WEIGHTS.
+
+    Args:
+        dimension_scores: Dict mapping dimension names to average raw scores (-2 to +2).
+
+    Returns:
+        Weighted composite score mapped to 1-10 scale.
+    """
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for dim_name, weight in DIMENSION_WEIGHTS.items():
+        if dim_name in dimension_scores:
+            weighted_sum += weight * dimension_scores[dim_name]
+            total_weight += weight
+
+    if total_weight == 0:
+        return 5.0
+
+    normalized = weighted_sum / total_weight  # range: [-2, +2]
+    score_10 = ((normalized + 2) / 4) * 9 + 1
+    return round(max(1.0, min(10.0, score_10)), 1)
+
+
+def compute_z_scores(values: list[float]) -> list[float]:
+    """Compute z-scores for a list of values.
+
+    Args:
+        values: List of raw scores.
+
+    Returns:
+        List of z-scores in the same order.
+    """
+    import math
+    n = len(values)
+    if n < 2:
+        return [0.0] * n
+    mean = sum(values) / n
+    variance = sum((v - mean) ** 2 for v in values) / n
+    stddev = math.sqrt(variance) if variance > 0 else 1.0
+    return [(v - mean) / stddev for v in values]
+
+
+def z_to_percentile(z: float) -> float:
+    """Convert a z-score to a percentile (0-100) using the error function.
+
+    Uses a pure-Python approximation of the cumulative normal distribution.
+    """
+    import math
+    return 50.0 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def percentile_to_fii_score(percentile: float) -> int:
+    """Convert a percentile rank (0-100) to FII Score (1-10) using forced distribution.
+
+    Percentile is measured from top (100 = best), so:
+      top 5%  (percentile >= 95) -> Score 10
+      next 10% (percentile >= 85) -> Score 9
+      ...
+      bottom 5% (percentile < 5)  -> Score 1
+    """
+    # percentile here is the stock's position: 100 = best
+    if percentile >= 95:
+        return 10
+    elif percentile >= 85:
+        return 9
+    elif percentile >= 70:
+        return 8
+    elif percentile >= 55:
+        return 7
+    elif percentile >= 45:
+        return 6
+    elif percentile >= 35:
+        return 5
+    elif percentile >= 20:
+        return 4
+    elif percentile >= 10:
+        return 3
+    elif percentile >= 5:
+        return 2
+    else:
+        return 1
+
+
+def should_update_score(new_percentile: float, old_score: int, old_percentile: float = None) -> bool:
+    """Check if the score should change based on stability buffer.
+
+    Only change the displayed score if the underlying percentile moves
+    more than STABILITY_BUFFER_POINTS past a bucket boundary.
+    """
+    if old_percentile is None:
+        return True
+
+    new_score = percentile_to_fii_score(new_percentile)
+    if new_score == old_score:
+        return False
+
+    # Find the boundary that was crossed
+    # Score boundaries (from top): 95, 85, 70, 55, 45, 35, 20, 10, 5
+    boundaries = [95, 85, 70, 55, 45, 35, 20, 10, 5]
+
+    # Check if the percentile has moved sufficiently past the boundary
+    for boundary in boundaries:
+        if (old_percentile < boundary and new_percentile >= boundary) or \
+           (old_percentile >= boundary and new_percentile < boundary):
+            distance = abs(new_percentile - boundary)
+            if distance >= STABILITY_BUFFER_POINTS:
+                return True
+            return False
+
+    return True
+
+
+def get_sector_for_ticker(ticker: str) -> str:
+    """Get the GICS sector for a ticker."""
+    return STOCK_SECTORS.get(ticker, "Unknown")

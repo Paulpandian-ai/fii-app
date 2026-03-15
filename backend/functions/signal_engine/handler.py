@@ -29,6 +29,7 @@ import technical_engine
 import sec_edgar
 import batch_scorer
 from models import (
+    ALL_NON_ETF,
     ALL_SECURITIES,
     COMPANY_NAMES,
     DIMENSION_FACTOR_MAP,
@@ -79,6 +80,10 @@ def lambda_handler(event, context):
             return _run_weekly_deep_analysis(event, context)
         if run_type == "process_queue":
             return _run_queue_processor(event)
+
+        # ── Batch mode: score a slice of the stock universe ──
+        if event.get("batch_start") is not None:
+            return _run_batch_slice(event)
 
         # ── Legacy: single ticker or scheduled fan-out ──
         tickers = _extract_tickers(event)
@@ -1499,6 +1504,104 @@ def _run_queue_processor(event):
             "errors": errors,
             "queue_depth": len(queue_items),
             "timestamp": now.isoformat(),
+        }),
+    }
+
+
+def _run_batch_slice(event: dict) -> dict:
+    """Score a slice of the stock universe for parallel Lambda invocation.
+
+    Designed for initial full scoring: invoke 6 parallel Lambdas each
+    scoring ~90 stocks to complete all 547 in one 15-minute window.
+
+    Event payload:
+        batch_start: int — starting index in ALL_NON_ETF
+        batch_size: int — number of tickers to process (default 100)
+
+    Uses ThreadPoolExecutor for parallel Finnhub/EDGAR fetches.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    start = int(event["batch_start"])
+    size = int(event.get("batch_size", 100))
+    tickers = ALL_NON_ETF[start:start + size]
+
+    if not tickers:
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "run_type": "batch_slice",
+                "batch_start": start,
+                "batch_size": size,
+                "scored": 0,
+                "message": "No tickers in range",
+            }),
+        }
+
+    total = len(tickers)
+    t0 = time.time()
+    scored = 0
+    errors = 0
+    error_details = []
+
+    logger.info(
+        f"[BatchSlice] Starting batch: start={start}, size={size}, "
+        f"tickers={total} ({tickers[0]}..{tickers[-1]})"
+    )
+
+    def _score_one(ticker):
+        """Score a single ticker with error handling."""
+        tier = get_tier(ticker)
+        return analyze_ticker(ticker, tier=tier)
+
+    # Process in sub-batches of 50 with ThreadPoolExecutor
+    BATCH_SIZE = 50
+    MAX_WORKERS = 10
+
+    for batch_idx in range(0, total, BATCH_SIZE):
+        batch = tickers[batch_idx:batch_idx + BATCH_SIZE]
+        batch_start_time = time.time()
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(_score_one, t): t for t in batch}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    result = future.result()
+                    scored += 1
+                except Exception as e:
+                    errors += 1
+                    error_details.append({"ticker": ticker, "error": str(e)})
+                    logger.warning(f"[BatchSlice] Error scoring {ticker}: {e}")
+
+        elapsed = time.time() - t0
+        done = batch_idx + len(batch)
+        pct = int(100 * done / total)
+        logger.info(
+            f"[BatchSlice] Scored {done}/{total} ({pct}%), "
+            f"elapsed: {elapsed:.0f}s"
+        )
+
+    # Normalize after batch completes
+    _normalize_signals()
+
+    elapsed_total = time.time() - t0
+    logger.info(
+        f"[BatchSlice] Complete: {scored} scored, {errors} errors, "
+        f"{elapsed_total:.0f}s elapsed"
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "run_type": "batch_slice",
+            "batch_start": start,
+            "batch_size": size,
+            "scored": scored,
+            "errors": errors,
+            "error_details": error_details[:20],
+            "elapsed_seconds": round(elapsed_total, 1),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }),
     }
 
