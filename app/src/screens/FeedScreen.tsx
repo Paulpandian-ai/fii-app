@@ -342,9 +342,35 @@ export const FeedScreen: React.FC = () => {
       }
 
       const sorted = prioritizePortfolioStocks(allEntries);
-      const feedItems = sorted.filter((e): e is FeedItem => !isEducationalCard(e));
+
+      // Extract educational cards and insert after every 5 stock cards
+      const stockCards: FeedEntry[] = [];
+      const eduCards: EducationalCard[] = [];
+      for (const entry of sorted) {
+        if (isEducationalCard(entry)) {
+          eduCards.push(entry);
+        } else {
+          stockCards.push(entry);
+        }
+      }
+      const interleavedFeed: FeedEntry[] = [];
+      let eduIndex = 0;
+      for (let i = 0; i < stockCards.length; i++) {
+        interleavedFeed.push(stockCards[i]);
+        if ((i + 1) % 5 === 0 && eduIndex < eduCards.length) {
+          interleavedFeed.push(eduCards[eduIndex]);
+          eduIndex++;
+        }
+      }
+      // Append any remaining educational cards at the end
+      while (eduIndex < eduCards.length) {
+        interleavedFeed.push(eduCards[eduIndex]);
+        eduIndex++;
+      }
+
+      const feedItems = interleavedFeed.filter((e): e is FeedItem => !isEducationalCard(e));
       setItems(feedItems);
-      setFeed(sorted);
+      setFeed(interleavedFeed);
     } catch {
       // API unavailable — fall back to placeholder data so screen is never blank
       usePlaceholder();

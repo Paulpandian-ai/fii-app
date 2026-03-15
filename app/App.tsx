@@ -181,8 +181,8 @@ function MainTabs() {
       <Tab.Screen name="Feed" component={WrappedFeed} />
       <Tab.Screen name="Portfolio" component={WrappedPortfolio} />
       <Tab.Screen name="Radar" component={WrappedRadar} />
-      <Tab.Screen name="Screener" component={WrappedScreener} />
       <Tab.Screen name="Strategy" component={WrappedStrategy} />
+      <Tab.Screen name="Screener" component={WrappedScreener} />
     </Tab.Navigator>
   );
 }
