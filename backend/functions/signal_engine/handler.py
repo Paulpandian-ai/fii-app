@@ -1363,16 +1363,19 @@ def _run_weekly_deep_analysis(event, context):
 
         for ticker in list(TIER_1_SET)[:50]:
             try:
-                price_data = db.get_item(f"PRICE#{ticker}", "LATEST") or {}
-                health_data = db.get_item(f"HEALTH#{ticker}", "LATEST") or {}
-                tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST") or {}
+                signal = db.get_item(f"SIGNAL#{ticker}", "LATEST") or {}
+                # Extract what we need from signal data
+                price_data = {"price": signal.get("price", 0),
+                              "beta": float(signal.get("technicalScore", 1.0))}
+                tech_data = signal
+                health_data = signal
                 report = stress_engine.build_full_stress_report(
-                    ticker, price_data, health_data, tech_data
+                    ticker, price_data, tech_data, health_data, signal
                 )
                 stress_engine.store_stress_report(db, ticker, report)
                 stress_refreshed += 1
             except Exception as e:
-                logger.debug(f"[WeeklyDeep] Stress refresh failed for {ticker}: {e}")
+                logger.warning(f"[WeeklyDeep] Stress refresh failed for {ticker}: {e}")
     except ImportError:
         logger.warning("[WeeklyDeep] stress_engine not available, skipping stress refresh")
 
@@ -1690,16 +1693,19 @@ def _run_batch_slice(event: dict) -> dict:
 
             for ticker in tickers:
                 try:
-                    price_data = db.get_item(f"PRICE#{ticker}", "LATEST") or {}
-                    health_data = db.get_item(f"HEALTH#{ticker}", "LATEST") or {}
-                    tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST") or {}
+                    signal = db.get_item(f"SIGNAL#{ticker}", "LATEST") or {}
+                    # Extract what we need from signal data
+                    price_data = {"price": signal.get("price", 0),
+                                  "beta": float(signal.get("technicalScore", 1.0))}
+                    tech_data = signal
+                    health_data = signal
                     report = stress_engine.build_full_stress_report(
-                        ticker, price_data, health_data, tech_data
+                        ticker, price_data, tech_data, health_data, signal
                     )
                     stress_engine.store_stress_report(db, ticker, report)
                     stress_count += 1
                 except Exception as e:
-                    logger.debug(f"[BatchSlice] Stress failed for {ticker}: {e}")
+                    logger.warning(f"[BatchSlice] Stress failed for {ticker}: {e}")
         except ImportError:
             logger.warning("[BatchSlice] stress_engine not available")
 
