@@ -61,10 +61,12 @@ def lambda_handler(event, context):
     """Run the 6-factor signal analysis.
 
     Routes on event.run_type:
-      "daily_light"    — Light refresh: detect changes, update technicals, NO Claude
-      "weekly_deep"    — Full Claude-powered analysis for all stocks (Saturday 6AM)
-      "process_queue"  — Process urgent scoring queue (hourly during market hours)
-      (default)        — Legacy: single ticker or scheduled fan-out
+      "daily_light"       — Light refresh: detect changes, update technicals, NO Claude
+      "weekly_deep"       — Full Claude-powered analysis for all stocks (Saturday 6AM)
+      "process_queue"     — Process urgent scoring queue (hourly during market hours)
+      "orchestrate_full"  — Launch sharded parallel workers across full universe
+      "batch_slice"       — Score a shard of stocks (invoked by orchestrator)
+      (default)           — Legacy: single ticker or scheduled fan-out
     """
     try:
         run_type = event.get("run_type", "")
@@ -80,9 +82,11 @@ def lambda_handler(event, context):
             return _run_weekly_deep_analysis(event, context)
         if run_type == "process_queue":
             return _run_queue_processor(event)
+        if run_type == "orchestrate_full":
+            return _orchestrate_full_scoring(event)
 
         # ── Batch mode: score a slice of the stock universe ──
-        if event.get("batch_start") is not None:
+        if event.get("batch_start") is not None or run_type == "batch_slice":
             return _run_batch_slice(event)
 
         # ── Legacy: single ticker or scheduled fan-out ──
@@ -1508,13 +1512,98 @@ def _run_queue_processor(event):
     }
 
 
+def _orchestrate_full_scoring(event: dict) -> dict:
+    """Split the full stock universe into shards and invoke worker Lambdas.
+
+    Launches ~20 async Lambda workers, each scoring ~28 stocks, so the
+    entire universe completes within a single 15-minute window.
+
+    Event payload:
+        include_claude: bool — run Claude factor summaries (default False)
+        include_stress: bool — compute stress tests (default False)
+        shard_size: int — stocks per worker (default 28)
+    """
+    import boto3
+
+    lambda_client = boto3.client("lambda")
+
+    all_tickers = [t for t in ALL_SECURITIES if t not in ETF_SET]
+    shard_size = int(event.get("shard_size", 28))
+    include_claude = event.get("include_claude", False)
+    include_stress = event.get("include_stress", False)
+
+    # Split into shards
+    shards = []
+    for i in range(0, len(all_tickers), shard_size):
+        shards.append(all_tickers[i : i + shard_size])
+
+    results = []
+    for idx, shard in enumerate(shards):
+        payload = {
+            "run_type": "batch_slice",
+            "tickers": shard,
+            "shard_id": idx,
+            "include_claude": include_claude,
+            "include_stress": include_stress,
+        }
+
+        try:
+            response = lambda_client.invoke(
+                FunctionName="fii-signal-engine-dev",
+                InvocationType="Event",  # async — don't wait
+                Payload=json.dumps(payload),
+            )
+            results.append({
+                "shard": idx,
+                "stocks": len(shard),
+                "status": response["StatusCode"],
+            })
+        except Exception as e:
+            logger.error(f"[Orchestrator] Failed to invoke shard {idx}: {e}")
+            results.append({
+                "shard": idx,
+                "stocks": len(shard),
+                "status": "ERROR",
+                "error": str(e),
+            })
+
+        # Brief delay between invocations to avoid Lambda throttling
+        time.sleep(1)
+
+    logger.info(
+        f"[Orchestrator] Launched {len(shards)} shards "
+        f"for {len(all_tickers)} stocks "
+        f"(claude={include_claude}, stress={include_stress})"
+    )
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "run_type": "orchestrate_full",
+            "shards_launched": len(shards),
+            "total_stocks": len(all_tickers),
+            "shard_size": shard_size,
+            "include_claude": include_claude,
+            "include_stress": include_stress,
+            "shards": results,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }),
+    }
+
+
 def _run_batch_slice(event: dict) -> dict:
     """Score a slice of the stock universe for parallel Lambda invocation.
 
-    Designed for initial full scoring: invoke 6 parallel Lambdas each
-    scoring ~90 stocks to complete all 547 in one 15-minute window.
+    Accepts either an explicit ``tickers`` list (from orchestrator) or
+    legacy ``batch_start``/``batch_size`` indices into ALL_NON_ETF.
 
-    Event payload:
+    Event payload (new — from orchestrator):
+        tickers: list[str] — explicit list of tickers to score
+        shard_id: int — shard identifier for logging
+        include_claude: bool — run Claude factor summaries
+        include_stress: bool — compute stress tests
+
+    Event payload (legacy):
         batch_start: int — starting index in ALL_NON_ETF
         batch_size: int — number of tickers to process (default 100)
 
@@ -1522,9 +1611,19 @@ def _run_batch_slice(event: dict) -> dict:
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    start = int(event["batch_start"])
-    size = int(event.get("batch_size", 100))
-    tickers = ALL_NON_ETF[start:start + size]
+    # Accept explicit tickers list or fall back to index-based slicing
+    tickers = event.get("tickers")
+    if tickers:
+        start = 0
+        size = len(tickers)
+    else:
+        start = int(event["batch_start"])
+        size = int(event.get("batch_size", 100))
+        tickers = ALL_NON_ETF[start:start + size]
+
+    shard_id = event.get("shard_id", "?")
+    include_claude = event.get("include_claude", False)
+    include_stress = event.get("include_stress", False)
 
     if not tickers:
         return {
@@ -1545,8 +1644,9 @@ def _run_batch_slice(event: dict) -> dict:
     error_details = []
 
     logger.info(
-        f"[BatchSlice] Starting batch: start={start}, size={size}, "
-        f"tickers={total} ({tickers[0]}..{tickers[-1]})"
+        f"[BatchSlice] Shard {shard_id}: {total} tickers "
+        f"({tickers[0]}..{tickers[-1]}), "
+        f"claude={include_claude}, stress={include_stress}"
     )
 
     def _score_one(ticker):
@@ -1582,12 +1682,47 @@ def _run_batch_slice(event: dict) -> dict:
             f"elapsed: {elapsed:.0f}s"
         )
 
+    # Stress tests (if requested)
+    stress_count = 0
+    if include_stress:
+        try:
+            import stress_engine
+
+            for ticker in tickers:
+                try:
+                    price_data = db.get_item(f"PRICE#{ticker}", "LATEST") or {}
+                    health_data = db.get_item(f"HEALTH#{ticker}", "LATEST") or {}
+                    tech_data = db.get_item(f"TECHNICALS#{ticker}", "LATEST") or {}
+                    report = stress_engine.build_full_stress_report(
+                        ticker, price_data, health_data, tech_data
+                    )
+                    stress_engine.store_stress_report(db, ticker, report)
+                    stress_count += 1
+                except Exception as e:
+                    logger.debug(f"[BatchSlice] Stress failed for {ticker}: {e}")
+        except ImportError:
+            logger.warning("[BatchSlice] stress_engine not available")
+
+    # Claude factor summaries (if requested)
+    claude_count = 0
+    if include_claude:
+        try:
+            summary = batch_scorer.score_batch(tickers, run_type="weekly")
+            claude_count = summary.get("scored", 0)
+            logger.info(
+                f"[BatchSlice] Shard {shard_id}: Claude scored {claude_count}, "
+                f"~${summary.get('cost_estimate', 0):.4f}"
+            )
+        except Exception as e:
+            logger.error(f"[BatchSlice] Claude batch failed: {e}")
+
     # Normalize after batch completes
     _normalize_signals()
 
     elapsed_total = time.time() - t0
     logger.info(
-        f"[BatchSlice] Complete: {scored} scored, {errors} errors, "
+        f"[BatchSlice] Shard {shard_id} complete: {scored} scored, "
+        f"{errors} errors, {stress_count} stress, {claude_count} claude, "
         f"{elapsed_total:.0f}s elapsed"
     )
 
@@ -1595,9 +1730,10 @@ def _run_batch_slice(event: dict) -> dict:
         "statusCode": 200,
         "body": json.dumps({
             "run_type": "batch_slice",
-            "batch_start": start,
-            "batch_size": size,
+            "shard_id": shard_id,
             "scored": scored,
+            "stress_tested": stress_count,
+            "claude_scored": claude_count,
             "errors": errors,
             "error_details": error_details[:20],
             "elapsed_seconds": round(elapsed_total, 1),
