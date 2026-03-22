@@ -44,7 +44,21 @@ export interface EducationalCard {
   body: string;
 }
 
-export type FeedEntry = FeedItem | EducationalCard;
+export interface NewsEntry {
+  id: string;
+  type: 'news';
+  items: {
+    headline: string;
+    summary: string;
+    source: string;
+    datetime: number;
+    url: string;
+    related?: string;
+    category?: string;
+  }[];
+}
+
+export type FeedEntry = FeedItem | EducationalCard | NewsEntry;
 
 export interface PriceData {
   ticker: string;

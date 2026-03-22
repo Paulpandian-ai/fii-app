@@ -16,6 +16,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FeedCard } from '../components/FeedCard';
+import { NewsCard } from '../components/NewsCard';
+import type { NewsItem } from '../components/NewsCard';
 import { SearchOverlay } from '../components/SearchOverlay';
 import { SwipeHint } from '../components/SwipeHint';
 import { Skeleton } from '../components/Skeleton';
@@ -28,14 +30,18 @@ import { useEventStore } from '../store/eventStore';
 import { useSignalStore } from '../store/signalStore';
 import { useDataRefresh } from '../hooks/useDataRefresh';
 import { dataRefreshManager } from '../services/DataRefreshManager';
-import { getFeed, getScreener, getInsightsAlerts, getBatchPrices } from '../services/api';
+import { getFeed, getScreener, getInsightsAlerts, getBatchPrices, getMarketNews } from '../services/api';
 import { DisclaimerFooter } from '../components/DisclaimerFooter';
-import type { FeedItem, FeedEntry, EducationalCard, RootStackParamList, ScoreLabel } from '../types';
+import type { FeedItem, FeedEntry, EducationalCard, NewsEntry, RootStackParamList, ScoreLabel } from '../types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const isEducationalCard = (entry: FeedEntry): entry is EducationalCard => {
-  return entry.type === 'educational';
+  return (entry as any).type === 'educational';
+};
+
+const isNewsEntry = (entry: FeedEntry): entry is NewsEntry => {
+  return (entry as any).type === 'news';
 };
 
 // ─── Placeholder feed shown when API is unavailable or returns empty ───
@@ -122,24 +128,20 @@ function buildSmartFeed(results: any[]): FeedItem[] {
     }
   };
 
-  // 1. Biggest movers (top 3 by absolute changePercent)
   const movers = [...results]
     .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0));
   for (const r of movers.slice(0, 3)) add(toFeedItem(r));
 
-  // 2. Top-scoring stocks (score >= 7, top 3 by aiScore)
   const topScoring = results
     .filter((r) => (r.aiScore || r.compositeScore || 0) >= 7)
     .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
   for (const r of topScoring.slice(0, 3)) add(toFeedItem(r));
 
-  // 3. Low-scoring stocks (score < 4, top 2)
   const lowScoring = results
     .filter((r) => (r.aiScore || r.compositeScore || 10) < 4)
     .sort((a, b) => (a.aiScore || 10) - (b.aiScore || 10));
   for (const r of lowScoring.slice(0, 2)) add(toFeedItem(r));
 
-  // 4. Remaining: sorted by absolute changePercent (most interesting first)
   const rest = results
     .filter((r) => !seen.has(r.ticker))
     .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0));
@@ -168,15 +170,16 @@ export const FeedScreen: React.FC = () => {
   const [searchVisible, setSearchVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const flashListRef = useRef<any>(null);
   const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  // Pagination: keep all processed entries, show in pages
+  // Pagination
   const allEntriesRef = useRef<FeedEntry[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Cache: show stale data instantly on tab return
+  // Cache
   const cachedFeedRef = useRef<FeedEntry[]>([]);
   const cachedItemsRef = useRef<FeedItem[]>([]);
 
@@ -215,17 +218,15 @@ export const FeedScreen: React.FC = () => {
   );
 
   useEffect(() => {
-    // Show cached data instantly on tab return, then refresh in background
     if (cachedFeedRef.current.length > 0) {
       setFeed(cachedFeedRef.current);
       setItems(cachedItemsRef.current);
-      // Refresh in background (don't show loading state)
       loadFeed(true);
     } else {
       loadFeed();
     }
 
-    // Load secondary data in parallel (events + alerts) after short stagger
+    // Load secondary data in parallel
     const secondaryTimer = setTimeout(() => {
       Promise.all([
         loadEventsFeed().catch(() => {}),
@@ -278,14 +279,14 @@ export const FeedScreen: React.FC = () => {
     setFeed(PLACEHOLDER_FEED);
   };
 
-  // Sort portfolio stocks to the top of the feed
+  // Sort portfolio stocks to the top
   const prioritizePortfolioStocks = (entries: FeedEntry[]): FeedEntry[] => {
     if (portfolioTickers.length === 0) return entries;
     const ptSet = new Set(portfolioTickers);
     const owned: FeedEntry[] = [];
     const rest: FeedEntry[] = [];
     for (const e of entries) {
-      if (!isEducationalCard(e) && ptSet.has(e.ticker)) {
+      if (!isEducationalCard(e) && !isNewsEntry(e) && ptSet.has((e as FeedItem).ticker)) {
         owned.push(e);
       } else {
         rest.push(e);
@@ -294,24 +295,42 @@ export const FeedScreen: React.FC = () => {
     return [...owned, ...rest];
   };
 
+  /** Build news entries from fetched items — split into groups of 3 */
+  const buildNewsEntries = (items: NewsItem[]): NewsEntry[] => {
+    const entries: NewsEntry[] = [];
+    for (let i = 0; i < items.length; i += 3) {
+      entries.push({
+        id: `news-${i}`,
+        type: 'news',
+        items: items.slice(i, i + 3),
+      });
+    }
+    return entries;
+  };
+
   const loadFeed = async (background = false) => {
     if (!background) setLoading(true);
     try {
-      // Fetch feed + screener in parallel for maximum stock coverage
-      const [feedData, screenerData] = await Promise.all([
+      // Fetch feed + screener + news in parallel
+      const [feedData, screenerData, newsData] = await Promise.all([
         getFeed().catch(() => null),
         getScreener({ limit: '20', sortBy: 'changePercent', sortDir: 'desc' }).catch(() => null),
+        getMarketNews(10).catch(() => null),
       ]);
+
+      // Store news items
+      const fetchedNews = newsData?.items || [];
+      setNewsItems(fetchedNews);
 
       // Build feed items from both sources
       const feedItemMap = new Map<string, FeedItem>();
       const allEntries: FeedEntry[] = [];
 
-      // Process original feed items first (they have richer data: insight, topFactors)
       const rawFeed = feedData?.items || feedData?.feed || [];
       for (const entry of rawFeed) {
         if (entry.type === 'educational') {
-          allEntries.push(entry as EducationalCard);
+          // Skip educational cards — replaced by news
+          continue;
         } else {
           const feedItem: FeedItem = {
             id: entry.id || entry.ticker,
@@ -334,7 +353,6 @@ export const FeedScreen: React.FC = () => {
       if (screenerResults.length > 0) {
         const smartFeed = buildSmartFeed(screenerResults);
         for (const item of smartFeed) {
-          // Prefer feed-sourced data (richer insight) when available
           const existing = feedItemMap.get(item.ticker);
           if (existing) {
             allEntries.push(existing);
@@ -343,12 +361,10 @@ export const FeedScreen: React.FC = () => {
             allEntries.push(item);
           }
         }
-        // Append any remaining original feed items not already in screener
         for (const item of feedItemMap.values()) {
           allEntries.push(item);
         }
       } else {
-        // No screener data — use original feed items only
         for (const item of feedItemMap.values()) {
           allEntries.push(item);
         }
@@ -361,49 +377,33 @@ export const FeedScreen: React.FC = () => {
 
       const sorted = prioritizePortfolioStocks(allEntries);
 
-      // Extract educational cards and insert after every 5 stock cards
-      const stockCards: FeedEntry[] = [];
-      const eduCards: EducationalCard[] = [];
-      for (const entry of sorted) {
-        if (isEducationalCard(entry)) {
-          eduCards.push(entry);
-        } else {
-          stockCards.push(entry);
-        }
-      }
+      // Insert news cards after every 5 stock cards (replacing educational cards)
+      const stockCards = sorted.filter((e): e is FeedItem => !isNewsEntry(e) && !isEducationalCard(e));
+      const newsEntries = buildNewsEntries(fetchedNews);
       const interleavedFeed: FeedEntry[] = [];
-      let eduIndex = 0;
+      let newsIndex = 0;
       for (let i = 0; i < stockCards.length; i++) {
         interleavedFeed.push(stockCards[i]);
-        if ((i + 1) % 5 === 0 && eduIndex < eduCards.length) {
-          interleavedFeed.push(eduCards[eduIndex]);
-          eduIndex++;
+        if ((i + 1) % 5 === 0 && newsIndex < newsEntries.length) {
+          interleavedFeed.push(newsEntries[newsIndex]);
+          newsIndex++;
         }
       }
-      // Append any remaining educational cards at the end
-      while (eduIndex < eduCards.length) {
-        interleavedFeed.push(eduCards[eduIndex]);
-        eduIndex++;
-      }
 
-      const feedItemsOnly = interleavedFeed.filter((e): e is FeedItem => !isEducationalCard(e));
+      const feedItemsOnly = interleavedFeed.filter((e): e is FeedItem => !isNewsEntry(e) && !isEducationalCard(e));
       setItems(feedItemsOnly);
-      // Cache for instant tab-return
       cachedFeedRef.current = interleavedFeed;
       cachedItemsRef.current = feedItemsOnly;
-      // Store all entries, display first page
       allEntriesRef.current = interleavedFeed;
       setVisibleCount(PAGE_SIZE);
       setFeed(interleavedFeed.slice(0, PAGE_SIZE));
     } catch {
-      // API unavailable — fall back to placeholder data so screen is never blank
       usePlaceholder();
     } finally {
       setLoading(false);
     }
   };
 
-  // Infinite scroll: load more items when near the end
   const loadMore = useCallback(() => {
     const all = allEntriesRef.current;
     if (visibleCount >= all.length) return;
@@ -426,8 +426,8 @@ export const FeedScreen: React.FC = () => {
   }).current;
 
   const handleCardPress = useCallback((item: FeedEntry) => {
-    if (!isEducationalCard(item)) {
-      navigation.navigate('SignalDetail', { ticker: item.ticker, companyName: item.companyName });
+    if (!isEducationalCard(item) && !isNewsEntry(item)) {
+      navigation.navigate('SignalDetail', { ticker: (item as FeedItem).ticker, companyName: (item as FeedItem).companyName });
     }
   }, [navigation]);
 
@@ -438,31 +438,16 @@ export const FeedScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: FeedEntry }) => {
+      if (isNewsEntry(item)) {
+        return <NewsCard items={item.items} />;
+      }
       if (isEducationalCard(item)) {
-        return (
-          <View style={styles.cardWrapper}>
-            <LinearGradient
-              colors={['#1a237e', '#4a148c']}
-              style={styles.eduCard}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.eduIcon}>
-                <Ionicons name="school-outline" size={32} color="#B39DDB" />
-              </View>
-              <Text style={styles.eduLabel}>Did You Know?</Text>
-              <Text style={styles.eduTitle}>{item.title}</Text>
-              <Text style={styles.eduBody}>{item.body}</Text>
-              <View style={styles.eduHint}>
-                <SwipeHint />
-              </View>
-            </LinearGradient>
-          </View>
-        );
+        // Legacy fallback — shouldn't appear anymore
+        return null;
       }
       return (
         <FeedCard
-          item={item}
+          item={item as FeedItem}
           onPress={() => handleCardPress(item)}
         />
       );
@@ -662,53 +647,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  cardWrapper: {
-    height: SCREEN_HEIGHT,
-    width: '100%',
-  },
-  eduCard: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  eduIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(179,157,219,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  eduLabel: {
-    color: '#B39DDB',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  eduTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 16,
-    lineHeight: 32,
-  },
-  eduBody: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 24,
-    maxWidth: 300,
-  },
-  eduHint: {
-    position: 'absolute',
-    bottom: 40,
-    alignSelf: 'center',
   },
   liveBanner: {
     position: 'absolute',

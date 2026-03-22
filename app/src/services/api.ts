@@ -411,6 +411,16 @@ export const getInsightsForTicker = async (ticker: string, limit: number = 5) =>
   return _deduplicatedGet(`/insights/${ticker}`, { limit: String(limit) });
 };
 
+// ─── News ───
+
+export const getMarketNews = async (limit: number = 10) => {
+  return _deduplicatedGet('/news/market', { limit: String(limit) });
+};
+
+export const getStockNews = async (ticker: string) => {
+  return _deduplicatedGet(`/news/stock/${ticker}`);
+};
+
 // ─── Coach ───
 
 export const getCoachDaily = async () => {

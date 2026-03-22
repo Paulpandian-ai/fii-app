@@ -226,6 +226,8 @@ def lambda_handler(event, context):
                 return _response(404, {"error": "Unknown stocks endpoint"})
         elif path.startswith("/stock/") and "/stress-test" in path:
             return _handle_stress_test(http_method, path, query_params)
+        elif path.startswith("/news/"):
+            return _handle_news(http_method, path, query_params)
         elif path.startswith("/insights"):
             return _handle_insights(http_method, path, query_params)
         elif path.startswith("/user/"):
@@ -6130,6 +6132,77 @@ def _handle_stress_test(method, path, query_params):
     if "error" in result:
         return _response(400, result)
     return _response(200, result)
+
+
+# ─── News (Market & Stock) ───
+
+
+def _handle_news(method, path, query_params):
+    """GET /news/market — Market news with 30-min DynamoDB cache.
+    GET /news/stock/{ticker} — Company news for a specific stock.
+    """
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+
+    from datetime import datetime, timezone
+
+    if path == "/news/market":
+        limit = int(query_params.get("limit", "10"))
+
+        # Check cache first
+        try:
+            cached = db.get_item("NEWS#MARKET", "LATEST")
+            if cached:
+                fetched_at = cached.get("fetched_at", "")
+                if fetched_at:
+                    cached_time = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+                    age_minutes = (datetime.now(timezone.utc) - cached_time).total_seconds() / 60
+                    if age_minutes < 30:
+                        return _response(200, {
+                            "items": cached.get("items", [])[:limit],
+                            "fetched_at": fetched_at,
+                            "cached": True,
+                        })
+        except Exception as e:
+            logger.warning(f"[News] Cache read error: {e}")
+
+        # Fetch from Finnhub
+        try:
+            news = finnhub_client.get_market_news(limit=limit)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            result = {"items": news, "fetched_at": now_iso}
+
+            # Cache in DynamoDB
+            try:
+                import time
+                ttl = int(time.time()) + 3600  # 1 hour TTL
+                db.put_item({
+                    "PK": "NEWS#MARKET",
+                    "SK": "LATEST",
+                    "items": news,
+                    "fetched_at": now_iso,
+                    "TTL": ttl,
+                })
+            except Exception as e:
+                logger.warning(f"[News] Cache write error: {e}")
+
+            return _response(200, result)
+        except Exception as e:
+            logger.error(f"[News] Failed to fetch market news: {e}")
+            return _response(500, {"error": "Failed to fetch market news"})
+
+    elif path.startswith("/news/stock/"):
+        ticker = path.split("/news/stock/")[-1].strip("/").upper()
+        if not ticker:
+            return _response(400, {"error": "Ticker required"})
+        try:
+            news = finnhub_client.get_news(ticker, days=7)
+            return _response(200, {"items": news, "ticker": ticker})
+        except Exception as e:
+            logger.error(f"[News] Failed to fetch news for {ticker}: {e}")
+            return _response(500, {"error": f"Failed to fetch news for {ticker}"})
+
+    return _response(404, {"error": "Unknown news endpoint"})
 
 
 # ─── Insights (AI Agent) ───

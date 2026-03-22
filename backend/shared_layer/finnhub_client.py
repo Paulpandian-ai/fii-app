@@ -282,6 +282,29 @@ def get_basic_financials(ticker: str) -> dict:
     }
 
 
+def get_market_news(limit: int = 10) -> list[dict]:
+    """Get general market news from Finnhub.
+
+    Returns: List of {headline, summary, source, datetime, url, related, category} dicts.
+    """
+    data = _request("news", {"category": "general"})
+    if not data or not isinstance(data, list):
+        return []
+
+    items = []
+    for n in data[:limit]:
+        items.append({
+            "headline": n.get("headline", ""),
+            "summary": (n.get("summary", "") or "")[:200],
+            "source": n.get("source", ""),
+            "datetime": n.get("datetime", 0),
+            "url": n.get("url", ""),
+            "related": n.get("related", ""),
+            "category": n.get("category", ""),
+        })
+    return items
+
+
 def get_market_data_for_signal(ticker: str) -> dict:
     """Unified function to replace market_data.get_yahoo_finance_data().
 
