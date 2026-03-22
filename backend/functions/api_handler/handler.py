@@ -2286,7 +2286,7 @@ def _handle_screener(method, query_params):
 
     sort_by = query_params.get("sortBy", "changePercent")
     sort_dir = query_params.get("sortDir", "desc")
-    limit = min(int(query_params.get("limit", "50")), 50)
+    limit = min(int(query_params.get("limit", "50")), 600)
     offset = int(query_params.get("offset", "0"))
     show_etf = query_params.get("showETF", "true").lower() == "true"
     tier_filter = [t.strip() for t in query_params.get("tier", "").split(",") if t.strip()] or None
