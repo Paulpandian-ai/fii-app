@@ -143,7 +143,7 @@ export function ReportCritiqueScreen() {
 
       // Read file as base64
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64',
       });
       setPdfBase64(base64);
     } catch (err: any) {
@@ -160,7 +160,7 @@ export function ReportCritiqueScreen() {
   const canAnalyze =
     selectedStock &&
     ((uploadMethod === 'pdf' && pdfBase64) ||
-      (uploadMethod === 'text' && reportText.trim().length > 20));
+      (uploadMethod === 'text' && reportText.trim().length > 0));
 
   const handleAnalyze = useCallback(async () => {
     if (!selectedStock) return;
