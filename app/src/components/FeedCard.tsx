@@ -8,7 +8,7 @@ import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
 import { Skeleton } from './Skeleton';
 import { MiniRadarChart } from './MiniRadarChart';
-import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker } from '../services/api';
+import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker, getStressTestAll } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
@@ -153,6 +153,12 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   // ─── Beta from financials ───
   const [beta, setBeta] = useState<number | null>((cached as any)?.beta ?? null);
 
+  // ─── Sector percentile for peer ranking ───
+  const [sectorPercentile, setSectorPercentile] = useState<number | null>((cached as any)?.sectorPercentile ?? null);
+
+  // ─── Stress test data ───
+  const [stressData, setStressData] = useState<any | null>((cached as any)?.stressData ?? null);
+
   const [dataLoaded, setDataLoaded] = useState(hasCache);
 
   useEffect(() => {
@@ -166,7 +172,8 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       getFactors(item.ticker),
       getInsightsForTicker(item.ticker, 1),
       getFairPrice(item.ticker),
-    ]).then(([priceR, signalR, techR, fundR, factorR, insightR, fairPriceR]) => {
+      getStressTestAll(item.ticker),
+    ]).then(([priceR, signalR, techR, fundR, factorR, insightR, fairPriceR, stressR]) => {
       if (!mounted) return;
 
       const _ok = (r: PromiseSettledResult<any>) => {
@@ -283,6 +290,21 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
         ed.percentileRank = v;
       }
 
+      // ── Sector percentile ──
+      const sPctl = sig?.sector_percentile ?? sig?.sectorPercentile;
+      if (sPctl != null) {
+        const v = safeNum(sPctl);
+        setSectorPercentile(v);
+        ed.sectorPercentile = v;
+      }
+
+      // ── Stress test data ──
+      const stressResult = stressR?.status === 'fulfilled' ? stressR.value : null;
+      if (stressResult && !stressResult.error && stressResult.scenarios) {
+        setStressData(stressResult);
+        ed.stressData = stressResult;
+      }
+
       // ── Score drivers (for AI insight) ──
       const drivers = sig?.score_drivers ?? sig?.scoreDrivers;
       if (drivers) {
@@ -390,6 +412,54 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
     correlations: 50,
     risk_performance: 50,
   };
+
+  // 52-week range position
+  const w52Position = (w52Low != null && w52High != null && price != null && w52High > w52Low)
+    ? Math.min(100, Math.max(0, ((price - w52Low) / (w52High - w52Low)) * 100))
+    : null;
+
+  // Factor bar data
+  const factorBarData = factorPercentiles ? [
+    { key: 'sc_up', label: 'SC Upstream', percentile: factorPercentiles.supply_chain_upstream },
+    { key: 'sc_down', label: 'SC Downstream', percentile: factorPercentiles.supply_chain_downstream },
+    { key: 'geo', label: 'Geopolitical', percentile: factorPercentiles.geopolitical },
+    { key: 'monetary', label: 'Monetary', percentile: factorPercentiles.monetary },
+    { key: 'corr', label: 'Correlations', percentile: factorPercentiles.correlations },
+    { key: 'risk', label: 'Risk & Perf', percentile: factorPercentiles.performance },
+  ] : null;
+
+  // Map factor percentiles to raw scores (1-10) from score_drivers if available
+  const factorScoreMap: Record<string, number> = {};
+  if (scoreDrivers.length > 0) {
+    const factorKeywords: Record<string, string[]> = {
+      sc_up: ['supply chain upstream', 'sc upstream', 'supply_chain_upstream'],
+      sc_down: ['supply chain downstream', 'sc downstream', 'supply_chain_downstream'],
+      geo: ['geopolitical', 'geo'],
+      monetary: ['monetary'],
+      corr: ['correlation', 'correlations'],
+      risk: ['risk', 'performance', 'risk_performance'],
+    };
+    for (const driver of scoreDrivers) {
+      const desc = (driver.factor || driver.description || '').toLowerCase();
+      for (const [key, keywords] of Object.entries(factorKeywords)) {
+        if (keywords.some(kw => desc.includes(kw)) && !factorScoreMap[key]) {
+          factorScoreMap[key] = Math.min(10, Math.max(1, Math.round(Math.abs(driver.magnitude ?? 5))));
+        }
+      }
+    }
+  }
+
+  // Stress test scenarios
+  const stressScenarios = stressData?.scenarios as any[] | undefined;
+  const stressModerate = stressScenarios?.find((s: any) => s.scenarioKey === 'moderate');
+  const stressRecession = stressScenarios?.find((s: any) => s.scenarioKey === 'recession');
+  const stressSevere = stressScenarios?.find((s: any) => s.scenarioKey === 'severe' || s.scenarioKey === 'severely_adverse');
+  const hasStressData = stressModerate || stressRecession || stressSevere;
+
+  // Sector rank approximation
+  const sectorRankApprox = sectorPercentile != null
+    ? { rank: Math.max(1, Math.round((100 - sectorPercentile) * 62 / 100)), total: 62 }
+    : null;
 
   // Fair price as small text under price
   const fairPriceText = fairPriceDollars != null
@@ -511,6 +581,80 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
             <Text style={styles.metricLabel}>RSI</Text>
           </View>
         </View>
+
+        {/* ── 52-Week Range ── */}
+        {w52Position != null && w52Low != null && w52High != null && (
+          <View style={styles.rangeRow}>
+            <Text style={styles.rangeLabel}>52W</Text>
+            <Text style={styles.rangeValue}>${w52Low.toFixed(0)}</Text>
+            <View style={styles.rangeTrack}>
+              <View style={[styles.rangeFill, { width: `${w52Position}%` }]} />
+              <View style={[styles.rangeDot, { left: `${w52Position}%`, backgroundColor: w52Position >= 50 ? '#00C9A7' : '#F5A623' }]} />
+            </View>
+            <Text style={styles.rangeValue}>${w52High.toFixed(0)}</Text>
+            <Text style={[styles.rangePercent, { color: w52Position >= 50 ? '#00C9A7' : '#F5A623' }]}>
+              {w52Position.toFixed(0)}%
+            </Text>
+          </View>
+        )}
+
+        {/* ── Factor Score Bars ── */}
+        {factorBarData && (
+          <View style={styles.factorBarsContainer}>
+            {factorBarData.map((f) => {
+              const pctl = f.percentile;
+              const barColor = pctl >= 60 ? '#00C9A7' : pctl >= 40 ? '#F5A623' : '#E8634A';
+              const rawScore = factorScoreMap[f.key] || Math.max(1, Math.min(10, Math.round(pctl / 10)));
+              return (
+                <View key={f.key} style={styles.factorBarRow}>
+                  <Text style={styles.factorBarLabel}>{f.label}</Text>
+                  <View style={styles.factorBarTrack}>
+                    <View style={[styles.factorBarFill, { width: `${pctl}%`, backgroundColor: barColor }]} />
+                  </View>
+                  <Text style={[styles.factorBarPctl, { color: barColor }]}>{pctl}p</Text>
+                  <Text style={styles.factorBarScore}>{rawScore}/10</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Stress Test Summary ── */}
+        {hasStressData && (
+          <View style={styles.stressRow}>
+            <Text style={styles.stressIcon}>🛡️</Text>
+            {stressModerate && (
+              <Text style={[styles.stressText, { color: '#F5A623' }]}>
+                {safeNum(stressModerate.estimated_impact).toFixed(0)}% pullback
+              </Text>
+            )}
+            {stressModerate && (stressRecession || stressSevere) && (
+              <Text style={styles.stressDivider}>|</Text>
+            )}
+            {stressRecession && (
+              <Text style={[styles.stressText, { color: '#F5A623' }]}>
+                {safeNum(stressRecession.estimated_impact).toFixed(0)}% recession
+              </Text>
+            )}
+            {stressRecession && stressSevere && (
+              <Text style={styles.stressDivider}>|</Text>
+            )}
+            {stressSevere && (
+              <Text style={[styles.stressText, { color: '#E8634A' }]}>
+                {safeNum(stressSevere.estimated_impact).toFixed(0)}% severe
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Sector Rank ── */}
+        {sectorPercentile != null && sector && (
+          <View style={styles.peerRankRow}>
+            <Text style={styles.peerRankText}>
+              📊 Ranked #{sectorRankApprox?.rank ?? '—'} of {sectorRankApprox?.total ?? '—'} in {sector}
+            </Text>
+          </View>
+        )}
 
         {/* ── AI Insight (from score_drivers) ── */}
         {showSkeleton && !insightText ? (
@@ -779,6 +923,137 @@ const styles = StyleSheet.create({
   factorScore: {
     fontSize: 10,
     fontWeight: '800',
+  },
+
+  // ── 52-Week Range ──
+  rangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+    gap: 6,
+  },
+  rangeLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  rangeValue: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  rangeTrack: {
+    flex: 1,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    position: 'relative',
+  },
+  rangeFill: {
+    height: '100%',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 2,
+  },
+  rangeDot: {
+    position: 'absolute',
+    top: -3,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    marginLeft: -4,
+  },
+  rangePercent: {
+    fontSize: 10,
+    fontWeight: '700',
+    minWidth: 28,
+    textAlign: 'right',
+  },
+
+  // ── Factor Score Bars ──
+  factorBarsContainer: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+    gap: 2,
+  },
+  factorBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 20,
+  },
+  factorBarLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 9,
+    fontWeight: '600',
+    width: 80,
+  },
+  factorBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  factorBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  factorBarPctl: {
+    fontSize: 9,
+    fontWeight: '700',
+    width: 28,
+    textAlign: 'right',
+  },
+  factorBarScore: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 9,
+    fontWeight: '700',
+    width: 28,
+    textAlign: 'right',
+  },
+
+  // ── Stress Test ──
+  stressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 8,
+    gap: 4,
+  },
+  stressIcon: {
+    fontSize: 11,
+  },
+  stressText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  stressDivider: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 11,
+  },
+
+  // ── Peer Rank ──
+  peerRankRow: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  peerRankText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
   },
 
   // ── CTA ──
