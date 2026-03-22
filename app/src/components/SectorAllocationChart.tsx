@@ -32,6 +32,21 @@ const getColor = (sector: string, idx: number): string => {
   return SECTOR_COLORS[sector] || fallback[idx % fallback.length];
 };
 
+// Normalize sector names to avoid duplicates (e.g. "Information Technology" → "Technology")
+const SECTOR_NORMALIZE: Record<string, string> = {
+  'Information Technology': 'Technology',
+  'Info Tech': 'Technology',
+  'Consumer Discretionary': 'Consumer Disc.',
+  'Consumer Staples': 'Consumer Staples',
+  'Health Care': 'Healthcare',
+  'Communication Svcs': 'Communication Services',
+  'Comm Services': 'Communication Services',
+};
+
+function normalizeSector(sector: string): string {
+  return SECTOR_NORMALIZE[sector] || sector;
+}
+
 const SIZE = 160;
 const R = 60;
 const INNER_R = 38;
@@ -65,14 +80,28 @@ export const SectorAllocationChart: React.FC<Props> = ({ analyticsData }) => {
   }, [analyticsData]);
 
   const parseSectors = (breakdown: any[]) => {
-    const parsed = breakdown
-      .map((s: any) => ({
-        sector: s.sector || 'Other',
-        weight: s.weight || s.pct || 0,
-        benchmark_weight: s.benchmark_weight,
-      }))
-      .filter((s: SectorData) => s.weight > 0)
-      .sort((a: SectorData, b: SectorData) => b.weight - a.weight);
+    // Normalize sector names and merge duplicates
+    const merged = new Map<string, SectorData>();
+    for (const s of breakdown) {
+      const name = normalizeSector(s.sector || 'Other');
+      const weight = s.weight || s.pct || 0;
+      if (weight <= 0) continue;
+      const existing = merged.get(name);
+      if (existing) {
+        existing.weight += weight;
+        // Keep the first benchmark_weight encountered
+        if (existing.benchmark_weight == null && s.benchmark_weight != null) {
+          existing.benchmark_weight = s.benchmark_weight;
+        }
+      } else {
+        merged.set(name, {
+          sector: name,
+          weight,
+          benchmark_weight: s.benchmark_weight,
+        });
+      }
+    }
+    const parsed = Array.from(merged.values()).sort((a, b) => b.weight - a.weight);
     setSectors(parsed);
     setLoading(false);
   };

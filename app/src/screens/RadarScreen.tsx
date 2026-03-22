@@ -8,7 +8,6 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
-  Dimensions,
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -16,13 +15,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { getScreener } from '../services/api';
 import { useRecentStocks } from '../contexts/RecentStocksContext';
-import { ScoreRing } from '../components/ScoreRing';
-import { SCORE_COLORS, getScoreColor, getScoreLabel } from '../utils/scoreColors';
+import { SCORE_COLORS, getScoreColor } from '../utils/scoreColors';
 import type { ScreenerResult, RootStackParamList, ScoreLabel } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
 const DEBOUNCE_MS = 300;
 const MAX_SEARCH_RESULTS = 20;
 
@@ -125,21 +121,6 @@ export const RadarScreen: React.FC = () => {
   }, [debouncedQuery, allStocks]);
 
   const isSearching = debouncedQuery.length > 0;
-
-  // Derived data — top 4 by score for trending
-  const trendingStocks = useMemo(
-    () => [...allStocks].sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0)).slice(0, 4),
-    [allStocks],
-  );
-
-  // Biggest movers — top 3 by absolute changePercent
-  const biggestMovers = useMemo(
-    () =>
-      [...allStocks]
-        .sort((a, b) => Math.abs(b.changePercent || 0) - Math.abs(a.changePercent || 0))
-        .slice(0, 3),
-    [allStocks],
-  );
 
   // Navigation
   const goToStock = useCallback(
@@ -265,76 +246,6 @@ export const RadarScreen: React.FC = () => {
             ))}
           </View>
 
-          {/* Trending Now */}
-          {trendingStocks.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🔥  Trending Now</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.trendingRow}
-              >
-                {trendingStocks.map((stock) => (
-                  <TouchableOpacity
-                    key={stock.ticker}
-                    style={styles.trendingCard}
-                    onPress={() => goToStock(stock.ticker)}
-                    activeOpacity={0.7}
-                  >
-                    <ScoreRing score={stock.aiScore} size={52} />
-                    <Text style={styles.trendingTicker}>{stock.ticker}</Text>
-                    <Text style={styles.trendingLabel}>
-                      {getScoreLabel(stock.aiScore)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-
-          {/* Biggest Movers Today */}
-          {biggestMovers.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>📈  Biggest Movers Today</Text>
-              {biggestMovers.map((stock) => {
-                const isUp = (stock.changePercent || 0) >= 0;
-                const changeColor = isUp ? '#00C9A7' : '#F5A623';
-                const pct = Math.abs(stock.changePercent || 0);
-                const barWidth = Math.min(pct * 12, 100); // scale bar
-                return (
-                  <TouchableOpacity
-                    key={stock.ticker}
-                    style={styles.moverRow}
-                    onPress={() => goToStock(stock.ticker)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.moverTicker}>{stock.ticker}</Text>
-                    <Text style={[styles.moverChange, { color: changeColor }]}>
-                      {isUp ? '+' : '-'}{pct.toFixed(1)}%
-                    </Text>
-                    <View style={styles.moverBarBg}>
-                      <View style={[styles.moverBarFill, { width: `${barWidth}%`, backgroundColor: changeColor }]} />
-                    </View>
-                    {stock.aiScore > 0 ? (
-                      <View style={styles.moverScore}>
-                        <Text style={[styles.moverScoreText, { color: getScoreColor(stock.aiScore) }]}>
-                          {stock.aiScore.toFixed(1)}
-                        </Text>
-                        <Text style={styles.moverScoreLabel}>
-                          {getShortLabel(stock.aiScore)}
-                        </Text>
-                      </View>
-                    ) : (
-                      <View style={styles.moverScore}>
-                        <Text style={styles.moverScoreDash}>—</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
           {/* Disclaimer */}
           <View style={styles.disclaimerContainer}>
             <Text style={styles.disclaimerText}>
@@ -350,14 +261,6 @@ export const RadarScreen: React.FC = () => {
 };
 
 // ─── Helpers ───
-
-function getShortLabel(score: number): string {
-  if (score >= 9) return 'Strong';
-  if (score >= 7) return 'Favor.';
-  if (score >= 5) return 'Neut.';
-  if (score >= 3) return 'Weak';
-  return 'Caution';
-}
 
 // ─── Score Badge Component ───
 
@@ -493,95 +396,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.45)',
     fontSize: 12,
     lineHeight: 17,
-  },
-
-  // Sections
-  section: {
-    marginTop: 28,
-    paddingHorizontal: 16,
-  },
-  sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 14,
-  },
-
-  // Trending cards
-  trendingRow: {
-    gap: 12,
-    paddingRight: 16,
-  },
-  trendingCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 14,
-    padding: 14,
-    alignItems: 'center',
-    width: (SCREEN_WIDTH - 80) / 4,
-    minWidth: 80,
-    gap: 6,
-  },
-  trendingTicker: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  trendingLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // Mover rows
-  moverRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    gap: 10,
-  },
-  moverTicker: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    width: 50,
-  },
-  moverChange: {
-    fontSize: 14,
-    fontWeight: '600',
-    width: 58,
-    textAlign: 'right',
-  },
-  moverBarBg: {
-    flex: 1,
-    height: 6,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  moverBarFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  moverScore: {
-    width: 60,
-    alignItems: 'flex-end',
-  },
-  moverScoreText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  moverScoreLabel: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  moverScoreDash: {
-    color: 'rgba(255,255,255,0.25)',
-    fontSize: 14,
-    fontWeight: '600',
   },
 
   // Search result rows

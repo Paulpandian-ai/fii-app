@@ -148,6 +148,8 @@ function buildSmartFeed(results: any[]): FeedItem[] {
   return ordered;
 }
 
+const PAGE_SIZE = 20;
+
 export const FeedScreen: React.FC = () => {
   const feedItems = useFeedStore((s) => s.items);
   const setItems = useFeedStore((s) => s.setItems);
@@ -169,6 +171,14 @@ export const FeedScreen: React.FC = () => {
   const flashListRef = useRef<any>(null);
   const bannerAnim = useRef(new Animated.Value(-80)).current;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // Pagination: keep all processed entries, show in pages
+  const allEntriesRef = useRef<FeedEntry[]>([]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Cache: show stale data instantly on tab return
+  const cachedFeedRef = useRef<FeedEntry[]>([]);
+  const cachedItemsRef = useRef<FeedItem[]>([]);
 
   // ─── Data polling: batch price updates every 30s ───
   useDataRefresh(
@@ -205,38 +215,46 @@ export const FeedScreen: React.FC = () => {
   );
 
   useEffect(() => {
-    // Load feed immediately (visible on screen)
-    loadFeed();
+    // Show cached data instantly on tab return, then refresh in background
+    if (cachedFeedRef.current.length > 0) {
+      setFeed(cachedFeedRef.current);
+      setItems(cachedItemsRef.current);
+      // Refresh in background (don't show loading state)
+      loadFeed(true);
+    } else {
+      loadFeed();
+    }
 
-    // Stagger secondary loads to avoid 503 from concurrent Finnhub requests
-    const eventsTimer = setTimeout(() => loadEventsFeed(), 2000);
-    const alertsTimer = setTimeout(() => {
-      getInsightsAlerts(1).then((data) => {
-        const alerts = data?.alerts || [];
-        if (alerts.length > 0 && alerts[0].headline && alerts[0].ticker) {
-          useEventStore.getState().setLiveBannerEvent({
-            ticker: alerts[0].ticker,
-            summary: alerts[0].headline,
-            headline: alerts[0].headline,
-            type: 'news',
-            impact: 'high',
-            direction: 'neutral',
-            category: 'ai_agent',
-            sourceUrl: '',
-            formType: '',
-            indicator: '',
-            surpriseScore: null,
-            sectorImpacts: {},
-            factorsAffected: [],
-            timestamp: new Date().toISOString(),
-          } as any);
-        }
-      }).catch(() => {});
-    }, 4000);
+    // Load secondary data in parallel (events + alerts) after short stagger
+    const secondaryTimer = setTimeout(() => {
+      Promise.all([
+        loadEventsFeed().catch(() => {}),
+        getInsightsAlerts(1).then((data) => {
+          const alerts = data?.alerts || [];
+          if (alerts.length > 0 && alerts[0].headline && alerts[0].ticker) {
+            useEventStore.getState().setLiveBannerEvent({
+              ticker: alerts[0].ticker,
+              summary: alerts[0].headline,
+              headline: alerts[0].headline,
+              type: 'news',
+              impact: 'high',
+              direction: 'neutral',
+              category: 'ai_agent',
+              sourceUrl: '',
+              formType: '',
+              indicator: '',
+              surpriseScore: null,
+              sectorImpacts: {},
+              factorsAffected: [],
+              timestamp: new Date().toISOString(),
+            } as any);
+          }
+        }).catch(() => {}),
+      ]);
+    }, 2000);
 
     return () => {
-      clearTimeout(eventsTimer);
-      clearTimeout(alertsTimer);
+      clearTimeout(secondaryTimer);
     };
   }, []);
 
@@ -276,13 +294,13 @@ export const FeedScreen: React.FC = () => {
     return [...owned, ...rest];
   };
 
-  const loadFeed = async () => {
-    setLoading(true);
+  const loadFeed = async (background = false) => {
+    if (!background) setLoading(true);
     try {
       // Fetch feed + screener in parallel for maximum stock coverage
       const [feedData, screenerData] = await Promise.all([
         getFeed().catch(() => null),
-        getScreener({ limit: '50', sortBy: 'changePercent', sortDir: 'desc' }).catch(() => null),
+        getScreener({ limit: '20', sortBy: 'changePercent', sortDir: 'desc' }).catch(() => null),
       ]);
 
       // Build feed items from both sources
@@ -368,9 +386,15 @@ export const FeedScreen: React.FC = () => {
         eduIndex++;
       }
 
-      const feedItems = interleavedFeed.filter((e): e is FeedItem => !isEducationalCard(e));
-      setItems(feedItems);
-      setFeed(interleavedFeed);
+      const feedItemsOnly = interleavedFeed.filter((e): e is FeedItem => !isEducationalCard(e));
+      setItems(feedItemsOnly);
+      // Cache for instant tab-return
+      cachedFeedRef.current = interleavedFeed;
+      cachedItemsRef.current = feedItemsOnly;
+      // Store all entries, display first page
+      allEntriesRef.current = interleavedFeed;
+      setVisibleCount(PAGE_SIZE);
+      setFeed(interleavedFeed.slice(0, PAGE_SIZE));
     } catch {
       // API unavailable — fall back to placeholder data so screen is never blank
       usePlaceholder();
@@ -378,6 +402,15 @@ export const FeedScreen: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Infinite scroll: load more items when near the end
+  const loadMore = useCallback(() => {
+    const all = allEntriesRef.current;
+    if (visibleCount >= all.length) return;
+    const nextCount = Math.min(visibleCount + PAGE_SIZE, all.length);
+    setVisibleCount(nextCount);
+    setFeed(all.slice(0, nextCount));
+  }, [visibleCount]);
 
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -451,18 +484,18 @@ export const FeedScreen: React.FC = () => {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.loadingContainer}>
-          <Skeleton width={130} height={130} borderRadius={65} />
-          <View style={{ height: 20 }} />
-          <Skeleton width={120} height={36} borderRadius={8} />
-          <View style={{ height: 8 }} />
-          <Skeleton width={200} height={16} borderRadius={4} />
-          <View style={{ height: 24 }} />
-          <Skeleton width={80} height={32} borderRadius={16} />
-          <View style={{ height: 20 }} />
-          <Skeleton width={260} height={14} borderRadius={4} />
-          <View style={{ height: 8 }} />
-          <Skeleton width={200} height={14} borderRadius={4} />
+        <View style={styles.skeletonContainer}>
+          {[0, 1, 2, 3].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <Skeleton width={130} height={130} borderRadius={65} />
+              <View style={{ height: 12 }} />
+              <Skeleton width={100} height={28} borderRadius={8} />
+              <View style={{ height: 6 }} />
+              <Skeleton width={180} height={14} borderRadius={4} />
+              <View style={{ height: 10 }} />
+              <Skeleton width={60} height={24} borderRadius={12} />
+            </View>
+          ))}
         </View>
       </View>
     );
@@ -537,6 +570,8 @@ export const FeedScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -572,10 +607,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0D1B3E',
   },
-  loadingContainer: {
+  skeletonContainer: {
     flex: 1,
-    justifyContent: 'center',
+    paddingTop: 80,
+  },
+  skeletonCard: {
+    height: SCREEN_HEIGHT * 0.22,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
   },
   statusRow: {
     position: 'absolute',

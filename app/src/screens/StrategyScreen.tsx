@@ -20,7 +20,6 @@ import { usePortfolioStore } from '../store/portfolioStore';
 import {
   getAdvisorHoldings,
   getAdvisorInvestmentIdeas,
-  getAdvisorTaxStrategy,
   getAdvisorEvents,
   getPortfolioAnalytics,
   getScreener,
@@ -32,7 +31,6 @@ const ACCENT = {
   holdings: '#00C9A7',
   invest: '#FBBF24',
   research: '#60A5FA',
-  tax: '#34D399',
   events: '#F59E0B',
 };
 
@@ -80,14 +78,12 @@ export const StrategyScreen: React.FC = () => {
   // Data states
   const [holdingsData, setHoldingsData] = useState<any>(null);
   const [investData, setInvestData] = useState<any>(null);
-  const [taxData, setTaxData] = useState<any>(null);
   const [eventsData, setEventsData] = useState<any>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
 
   // Loading states
   const [loadingHoldings, setLoadingHoldings] = useState(true);
   const [loadingInvest, setLoadingInvest] = useState(true);
-  const [loadingTax, setLoadingTax] = useState(true);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -132,12 +128,6 @@ export const StrategyScreen: React.FC = () => {
       },
       async () => {
         try {
-          const d = await getAdvisorTaxStrategy();
-          setTaxData(d);
-        } catch {} finally { setLoadingTax(false); }
-      },
-      async () => {
-        try {
           const d = await getAdvisorEvents();
           setEventsData(d);
         } catch {} finally { setLoadingEvents(false); }
@@ -159,7 +149,6 @@ export const StrategyScreen: React.FC = () => {
     setRefreshing(true);
     setLoadingHoldings(true);
     setLoadingInvest(true);
-    setLoadingTax(true);
     setLoadingEvents(true);
     setLoadingAnalytics(true);
     await loadAllData();
@@ -215,11 +204,6 @@ export const StrategyScreen: React.FC = () => {
     .slice(0, 2)
     .map((g: any) => `${g.suggested_ticker || g.ticker || '?'} (${g.fii_score || '?'})`)
     .join(', ');
-
-  const taxSummary = taxData?.tax_summary || {};
-  const harvestable = Math.abs(taxSummary.harvestable_losses || 0);
-  const taxSavings = taxSummary.estimated_tax_savings_range || '$0';
-  const actionableItems = taxData?.actionable_items || [];
 
   const upcomingEvents = eventsData?.upcoming_events || [];
 
@@ -464,57 +448,6 @@ export const StrategyScreen: React.FC = () => {
             <Text style={styles.askAiText}>Critique a Report</Text>
             <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.3)" />
           </TouchableOpacity>
-        </AdvisorCard>
-
-        {/* ═══ 4. TAX STRATEGY CARD ═══ */}
-        <AdvisorCard accent={ACCENT.tax}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="cash-outline" size={18} color={ACCENT.tax} />
-            <Text style={styles.cardTitle}>Tax Strategy</Text>
-          </View>
-
-          {loadingTax ? (
-            <View style={{ gap: 8 }}>
-              <Skeleton width="70%" height={14} borderRadius={4} />
-              <Skeleton width="50%" height={14} borderRadius={4} />
-            </View>
-          ) : (
-            <>
-              {harvestable > 0 ? (
-                <>
-                  <Text style={styles.cardSubtitle}>
-                    ${harvestable.toLocaleString(undefined, { maximumFractionDigits: 0 })} harvestable losses
-                  </Text>
-                  <Text style={styles.detailLine}>
-                    Potential savings: {taxSavings}
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.cardSubtitle}>No harvestable losses right now</Text>
-              )}
-
-              {actionableItems.slice(0, 1).map((item: any, i: number) => (
-                <View key={i} style={styles.insightRow}>
-                  <Ionicons name="time-outline" size={14} color="#F59E0B" />
-                  <Text style={styles.insightText} numberOfLines={1}>
-                    {item.ticker}: {item.action || item.reason || ''}
-                  </Text>
-                </View>
-              ))}
-
-              <TouchableOpacity
-                style={styles.askAiButton}
-                onPress={() =>
-                  openCoachMode('tax', 'Explain my tax optimization opportunities')
-                }
-                activeOpacity={0.7}
-              >
-                <Ionicons name="chatbubble-ellipses-outline" size={16} color="#60A5FA" />
-                <Text style={styles.askAiText}>Tax optimization guidance</Text>
-                <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.3)" />
-              </TouchableOpacity>
-            </>
-          )}
         </AdvisorCard>
 
         {/* ═══ 4.5. BACKTEST CARD ═══ */}
