@@ -9,22 +9,31 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { postCritiqueReport, getScreener } from '../services/api';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_TEXT_CHARS = 15000;
+
+type UploadMethod = 'pdf' | 'text';
+
 // ─── Agreement score color helpers ───
 function getAgreementColor(score: number): string {
-  if (score <= 40) return '#F59E0B';     // amber – significant disagreement
-  if (score <= 60) return '#FBBF24';     // amber – partial agreement
-  if (score <= 80) return '#60A5FA';     // blue – mostly aligned
-  return '#00C9A7';                       // teal – strong agreement
+  if (score <= 40) return '#F59E0B';
+  if (score <= 60) return '#FBBF24';
+  if (score <= 80) return '#60A5FA';
+  return '#00C9A7';
 }
 
 function getAgreementLabel(score: number): string {
@@ -42,6 +51,12 @@ function getRiskColor(r: string): string {
   return r === 'Material' ? '#FBBF24' : '#8E8E93';
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 interface StockItem {
   ticker: string;
   companyName: string;
@@ -53,10 +68,13 @@ export function ReportCritiqueScreen() {
   const navigation = useNavigation<Nav>();
 
   // Input state
-  const [stocks, setStocks] = useState<StockItem[]>([]);
+  const [allStocks, setAllStocks] = useState<StockItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStock, setSelectedStock] = useState<StockItem | null>(null);
+  const [uploadMethod, setUploadMethod] = useState<UploadMethod>('pdf');
   const [reportText, setReportText] = useState('');
+  const [pdfFile, setPdfFile] = useState<{ name: string; size: number; uri: string } | null>(null);
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [source, setSource] = useState('');
 
   // Result state
@@ -69,45 +87,99 @@ export function ReportCritiqueScreen() {
   const [showContradictions, setShowContradictions] = useState(true);
   const [showBlindSpots, setShowBlindSpots] = useState(true);
 
-  // Load stock list for search
+  // Load all stocks on mount for local search
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await getScreener({ limit: '600' });
-        const items: StockItem[] = (data.stocks || data.results || []).map((s: any) => ({
-          ticker: s.ticker,
+    getScreener({ limit: '600', sortBy: 'ticker', sortDir: 'asc' })
+      .then((data) => {
+        const raw = data.results || data.stocks || data.items || [];
+        const items: StockItem[] = raw.map((s: any) => ({
+          ticker: s.ticker || '',
           companyName: s.companyName || s.company_name || '',
-          aiScore: s.aiScore ?? s.score ?? null,
+          aiScore: s.aiScore ?? s.ai_score ?? s.compositeScore ?? s.score ?? null,
         }));
-        setStocks(items);
-      } catch {}
-    })();
+        setAllStocks(items);
+      })
+      .catch((err) => console.error('Failed to load stocks:', err));
   }, []);
 
-  // Search filter
+  // Local search filter
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 1) return [];
     const q = searchQuery.toUpperCase();
-    return stocks
+    return allStocks
       .filter(
-        (s) => s.ticker.includes(q) || s.companyName.toUpperCase().includes(q),
+        (s) =>
+          s.ticker.toUpperCase().includes(q) ||
+          s.companyName.toUpperCase().includes(q),
       )
       .slice(0, 10);
-  }, [searchQuery, stocks]);
+  }, [searchQuery, allStocks]);
 
-  const canAnalyze = selectedStock && reportText.trim().length > 20;
+  // PDF picker
+  const handlePickPdf = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const fileSize = asset.size || 0;
+
+      if (fileSize > MAX_FILE_SIZE_BYTES) {
+        Alert.alert(
+          'File Too Large',
+          `Maximum file size is ${MAX_FILE_SIZE_MB}MB. Your file is ${formatFileSize(fileSize)}.`,
+        );
+        return;
+      }
+
+      setPdfFile({ name: asset.name, size: fileSize, uri: asset.uri });
+      setError('');
+
+      // Read file as base64
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      setPdfBase64(base64);
+    } catch (err: any) {
+      console.error('PDF pick error:', err);
+      setError('Failed to load PDF file');
+    }
+  }, []);
+
+  const handleRemovePdf = useCallback(() => {
+    setPdfFile(null);
+    setPdfBase64(null);
+  }, []);
+
+  const canAnalyze =
+    selectedStock &&
+    ((uploadMethod === 'pdf' && pdfBase64) ||
+      (uploadMethod === 'text' && reportText.trim().length > 20));
 
   const handleAnalyze = useCallback(async () => {
-    if (!selectedStock || !reportText.trim()) return;
+    if (!selectedStock) return;
     setLoading(true);
     setError('');
     setResult(null);
     try {
-      const data = await postCritiqueReport({
+      const params: any = {
         ticker: selectedStock.ticker,
-        report_text: reportText.trim(),
         source: source.trim() || undefined,
-      });
+      };
+
+      if (uploadMethod === 'pdf' && pdfBase64) {
+        params.report_pdf_base64 = pdfBase64;
+      } else {
+        params.report_text = reportText.trim();
+      }
+
+      const data = await postCritiqueReport(params);
       if (data.error) {
         setError(data.error);
       } else {
@@ -118,7 +190,7 @@ export function ReportCritiqueScreen() {
     } finally {
       setLoading(false);
     }
-  }, [selectedStock, reportText, source]);
+  }, [selectedStock, reportText, source, uploadMethod, pdfBase64]);
 
   const handleAskCoach = useCallback(() => {
     if (!result || !selectedStock) return;
@@ -413,30 +485,108 @@ export function ReportCritiqueScreen() {
             </>
           )}
 
-          {/* Report Text */}
-          <Text style={[styles.inputLabel, { marginTop: 20 }]}>Paste the analyst report below:</Text>
-          <View style={styles.textAreaContainer}>
-            <TextInput
-              style={styles.textArea}
-              placeholder="Paste analyst report text here..."
-              placeholderTextColor="rgba(255,255,255,0.2)"
-              value={reportText}
-              onChangeText={(t) => setReportText(t.slice(0, 15000))}
-              multiline
-              textAlignVertical="top"
-              scrollEnabled
-            />
+          {/* Upload Method Toggle */}
+          <Text style={[styles.inputLabel, { marginTop: 20 }]}>Upload Method:</Text>
+          <View style={styles.toggleRow}>
+            <TouchableOpacity
+              style={[styles.toggleButton, uploadMethod === 'pdf' && styles.toggleButtonActive]}
+              onPress={() => setUploadMethod('pdf')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="document-outline"
+                size={16}
+                color={uploadMethod === 'pdf' ? '#fff' : 'rgba(255,255,255,0.5)'}
+              />
+              <Text
+                style={[styles.toggleText, uploadMethod === 'pdf' && styles.toggleTextActive]}
+              >
+                Upload PDF
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleButton, uploadMethod === 'text' && styles.toggleButtonActive]}
+              onPress={() => setUploadMethod('text')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="create-outline"
+                size={16}
+                color={uploadMethod === 'text' ? '#fff' : 'rgba(255,255,255,0.5)'}
+              />
+              <Text
+                style={[styles.toggleText, uploadMethod === 'text' && styles.toggleTextActive]}
+              >
+                Paste Text
+              </Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.charCount}>
-            {reportText.length.toLocaleString()} / 15,000
-          </Text>
+
+          {/* PDF Upload */}
+          {uploadMethod === 'pdf' && (
+            <View style={{ marginTop: 12 }}>
+              {pdfFile ? (
+                <View style={styles.pdfFileCard}>
+                  <View style={styles.pdfFileIconRow}>
+                    <View style={styles.pdfIconContainer}>
+                      <Ionicons name="document" size={24} color="#60A5FA" />
+                    </View>
+                    <View style={styles.pdfFileInfo}>
+                      <Text style={styles.pdfFileName} numberOfLines={1}>
+                        {pdfFile.name}
+                      </Text>
+                      <Text style={styles.pdfFileSize}>
+                        {formatFileSize(pdfFile.size)}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={handleRemovePdf} style={styles.pdfRemoveBtn}>
+                      <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.4)" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.uploadButton}
+                  onPress={handlePickPdf}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="cloud-upload-outline" size={28} color="#60A5FA" />
+                  <Text style={styles.uploadButtonTitle}>Upload Analyst Report (PDF)</Text>
+                  <Text style={styles.uploadButtonSub}>
+                    Max {MAX_FILE_SIZE_MB}MB
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Text Paste */}
+          {uploadMethod === 'text' && (
+            <View style={{ marginTop: 12 }}>
+              <View style={styles.textAreaContainer}>
+                <TextInput
+                  style={styles.textArea}
+                  placeholder="Paste analyst report text here..."
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  value={reportText}
+                  onChangeText={(t) => setReportText(t.slice(0, MAX_TEXT_CHARS))}
+                  multiline
+                  textAlignVertical="top"
+                  scrollEnabled
+                />
+              </View>
+              <Text style={styles.charCount}>
+                {reportText.length.toLocaleString()} / {MAX_TEXT_CHARS.toLocaleString()}
+              </Text>
+            </View>
+          )}
 
           {/* Source */}
           <Text style={[styles.inputLabel, { marginTop: 16 }]}>Source (optional):</Text>
           <View style={styles.sourceContainer}>
             <TextInput
               style={styles.sourceInput}
-              placeholder="e.g. Morgan Stanley"
+              placeholder="e.g. Goldman Sachs"
               placeholderTextColor="rgba(255,255,255,0.25)"
               value={source}
               onChangeText={setSource}
@@ -476,8 +626,8 @@ export function ReportCritiqueScreen() {
           <View style={styles.hintContainer}>
             <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.35)" />
             <Text style={styles.hintText}>
-              Paste text from any analyst report — Morningstar, Seeking Alpha, Goldman Sachs, JP
-              Morgan, etc.
+              Upload a PDF or paste text from any analyst report — Morningstar, Seeking Alpha,
+              Goldman Sachs, JP Morgan, etc. For educational purposes only.
             </Text>
           </View>
         </ScrollView>
@@ -565,6 +715,97 @@ const styles = StyleSheet.create({
   selectedTicker: { fontSize: 15, fontWeight: '700', color: '#00C9A7' },
   selectedName: { flex: 1, fontSize: 13, color: 'rgba(255,255,255,0.6)' },
 
+  // Upload method toggle
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  toggleButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  toggleButtonActive: {
+    backgroundColor: 'rgba(96,165,250,0.15)',
+    borderColor: 'rgba(96,165,250,0.3)',
+  },
+  toggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  toggleTextActive: {
+    color: '#fff',
+  },
+
+  // PDF upload
+  uploadButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.2)',
+    borderStyle: 'dashed',
+    paddingVertical: 28,
+    gap: 6,
+  },
+  uploadButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#60A5FA',
+  },
+  uploadButtonSub: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.35)',
+  },
+
+  // PDF file card
+  pdfFileCard: {
+    backgroundColor: 'rgba(96,165,250,0.08)',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.2)',
+  },
+  pdfFileIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pdfIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: 'rgba(96,165,250,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pdfFileInfo: {
+    flex: 1,
+  },
+  pdfFileName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  pdfFileSize: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  pdfRemoveBtn: {
+    padding: 4,
+  },
+
+  // Text area
   textAreaContainer: {
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 10,

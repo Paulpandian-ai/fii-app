@@ -517,7 +517,8 @@ export const getAdvisorEvents = async (days?: number) => {
 
 export const postCritiqueReport = async (params: {
   ticker: string;
-  report_text: string;
+  report_text?: string;
+  report_pdf_base64?: string;
   source?: string;
 }) => {
   const { data } = await api.post('/advisor/critique-report', params);

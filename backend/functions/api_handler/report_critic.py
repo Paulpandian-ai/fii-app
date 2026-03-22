@@ -291,13 +291,14 @@ def _validate_critique(result: dict) -> dict:
     return result
 
 
-def critique_analyst_report(report_text: str, ticker: str, source: Optional[str] = None) -> dict:
+def critique_analyst_report(report_text: str, ticker: str, source: Optional[str] = None, report_pdf_base64: Optional[str] = None) -> dict:
     """Critique an analyst report against FII's multi-factor data.
 
     Args:
         report_text: Plain text of the analyst report (max 15,000 chars).
         ticker: Stock ticker symbol (e.g. "LLY").
         source: Optional source name (e.g. "Morgan Stanley").
+        report_pdf_base64: Optional base64-encoded PDF of the analyst report.
 
     Returns:
         Dict with analyst_summary, critique, fii_vs_analyst, executive_summary, disclaimer.
@@ -307,7 +308,8 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
     ticker = ticker.upper().strip()
 
     # Check cache first
-    cache_sk = _cache_key(ticker, report_text)
+    cache_text = report_pdf_base64[:100] if report_pdf_base64 else report_text
+    cache_sk = _cache_key(ticker, cache_text)
     try:
         cached = db.get_item("CRITIQUE_CACHE", cache_sk)
         if cached and cached.get("expires_at", 0) > int(time.time()):
@@ -320,12 +322,32 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
     # Step 1: Gather FII data
     fii_data = _gather_fii_data(ticker)
 
-    # Step 2: Build the user message
-    user_message = _build_user_message(report_text, ticker, fii_data)
-
-    # If source is provided, prepend it to help Claude identify the source
-    if source:
-        user_message = f"[SOURCE HINT: This report is from {source}]\n\n{user_message}"
+    # Step 2: Build the user message with FII data context
+    if report_pdf_base64:
+        # For PDF mode, build FII data context without the report text
+        fii_context = _build_user_message("(see attached PDF)", ticker, fii_data)
+        if source:
+            fii_context = f"[SOURCE HINT: This report is from {source}]\n\n{fii_context}"
+        # Use Claude's native PDF document support
+        user_content = [
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": report_pdf_base64,
+                },
+            },
+            {
+                "type": "text",
+                "text": fii_context,
+            },
+        ]
+    else:
+        user_message = _build_user_message(report_text, ticker, fii_data)
+        if source:
+            user_message = f"[SOURCE HINT: This report is from {source}]\n\n{user_message}"
+        user_content = user_message
 
     # Step 3: Call Claude Sonnet for high-quality critique
     client = cc._get_client()
@@ -333,7 +355,7 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
         model="claude-sonnet-4-5-20250929",
         max_tokens=4096,
         system=CRITIQUE_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
+        messages=[{"role": "user", "content": user_content}],
     )
 
     response_text = message.content[0].text
