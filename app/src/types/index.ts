@@ -1121,6 +1121,7 @@ export type RootStackParamList = {
   TaxPlaybook: undefined;
   PortfolioXRay: undefined;
   AIAdvisor: undefined;
+  ReportCritique: undefined;
   AICoach: {
     mode?: 'holdings' | 'invest' | 'research' | 'tax' | 'events';
     ticker?: string;

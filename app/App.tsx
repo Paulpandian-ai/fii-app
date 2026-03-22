@@ -46,6 +46,7 @@ import { TermsOfServiceScreen } from './src/screens/TermsOfServiceScreen';
 import { WealthAdvisorScreen } from './src/screens/WealthAdvisorScreen';
 import { TaxPlaybookScreen } from './src/screens/TaxPlaybookScreen';
 import { AICoachScreen } from './src/screens/AICoachScreen';
+import { ReportCritiqueScreen } from './src/screens/ReportCritiqueScreen';
 import { registerDeviceToken } from './src/services/api';
 import type { RootTabParamList, RootStackParamList } from './src/types';
 
@@ -132,6 +133,9 @@ const WrappedTaxPlaybook = () => (
 );
 const WrappedAICoach = () => (
   <ErrorBoundary screenName="AICoachScreen"><AICoachScreen /></ErrorBoundary>
+);
+const WrappedReportCritique = () => (
+  <ErrorBoundary screenName="ReportCritiqueScreen"><ReportCritiqueScreen /></ErrorBoundary>
 );
 const WrappedPrivacyPolicy = () => (
   <ErrorBoundary screenName="PrivacyPolicyScreen"><PrivacyPolicyScreen /></ErrorBoundary>
@@ -322,6 +326,11 @@ export default function App() {
         <Stack.Screen
           name="AICoach"
           component={WrappedAICoach}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="ReportCritique"
+          component={WrappedReportCritique}
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen

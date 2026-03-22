@@ -4237,6 +4237,18 @@ def _handle_advisor(method, path, body, user_id, query_params):
             result = wealth_advisor.get_events_watchlist(holdings, days)
             return _response(200, result)
 
+        elif "/critique-report" in path and method == "POST":
+            from report_critic import critique_analyst_report
+            ticker = (body or {}).get("ticker", "").upper()
+            report_text = (body or {}).get("report_text", "")
+            source = (body or {}).get("source")
+            if not ticker or not report_text:
+                return _response(400, {"error": "ticker and report_text required"})
+            if len(report_text) > 15000:
+                return _response(400, {"error": "Report text too long (max 15000 chars)"})
+            result = critique_analyst_report(report_text, ticker, source)
+            return _response(200, result)
+
         elif "/backtest/precomputed" in path and method == "GET":
             import backtester
             results = backtester.get_precomputed_backtests()

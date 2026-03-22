@@ -513,6 +513,17 @@ export const getAdvisorEvents = async (days?: number) => {
   return _deduplicatedGet('/advisor/events', params);
 };
 
+// ─── Report Critique ───
+
+export const postCritiqueReport = async (params: {
+  ticker: string;
+  report_text: string;
+  source?: string;
+}) => {
+  const { data } = await api.post('/advisor/critique-report', params);
+  return data;
+};
+
 // ─── Backtesting ───
 
 export const getPrecomputedBacktests = async () => {

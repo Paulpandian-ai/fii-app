@@ -440,6 +440,32 @@ export const StrategyScreen: React.FC = () => {
           )}
         </AdvisorCard>
 
+        {/* ═══ 3.5. REPORT CRITIC CARD ═══ */}
+        <AdvisorCard accent="#8B5CF6">
+          <View style={styles.cardHeader}>
+            <Ionicons name="search-outline" size={18} color="#8B5CF6" />
+            <Text style={styles.cardTitle}>Analyst Report Critic</Text>
+            <View style={{ backgroundColor: 'rgba(139,92,246,0.15)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>NEW</Text>
+            </View>
+          </View>
+          <Text style={styles.cardSubtitle}>
+            Paste any analyst report and get an independent second opinion powered by FII's 6-factor analysis
+          </Text>
+          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', marginTop: 4, marginBottom: 10 }}>
+            "Is the analyst missing something?"
+          </Text>
+          <TouchableOpacity
+            style={styles.askAiButton}
+            onPress={() => navigation.navigate('ReportCritique')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="flask-outline" size={16} color="#60A5FA" />
+            <Text style={styles.askAiText}>Critique a Report</Text>
+            <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        </AdvisorCard>
+
         {/* ═══ 4. TAX STRATEGY CARD ═══ */}
         <AdvisorCard accent={ACCENT.tax}>
           <View style={styles.cardHeader}>
