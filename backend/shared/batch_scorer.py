@@ -62,6 +62,23 @@ def score_single_stock(ticker: str, model: str = "haiku") -> dict:
     model_id = MODELS.get(model, MODELS["haiku"])
     start_time = time.time()
 
+    # ── Skip if fresh FACTOR_SUMMARY exists (< 7 days old) ──
+    try:
+        import db
+        existing = db.get_item(f"FACTOR_SUMMARY#{ticker}", "LATEST")
+        if existing and existing.get("last_updated"):
+            now = datetime.now(timezone.utc)
+            last_updated_str = existing["last_updated"]
+            last_updated_dt = datetime.fromisoformat(
+                last_updated_str.replace("Z", "+00:00")
+            )
+            age = (now - last_updated_dt).total_seconds()
+            if age < 7 * 86400:  # Less than 7 days old
+                logger.info(f"[BatchScorer] Skipping {ticker} — fresh summary exists ({age / 86400:.1f} days old)")
+                return {"ticker": ticker, "skipped": True, "reason": "fresh_summary"}
+    except Exception as e:
+        logger.debug(f"[BatchScorer] Freshness check failed for {ticker}, proceeding: {e}")
+
     logger.info(f"[BatchScorer] Scoring {ticker} with {model} ({model_id})")
 
     try:
@@ -172,6 +189,7 @@ def score_batch(tickers: list, run_type: str = "weekly") -> dict:
     # ── Phase 1: Score all tickers with Haiku ──
     results = []
     errors = []
+    skipped = []
 
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as executor:
         future_to_ticker = {
@@ -183,7 +201,9 @@ def score_batch(tickers: list, run_type: str = "weekly") -> dict:
             ticker = future_to_ticker[future]
             try:
                 result = future.result()
-                if result.get("error"):
+                if result.get("skipped"):
+                    skipped.append(ticker)
+                elif result.get("error"):
                     errors.append({"ticker": ticker, "error": result["error"]})
                 else:
                     results.append(result)
@@ -245,6 +265,7 @@ def score_batch(tickers: list, run_type: str = "weekly") -> dict:
 
     summary = {
         "scored": len(results),
+        "skipped_fresh": len(skipped),
         "errors": len(errors),
         "cost_estimate": round(estimated_cost, 4),
         "run_type": run_type,
@@ -258,6 +279,7 @@ def score_batch(tickers: list, run_type: str = "weekly") -> dict:
 
     logger.info(
         f"[BatchScorer] Batch complete: {summary['scored']} scored, "
+        f"{summary['skipped_fresh']} skipped (fresh), "
         f"{summary['errors']} errors, ~${summary['cost_estimate']:.4f} cost, "
         f"{summary['elapsed_seconds']}s elapsed"
     )
