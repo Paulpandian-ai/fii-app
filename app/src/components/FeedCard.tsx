@@ -36,6 +36,44 @@ const formatMarketCap = (cap: number): string => {
   return '';
 };
 
+/** Format P/E: whole number if >= 10, one decimal if < 10 */
+const formatPE = (pe: number | null, negEarnings: boolean): string => {
+  if (negEarnings || pe == null || pe <= 0) return '—';
+  return pe >= 10 ? Math.round(pe).toString() : pe.toFixed(1);
+};
+
+/** Format growth rate with + or - prefix */
+const formatGrowth = (val: number | null): string => {
+  if (val == null) return '—';
+  const prefix = val >= 0 ? '+' : '';
+  return `${prefix}${val.toFixed(1)}%`;
+};
+
+/** Format percentage */
+const formatPct = (val: number | null): string => {
+  if (val == null) return '—';
+  return `${val.toFixed(1)}%`;
+};
+
+/** Format target price with $ and commas */
+const formatTargetPrice = (val: number | null): string => {
+  if (val == null || val <= 0) return '—';
+  return `$${val >= 1000 ? val.toLocaleString('en-US', { maximumFractionDigits: 0 }) : val.toFixed(0)}`;
+};
+
+/** Format earnings date as "Mon DD" */
+const formatEarningsDate = (val: string | null): string => {
+  if (!val) return '—';
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '—';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[d.getMonth()]} ${d.getDate()}`;
+  } catch {
+    return '—';
+  }
+};
+
 /** Compute health grade from current_ratio + debt_to_equity */
 const computeHealthGrade = (
   existingGrade: string | null,
@@ -153,6 +191,17 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   // ─── Beta from financials ───
   const [beta, setBeta] = useState<number | null>((cached as any)?.beta ?? null);
 
+  // ─── New 3-row financial stats ───
+  const [revGrowth, setRevGrowth] = useState<number | null>((cached as any)?.revGrowth ?? null);
+  const [epsGrowth, setEpsGrowth] = useState<number | null>((cached as any)?.epsGrowth ?? null);
+  const [netMargin, setNetMargin] = useState<number | null>((cached as any)?.netMargin ?? null);
+  const [roe, setRoe] = useState<number | null>((cached as any)?.roe ?? null);
+  const [divYield, setDivYield] = useState<number | null>((cached as any)?.divYield ?? null);
+  const [targetPrice, setTargetPrice] = useState<number | null>((cached as any)?.targetPrice ?? null);
+  const [shortInterest, setShortInterest] = useState<number | null>((cached as any)?.shortInterest ?? null);
+  const [earningsDate, setEarningsDate] = useState<string | null>((cached as any)?.earningsDate ?? null);
+  const [fcfYield, setFcfYield] = useState<number | null>((cached as any)?.fcfYield ?? null);
+
   // ─── Sector percentile for peer ranking ───
   const [sectorPercentile, setSectorPercentile] = useState<number | null>((cached as any)?.sectorPercentile ?? null);
 
@@ -266,6 +315,36 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       // ── Beta ──
       const betaVal = sig?.beta ?? fund?.beta ?? fundRaw?.beta ?? priceData?.beta;
       if (betaVal != null) { const v = safeNum(betaVal); setBeta(v); ed.beta = v; }
+
+      // ── New 3-row metrics from fundamentals ──
+      // Extract from categorized fundamentals (fund?.profitability?.net_margin?.value)
+      // or flat signal data (sig?.net_margin)
+      const cats = fund?.categories || fund;
+      const profitCat = cats?.profitability;
+      const growthCat = cats?.growth;
+      const divCat = cats?.dividends;
+      const valCat = cats?.valuation;
+      const ownCat = cats?.ownership;
+      const analystCat = cats?.analyst_estimates;
+
+      const revGr = sig?.revenue_growth_yoy ?? growthCat?.revenue_growth_yoy?.value ?? fundRaw?.revenue_growth_yoy;
+      if (revGr != null) { const v = safeNum(revGr); setRevGrowth(v); ed.revGrowth = v; }
+      const epsGr = sig?.eps_growth_yoy ?? growthCat?.eps_growth_yoy?.value ?? fundRaw?.eps_growth_yoy;
+      if (epsGr != null) { const v = safeNum(epsGr); setEpsGrowth(v); ed.epsGrowth = v; }
+      const nm = sig?.net_margin ?? profitCat?.net_margin?.value ?? fundRaw?.net_margin;
+      if (nm != null) { const v = safeNum(nm); setNetMargin(v); ed.netMargin = v; }
+      const roeVal = sig?.roe ?? profitCat?.roe?.value ?? fundRaw?.roe;
+      if (roeVal != null) { const v = safeNum(roeVal); setRoe(v); ed.roe = v; }
+      const dy = sig?.dividend_yield ?? divCat?.dividend_yield?.value ?? fundRaw?.dividend_yield;
+      if (dy != null) { const v = safeNum(dy); setDivYield(v); ed.divYield = v; }
+      const tp = sig?.target_price ?? sig?.target_price_mean ?? analystCat?.target_price?.value ?? fundRaw?.target_price;
+      if (tp != null && tp > 0) { const v = safeNum(tp); setTargetPrice(v); ed.targetPrice = v; }
+      const si = sig?.short_pct_float ?? ownCat?.short_pct_float?.value ?? fundRaw?.short_pct_float ?? sig?.short_interest;
+      if (si != null) { const v = safeNum(si); setShortInterest(v); ed.shortInterest = v; }
+      const eDate = sig?.earnings_date ?? sig?.earningsDate ?? analystCat?.earnings_date?.value;
+      if (eDate) { const s = String(eDate); setEarningsDate(s); ed.earningsDate = s; }
+      const fcfy = sig?.fcf_yield ?? valCat?.fcf_yield?.value ?? fundRaw?.fcf_yield;
+      if (fcfy != null) { const v = safeNum(fcfy); setFcfYield(v); ed.fcfYield = v; }
 
       // ── Factor Percentiles ──
       const fpctls = sig?.factor_percentiles ?? factors?.factor_percentiles ?? factorsRaw?.factor_percentiles;
@@ -540,45 +619,100 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
           </View>
         )}
 
-        {/* ── Metrics Row (5 columns) ── */}
-        <View style={styles.metricsRow}>
-          <View style={styles.metricItem}>
-            {showSkeleton && techScore == null ? <MetricSkeleton /> : (
-              <Text style={styles.metricValue}>{techScore != null ? techScore.toFixed(1) : '—'}</Text>
-            )}
-            <Text style={styles.metricLabel}>Technical</Text>
+        {/* ── 3-Row Financial Stats ── */}
+        <View style={styles.statsContainer}>
+          {/* Row 1: Valuation & Growth */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>P/E</Text>
+              {showSkeleton && peRatio == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{formatPE(peRatio, negativeEarnings)}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Rev Growth</Text>
+              {showSkeleton && revGrowth == null ? <MetricSkeleton /> : (
+                <Text style={[styles.statValue, revGrowth != null ? { color: revGrowth >= 0 ? '#00C9A7' : '#F5A623' } : {}]}>
+                  {formatGrowth(revGrowth)}
+                </Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>EPS Growth</Text>
+              {showSkeleton && epsGrowth == null ? <MetricSkeleton /> : (
+                <Text style={[styles.statValue, epsGrowth != null ? { color: epsGrowth >= 0 ? '#00C9A7' : '#F5A623' } : {}]}>
+                  {formatGrowth(epsGrowth)}
+                </Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Mkt Cap</Text>
+              {showSkeleton && marketCap === 0 ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{marketCap > 0 ? formatMarketCap(marketCap) : '—'}</Text>
+              )}
+            </View>
           </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            {showSkeleton && !healthGrade ? <MetricSkeleton /> : (
-              <Text style={[styles.metricValue, { color: gradeColor }]}>{displayHealthGrade}</Text>
-            )}
-            <Text style={styles.metricLabel}>Health</Text>
+
+          <View style={styles.statsSeparator} />
+
+          {/* Row 2: Profitability & Risk */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Net Margin</Text>
+              {showSkeleton && netMargin == null ? <MetricSkeleton /> : (
+                <Text style={[styles.statValue, netMargin != null ? { color: netMargin >= 0 ? '#FFFFFF' : '#F5A623' } : {}]}>
+                  {formatPct(netMargin)}
+                </Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>ROE</Text>
+              {showSkeleton && roe == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{roe != null ? `${roe.toFixed(1)}%` : '—'}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Beta</Text>
+              {showSkeleton && beta == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{beta != null ? beta.toFixed(2) : '—'}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Div Yield</Text>
+              {showSkeleton && divYield == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{divYield != null && divYield > 0 ? `${divYield.toFixed(1)}%` : '—'}</Text>
+              )}
+            </View>
           </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            {showSkeleton && peRatio == null ? <MetricSkeleton /> : (
-              <Text style={[styles.metricValue, negativeEarnings ? { color: '#F5A623' } : {}]}>
-                {negativeEarnings ? '—' : peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '—'}
-              </Text>
-            )}
-            <Text style={styles.metricLabel}>P/E</Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            {showSkeleton && beta == null ? <MetricSkeleton /> : (
-              <Text style={styles.metricValue}>{beta != null ? beta.toFixed(2) : '—'}</Text>
-            )}
-            <Text style={styles.metricLabel}>Beta</Text>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricItem}>
-            {showSkeleton && rsi == null ? <MetricSkeleton /> : (
-              <Text style={[styles.metricValue, rsi != null ? { color: rsi >= 70 ? '#F5A623' : rsi <= 30 ? '#4A90D9' : '#8E8E93' } : {}]}>
-                {rsi != null ? rsi.toFixed(1) : '—'}
-              </Text>
-            )}
-            <Text style={styles.metricLabel}>RSI</Text>
+
+          <View style={styles.statsSeparator} />
+
+          {/* Row 3: Forward-Looking & Actionable */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Target Price</Text>
+              {showSkeleton && targetPrice == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{formatTargetPrice(targetPrice)}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Short Int</Text>
+              {showSkeleton && shortInterest == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{shortInterest != null ? `${shortInterest.toFixed(1)}%` : '—'}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Earnings</Text>
+              {showSkeleton && earningsDate == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{formatEarningsDate(earningsDate)}</Text>
+              )}
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>FCF Yield</Text>
+              {showSkeleton && fcfYield == null ? <MetricSkeleton /> : (
+                <Text style={styles.statValue}>{fcfYield != null ? `${fcfYield.toFixed(1)}%` : '—'}</Text>
+              )}
+            </View>
           </View>
         </View>
 
@@ -833,38 +967,41 @@ const styles = StyleSheet.create({
   },
   ownedText: { color: '#60A5FA', fontSize: 11, fontWeight: '600' },
 
-  // ── Metrics Row ──
-  metricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // ── 3-Row Financial Stats ──
+  statsContainer: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 10,
+    paddingVertical: 6,
     paddingHorizontal: 4,
     marginBottom: 12,
   },
-  metricItem: {
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 36,
+  },
+  statItem: {
     flex: 1,
     alignItems: 'center',
-    gap: 2,
+    gap: 1,
   },
-  metricValue: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  metricLabel: {
+  statLabel: {
     color: 'rgba(255,255,255,0.35)',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
-  metricDivider: {
-    width: 1,
-    height: 24,
+  statValue: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statsSeparator: {
+    height: 1,
     backgroundColor: 'rgba(255,255,255,0.08)',
+    marginHorizontal: 8,
   },
 
   // ── AI Insight ──

@@ -318,8 +318,10 @@ export const FeedScreen: React.FC = () => {
         getMarketNews(10).catch(() => null),
       ]);
 
-      // Store news items
-      const fetchedNews = newsData?.items || [];
+      // Store news items — handle both { items: [...] } and direct array responses
+      const rawNews = Array.isArray(newsData) ? newsData : (newsData?.items || newsData?.news || []);
+      const fetchedNews: NewsItem[] = Array.isArray(rawNews) ? rawNews : [];
+      console.log('News items loaded:', fetchedNews.length);
       setNewsItems(fetchedNews);
 
       // Build feed items from both sources
@@ -547,7 +549,11 @@ export const FeedScreen: React.FC = () => {
         ref={flashListRef}
         data={feed}
         renderItem={renderItem}
-        keyExtractor={(item, index) => item.id ?? (item as any).postId ?? (item as any).ticker ?? 'item-' + index}
+        keyExtractor={(item, index) => {
+          if (isNewsEntry(item)) return `news-entry-${item.id}-${index}`;
+          return item.id ?? (item as any).postId ?? (item as any).ticker ?? `item-${index}`;
+        }}
+        estimatedItemSize={SCREEN_HEIGHT}
         pagingEnabled={true}
         snapToInterval={SCREEN_HEIGHT}
         snapToAlignment="start"
