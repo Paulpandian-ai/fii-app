@@ -366,7 +366,7 @@ export const PortfolioScreen: React.FC = () => {
     addTicker: addWatchlistTicker,
   } = useWatchlistStore();
 
-  const { signals, enrichmentCache } = useSignalStore();
+  const { signals, enrichmentCache, setEnrichment } = useSignalStore();
 
   // ── Local State ──
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -475,11 +475,13 @@ export const PortfolioScreen: React.FC = () => {
   }, []);
 
   // Fetch signal data for watchlist tickers (for rich cards)
+  const [wlDataLoading, setWlDataLoading] = useState(false);
   useEffect(() => {
     const allTickers = watchlists.flatMap((wl) => wl.items.map((i) => i.ticker));
     const uniqueTickers = [...new Set(allTickers)].filter((t) => !wlSignalData[t]);
     if (uniqueTickers.length === 0) return;
     let mounted = true;
+    setWlDataLoading(true);
     (async () => {
       try {
         // Fetch batch signals first
@@ -492,19 +494,47 @@ export const PortfolioScreen: React.FC = () => {
         }
         setWlSignalData(newData);
 
-        // Also try to get enrichment for tickers that don't have it
+        // Fetch full signal detail for each ticker to get enrichment data
         for (const ticker of uniqueTickers) {
-          if (enrichmentCache[ticker]) continue;
           try {
             const detail = await getSignalDetail(ticker);
             if (!mounted) return;
             if (detail?.ticker) {
               newData[detail.ticker] = { ...newData[detail.ticker], ...detail };
               setWlSignalData({ ...newData });
+              // Populate enrichmentCache so price/metrics are available
+              setEnrichment(ticker, {
+                price: detail.price ?? detail.currentPrice ?? null,
+                change: detail.change ?? detail.priceChange ?? 0,
+                changePercent: detail.changePercent ?? detail.priceChangePercent ?? 0,
+                marketCap: detail.market_cap ?? detail.marketCap ?? 0,
+                w52Low: detail.fiftyTwoWeekLow ?? detail.w52Low ?? null,
+                w52High: detail.fiftyTwoWeekHigh ?? detail.w52High ?? null,
+                sector: detail.sector ?? null,
+                techScore: detail.techScore ?? null,
+                techTrend: detail.techTrend ?? null,
+                rsi: detail.rsi ?? null,
+                healthGrade: detail.healthGrade ?? null,
+                peRatio: detail.pe_ratio ?? detail.trailingPE ?? detail.peRatio ?? null,
+                forwardPE: detail.forwardPE ?? null,
+                negativeEarnings: detail.negativeEarnings ?? false,
+                fairValueUpside: detail.fairValueUpside ?? null,
+                fairPriceDollars: detail.fairPriceDollars ?? null,
+                fairPriceLabel: detail.fairPriceLabel ?? null,
+                zScore: detail.zScore ?? null,
+                fScoreVal: detail.fScoreVal ?? null,
+                dimensionScores: detail.dimensionScores ?? detail.dimension_scores ?? {},
+                enrichedFactors: detail.enrichedFactors ?? detail.enriched_factors ?? [],
+                enrichedInsight: detail.enrichedInsight ?? detail.enriched_insight ?? null,
+                aiHeadline: detail.aiHeadline ?? detail.ai_headline ?? null,
+                aiAction: detail.aiAction ?? detail.ai_action ?? null,
+                cachedAt: Date.now(),
+              });
             }
           } catch {}
         }
       } catch {}
+      if (mounted) setWlDataLoading(false);
     })();
     return () => { mounted = false; };
   }, [watchlists.length]);
@@ -1373,7 +1403,7 @@ export const PortfolioScreen: React.FC = () => {
                         const itemSignal = signals[item.ticker];
                         const sigData = wlSignalData[item.ticker];
                         const wlEnrichment = enrichmentCache[item.ticker];
-                        const isUp = (item.changePercent ?? 0) >= 0;
+                        const dataReady = !!(sigData || wlEnrichment);
                         const itemScore = itemSignal?.score ?? item.score ?? 5;
                         const itemLabel = itemSignal?.scoreLabel ?? getScoreLabelFromUtil(itemScore);
                         const scoreColor = getScoreColorFromUtil(itemScore);
@@ -1382,12 +1412,15 @@ export const PortfolioScreen: React.FC = () => {
                         const rawSector = wlEnrichment?.sector || TICKER_SECTOR_MAP[item.ticker] || '';
                         const sector = SECTOR_NAME_NORMALIZE[rawSector] || rawSector;
 
-                        // Metrics
-                        const peRatio = wlEnrichment?.peRatio ?? sigData?.pe_ratio ?? sigData?.trailingPE;
+                        // Metrics — pull from enrichmentCache first, then sigData, then item
+                        const peRatio = wlEnrichment?.peRatio ?? sigData?.pe_ratio ?? sigData?.trailingPE ?? sigData?.peRatio;
+                        const beta = sigData?.beta ?? wlEnrichment?.beta ?? null;
                         const marketCap = wlEnrichment?.marketCap ?? sigData?.market_cap ?? sigData?.marketCap ?? 0;
-                        const w52Low = wlEnrichment?.w52Low ?? sigData?.fiftyTwoWeekLow;
-                        const w52High = wlEnrichment?.w52High ?? sigData?.fiftyTwoWeekHigh;
-                        const price = item.price ?? wlEnrichment?.price ?? 0;
+                        const w52Low = wlEnrichment?.w52Low ?? sigData?.fiftyTwoWeekLow ?? sigData?.w52Low;
+                        const w52High = wlEnrichment?.w52High ?? sigData?.fiftyTwoWeekHigh ?? sigData?.w52High;
+                        const price = wlEnrichment?.price ?? sigData?.price ?? sigData?.currentPrice ?? item.price ?? 0;
+                        const changePercent = wlEnrichment?.changePercent ?? sigData?.changePercent ?? sigData?.priceChangePercent ?? item.changePercent ?? 0;
+                        const isUp = changePercent >= 0;
 
                         // Format market cap
                         const fmtMCap = marketCap >= 1e12 ? `$${(marketCap / 1e12).toFixed(1)}T`
@@ -1455,6 +1488,33 @@ export const PortfolioScreen: React.FC = () => {
                           'Risk & Performance': 'Earnings',
                         };
 
+                        // Skeleton placeholder while data loads
+                        if (!dataReady && wlDataLoading) {
+                          return (
+                            <View key={item.ticker} style={styles.wlCard}>
+                              <View style={styles.wlCardHeader}>
+                                <View style={{ flex: 1 }}>
+                                  <View style={styles.wlCardTickerRow}>
+                                    <Text style={styles.wlCardTicker}>{item.ticker}</Text>
+                                    <Text style={styles.wlCardCompany} numberOfLines={1}>{item.companyName}</Text>
+                                  </View>
+                                  <View style={{ marginTop: 6, gap: 8 }}>
+                                    <Skeleton width={120} height={14} borderRadius={4} />
+                                    <Skeleton width="80%" height={10} borderRadius={4} />
+                                  </View>
+                                </View>
+                                <Skeleton width={56} height={44} borderRadius={10} />
+                              </View>
+                              <View style={{ gap: 8 }}>
+                                <Skeleton width="60%" height={10} borderRadius={4} />
+                                <Skeleton width="100%" height={4} borderRadius={2} />
+                                <Skeleton width={120} height={120} borderRadius={60} />
+                                <Skeleton width="90%" height={10} borderRadius={4} />
+                              </View>
+                            </View>
+                          );
+                        }
+
                         return (
                           <SwipeableWatchlistRow
                             key={item.ticker}
@@ -1481,7 +1541,7 @@ export const PortfolioScreen: React.FC = () => {
                                   <View style={styles.wlCardPriceRow}>
                                     <Text style={styles.wlCardPrice}>{price ? `$${price.toFixed(2)}` : '\u2014'}</Text>
                                     <Text style={[styles.wlCardChange, { color: isUp ? COLORS.green : COLORS.red }]}>
-                                      {isUp ? '\u25B2' : '\u25BC'}{isUp ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
+                                      {isUp ? '\u25B2' : '\u25BC'}{isUp ? '+' : ''}{changePercent.toFixed(1)}%
                                     </Text>
                                     {sector ? <Text style={styles.wlCardSector}>{sector}</Text> : null}
                                   </View>
@@ -1492,14 +1552,19 @@ export const PortfolioScreen: React.FC = () => {
                                 </View>
                               </View>
 
-                              {/* Row 2: Mini radar + Key metrics */}
-                              <View style={styles.wlCardBody}>
-                                <MiniRadarChart scores={radarScores} size={64} />
-                                <View style={styles.wlCardMetrics}>
+                              {/* Row 2: Key metrics inline */}
+                              {(peRatio != null || beta != null || fmtMCap) ? (
+                                <View style={styles.wlCardMetricsRow}>
                                   {peRatio != null && peRatio > 0 && (
                                     <View style={styles.wlCardMetricItem}>
                                       <Text style={styles.wlCardMetricLabel}>P/E</Text>
-                                      <Text style={styles.wlCardMetricValue}>{peRatio.toFixed(0)}</Text>
+                                      <Text style={styles.wlCardMetricValue}>{peRatio.toFixed(1)}</Text>
+                                    </View>
+                                  )}
+                                  {beta != null && beta > 0 && (
+                                    <View style={styles.wlCardMetricItem}>
+                                      <Text style={styles.wlCardMetricLabel}>Beta</Text>
+                                      <Text style={styles.wlCardMetricValue}>{beta.toFixed(1)}</Text>
                                     </View>
                                   )}
                                   {fmtMCap ? (
@@ -1509,19 +1574,37 @@ export const PortfolioScreen: React.FC = () => {
                                     </View>
                                   ) : null}
                                 </View>
-                              </View>
+                              ) : null}
 
-                              {/* Row 3: Key signal / driver */}
-                              {topDriver?.description && (
-                                <View style={styles.wlCardSignalRow}>
-                                  <Ionicons name="key-outline" size={12} color={COLORS.primary} />
-                                  <Text style={styles.wlCardSignalText} numberOfLines={2}>
-                                    {topDriver.description}
-                                  </Text>
+                              {/* Row 3: 52-week range bar (moved up) */}
+                              {w52Pct != null && w52Low != null && w52High != null && (
+                                <View style={styles.wlCard52w}>
+                                  <Text style={styles.wlCard52wLabel}>52W</Text>
+                                  <Text style={styles.wlCard52wVal}>${w52Low.toFixed(0)}</Text>
+                                  <View style={styles.wlCard52wBar}>
+                                    <View style={styles.wlCard52wTrack} />
+                                    <View style={[styles.wlCard52wDot, { left: `${w52Pct}%` }]} />
+                                  </View>
+                                  <Text style={styles.wlCard52wVal}>${w52High.toFixed(0)}</Text>
                                 </View>
                               )}
 
-                              {/* Row 4: Factor chips */}
+                              {/* Row 4: Radar chart + Key signal side by side */}
+                              <View style={styles.wlCardBody}>
+                                <MiniRadarChart scores={radarScores} size={120} />
+                                {topDriver?.description ? (
+                                  <View style={styles.wlCardSignalBlock}>
+                                    <View style={styles.wlCardSignalRow}>
+                                      <Ionicons name="key-outline" size={12} color={COLORS.primary} />
+                                      <Text style={styles.wlCardSignalText} numberOfLines={3}>
+                                        {topDriver.description}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ) : null}
+                              </View>
+
+                              {/* Row 5: Factor chips */}
                               {(posFactors.length > 0 || negFactors.length > 0) && (
                                 <View style={styles.wlCardFactors}>
                                   {posFactors.map((f: any, i: number) => (
@@ -1541,18 +1624,6 @@ export const PortfolioScreen: React.FC = () => {
                                 </View>
                               )}
 
-                              {/* Row 5: 52-week range bar */}
-                              {w52Pct != null && w52Low != null && w52High != null && (
-                                <View style={styles.wlCard52w}>
-                                  <Text style={styles.wlCard52wLabel}>52W</Text>
-                                  <Text style={styles.wlCard52wVal}>${w52Low.toFixed(0)}</Text>
-                                  <View style={styles.wlCard52wBar}>
-                                    <View style={styles.wlCard52wTrack} />
-                                    <View style={[styles.wlCard52wDot, { left: `${w52Pct}%` }]} />
-                                  </View>
-                                  <Text style={styles.wlCard52wVal}>${w52High.toFixed(0)}</Text>
-                                </View>
-                              )}
                             </TouchableOpacity>
                           </SwipeableWatchlistRow>
                         );
@@ -2191,17 +2262,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
+  wlCardMetricsRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
   wlCardBody: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     marginBottom: 8,
   },
-  wlCardMetrics: {
+  wlCardSignalBlock: {
     flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'center',
   },
   wlCardMetricItem: {
     alignItems: 'center',
@@ -2224,7 +2302,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(96,165,250,0.06)',
     borderRadius: 8,
     padding: 8,
-    marginBottom: 8,
   },
   wlCardSignalText: {
     color: COLORS.textSecondary,
@@ -2251,6 +2328,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginBottom: 8,
   },
   wlCard52wLabel: {
     color: COLORS.textHint,
