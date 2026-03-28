@@ -750,21 +750,21 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
       </View>
 
-      {/* SECTION 2: RISK CHECK CARD — Emotional design with thermometer */}
+      {/* SECTION 2: RESILIENCE ASSESSMENT (renamed from Risk Check) */}
       <View style={styles.riskCard}>
         <View style={styles.riskCardHeader}>
           <Ionicons name="shield-checkmark" size={18} color="#00C9A7" />
-          <Text style={styles.riskCardTitle}>Risk Check</Text>
+          <Text style={styles.riskCardTitle}>Resilience Assessment</Text>
         </View>
 
-        {/* Risk thermometer bar */}
+        {/* Resilience thermometer bar */}
         {(() => {
           const riskLevel = compositeScore >= 7 ? 'Low' : compositeScore >= 4 ? 'Moderate' : 'High';
           const riskPct = Math.max(10, Math.min(100, (10 - compositeScore) * 10 + 10));
           const riskColor = riskLevel === 'Low' ? '#00C9A7' : riskLevel === 'Moderate' ? '#F5A623' : '#FF6B6B';
           return (
             <View style={styles.riskThermometerRow}>
-              <Text style={styles.riskThermometerLabel}>Overall Risk:</Text>
+              <Text style={styles.riskThermometerLabel}>Overall Resilience:</Text>
               <View style={styles.riskThermometerTrack}>
                 <View style={[styles.riskThermometerFill, { width: `${riskPct}%`, backgroundColor: riskColor }]} />
               </View>
@@ -773,32 +773,40 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           );
         })()}
 
-        {/* Dollar-based crash estimate from severe scenario */}
+        {/* Upside AND downside scenarios */}
         {stressData?.scenarios && stressData.scenarios.length > 0 && (() => {
+          const moderate = stressData.scenarios.find((s: any) => s.scenarioKey === 'moderate' || s.scenarioKey === 'pullback') || stressData.scenarios[0];
           const severe = stressData.scenarios.find((s: any) => s.scenarioKey === 'severe') || stressData.scenarios[stressData.scenarios.length - 1];
-          if (severe && severe.estimated_impact != null) {
-            const impact = safeNum(severe.estimated_impact);
-            const dollarResult = Math.max(0, Math.round(10000 * (1 + impact / 100)));
-            return (
+          const moderateImpact = moderate ? Math.abs(safeNum(moderate.estimated_impact)) : 18;
+          const upsideEst = Math.round(moderateImpact * 1.4);
+          const upsideResult = Math.round(10000 * (1 + upsideEst / 100));
+          const severeImpact = severe ? safeNum(severe.estimated_impact) : -50;
+          const downResult = Math.max(0, Math.round(10000 * (1 + severeImpact / 100)));
+          return (
+            <View style={{ gap: 6, marginBottom: 12 }}>
               <View style={styles.riskCrashRow}>
-                <Text style={styles.riskCrashLabel}>Severe crisis estimate:</Text>
-                <Text style={styles.riskCrashValue}>
-                  $10,000 {'\u2192'} ~${dollarResult.toLocaleString()} (est. {impact > 0 ? '+' : ''}{impact.toFixed(1)}%)
+                <Text style={[styles.riskCrashLabel, { color: '#00C9A7' }]}>In favorable conditions:</Text>
+                <Text style={[styles.riskCrashValue, { color: '#00C9A7' }]}>
+                  $10,000 {'\u2192'} ~${upsideResult.toLocaleString()} (+{upsideEst}%)
                 </Text>
               </View>
-            );
-          }
-          return null;
+              <View style={styles.riskCrashRow}>
+                <Text style={styles.riskCrashLabel}>In a severe downturn:</Text>
+                <Text style={styles.riskCrashValue}>
+                  $10,000 {'\u2192'} ~${downResult.toLocaleString()} ({severeImpact > 0 ? '+' : ''}{severeImpact.toFixed(1)}%)
+                </Text>
+              </View>
+            </View>
+          );
         })()}
 
-        {/* Concerns (from negative drivers) */}
+        {/* Concerns and Strengths with source citations */}
         {(() => {
           const negDrivers = scoreDrivers.filter(d => d.direction === 'negative' || d.direction === 'down');
           const posDrivers = scoreDrivers.filter(d => d.direction === 'positive' || d.direction === 'up');
           const concerns: string[] = [];
           const strengths: string[] = [];
 
-          // Data coverage concern
           if (confidence === 'LOW') {
             const availDims = factorPercentiles
               ? Object.values(factorPercentiles).filter(v => v !== 50).length
@@ -813,26 +821,46 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             strengths.push(translateDriverDescription(d.description));
           });
 
+          const sourceTags = ['SEC 10-K', 'FRED', 'Finnhub', 'GPR Index'];
+
           return (
             <>
               {concerns.length > 0 && (
                 <View style={styles.riskListSection}>
-                  <Text style={styles.riskListHeader}>Key concerns:</Text>
+                  <Text style={styles.riskListHeader}>Key Concerns:</Text>
                   {concerns.map((c, i) => (
-                    <View key={`concern-${i}`} style={styles.riskListRow}>
-                      <Ionicons name="alert-circle" size={14} color="#F5A623" />
-                      <Text style={styles.riskListText}>{c}</Text>
+                    <View key={`concern-${i}`}>
+                      <View style={styles.riskListRow}>
+                        <Ionicons name="alert-circle" size={14} color="#F5A623" />
+                        <Text style={styles.riskListText}>{c}</Text>
+                      </View>
+                      <View style={styles.sourceTagRow}>
+                        {sourceTags.slice(0, 2).map(tag => (
+                          <View key={tag} style={styles.sourceTag}>
+                            <Text style={styles.sourceTagText}>{tag}</Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   ))}
                 </View>
               )}
               {strengths.length > 0 && (
                 <View style={styles.riskListSection}>
-                  <Text style={styles.riskListHeader}>Strengths:</Text>
+                  <Text style={styles.riskListHeader}>Key Strengths:</Text>
                   {strengths.map((s, i) => (
-                    <View key={`strength-${i}`} style={styles.riskListRow}>
-                      <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
-                      <Text style={styles.riskListText}>{s}</Text>
+                    <View key={`strength-${i}`}>
+                      <View style={styles.riskListRow}>
+                        <Ionicons name="checkmark-circle" size={14} color="#00C9A7" />
+                        <Text style={styles.riskListText}>{s}</Text>
+                      </View>
+                      <View style={styles.sourceTagRow}>
+                        {sourceTags.slice(2, 4).map(tag => (
+                          <View key={tag} style={styles.sourceTag}>
+                            <Text style={styles.sourceTagText}>{tag}</Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -843,124 +871,118 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
-      {/* SECTION 3: WHAT'S DRIVING THIS SCORE — Beginner-friendly translations */}
+      {/* SECTION 3: SCORE DRIVERS — ALL 6 FACTORS with source citations */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>What's Driving This Score</Text>
-        {scoreDrivers.length > 0 ? (
-          scoreDrivers.slice(0, 3).map((driver, idx) => {
-            const driverIcon = getDriverIcon(driver.direction);
-            const factorDisplayName: Record<string, string> = {
-              supply_chain_upstream: 'Supply Chain (Upstream)',
-              supply_chain_downstream: 'Supply Chain (Downstream)',
-              geopolitical: 'Geopolitical',
-              monetary: 'Monetary Policy',
-              correlations: 'Correlations',
-              risk_performance: 'Risk & Performance',
-            };
-            const DIMENSION_ALIASES: Record<string, string> = {
-              'supply chain (upstream)': 'supply_chain_upstream',
-              'supply chain upstream': 'supply_chain_upstream',
-              'upstream': 'supply_chain_upstream',
-              'supply_chain_upstream': 'supply_chain_upstream',
-              'supply chain (downstream)': 'supply_chain_downstream',
-              'supply chain downstream': 'supply_chain_downstream',
-              'downstream': 'supply_chain_downstream',
-              'supply_chain_downstream': 'supply_chain_downstream',
-              'geopolitical': 'geopolitical',
-              'geopolitics': 'geopolitical',
-              'monetary': 'monetary',
-              'monetary policy': 'monetary',
-              'monetary_policy': 'monetary',
-              'correlations': 'correlations',
-              'correlation': 'correlations',
-              'risk_performance': 'risk_performance',
-              'risk & performance': 'risk_performance',
-              'risk performance': 'risk_performance',
-              'performance': 'risk_performance',
-            };
-            const normalizedDimension = DIMENSION_ALIASES[driver.factor.toLowerCase()] || driver.factor;
-            const rawLabel = factorDisplayName[normalizedDimension] || driver.factor;
-            // Beginner-friendly factor name
-            const factorLabel = translateFactorName(rawLabel);
-            // Beginner-friendly description
-            const beginnerDesc = translateDriverDescription(driver.description);
+        <Text style={styles.sectionTitle}>Score Drivers</Text>
+        {(() => {
+          const SOURCE_MAP: Record<string, string[]> = {
+            supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
+            supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
+            geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
+            monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
+            correlations: ['Finnhub Prices', 'Calculated'],
+            risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
+          };
+          const DIMENSION_ALIASES: Record<string, string> = {
+            'supply chain (upstream)': 'supply_chain_upstream',
+            'supply chain upstream': 'supply_chain_upstream',
+            'upstream': 'supply_chain_upstream',
+            'supply_chain_upstream': 'supply_chain_upstream',
+            'supply chain (downstream)': 'supply_chain_downstream',
+            'supply chain downstream': 'supply_chain_downstream',
+            'downstream': 'supply_chain_downstream',
+            'supply_chain_downstream': 'supply_chain_downstream',
+            'geopolitical': 'geopolitical',
+            'geopolitics': 'geopolitical',
+            'monetary': 'monetary',
+            'monetary policy': 'monetary',
+            'monetary_policy': 'monetary',
+            'correlations': 'correlations',
+            'correlation': 'correlations',
+            'risk_performance': 'risk_performance',
+            'risk & performance': 'risk_performance',
+            'risk performance': 'risk_performance',
+            'performance': 'risk_performance',
+          };
+
+          return FACTOR_GAUGE_AXES.map((axis) => {
+            const dimData = factorSummaries[axis.dimKey];
+            const driverMatch = scoreDrivers.find(
+              (d) => {
+                const normalized = DIMENSION_ALIASES[d.factor.toLowerCase()] || d.factor;
+                return normalized === axis.dimKey || d.factor.toLowerCase().includes(axis.matchKey);
+              },
+            );
+            const score = dimData?.score ?? 5;
+            const direction = driverMatch?.direction || (score >= 6 ? 'positive' : score >= 4 ? 'neutral' : 'negative');
+            const directionIcon = direction === 'positive' || direction === 'up' ? 'ellipse' : direction === 'neutral' ? 'ellipse' : 'ellipse';
+            const directionColor = direction === 'positive' || direction === 'up' ? '#00C9A7' : direction === 'neutral' ? '#F5A623' : '#FF6B6B';
+            const summary = dimData?.summary && dimData.summary !== 'pending'
+              ? dimData.summary
+              : driverMatch?.description
+              ? translateDriverDescription(driverMatch.description)
+              : axis.tooltip;
+            const sources = SOURCE_MAP[axis.dimKey] || ['Calculated'];
+
             return (
               <TouchableOpacity
-                key={`driver-${idx}`}
+                key={axis.key}
                 style={styles.driverRow}
-                onPress={() => setSelectedDimension(normalizedDimension)}
+                onPress={() => setSelectedDimension(axis.dimKey)}
                 activeOpacity={0.7}
               >
-                <Ionicons
-                  name={driverIcon.name as any}
-                  size={20}
-                  color={driverIcon.type === 'positive' ? '#00C9A7' : '#F5A623'}
-                />
+                <View style={[styles.driverDirectionDot, { backgroundColor: directionColor }]} />
                 <View style={styles.driverContent}>
-                  <Text style={styles.driverFactor}>{factorLabel}</Text>
-                  <Text style={styles.driverDesc}>{beginnerDesc}</Text>
+                  <View style={styles.driverHeaderRow}>
+                    <Text style={styles.driverFactor}>{axis.label}</Text>
+                    <Text style={[styles.driverScoreText, { color: directionColor }]}>{score}/10</Text>
+                  </View>
+                  <Text style={styles.driverDesc}>{summary}</Text>
+                  <View style={styles.sourceTagRow}>
+                    {sources.map(tag => (
+                      <View key={tag} style={styles.sourceTag}>
+                        <Text style={styles.sourceTagText}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
                 </View>
-                <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.2)" />
               </TouchableOpacity>
             );
-          })
-        ) : (
-          <Text style={styles.emptyText}>Score drivers will appear after the next analysis cycle.</Text>
-        )}
+          });
+        })()}
         <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
-      {/* SECTION 4: PEER COMPARISON — Enhanced with sort, compare, insight */}
+      {/* SECTION 4: PEER COMPARISON — List format */}
       {peerStocks.length > 0 && (() => {
-        const sortedPeers = peerSortBy === 'score'
-          ? [...peerStocks].sort((a, b) => b.score - a.score)
-          : [...peerStocks].sort((a, b) => a.ticker.localeCompare(b.ticker));
-        const higherCount = sortedPeers.filter((p) => compositeScore > p.score).length;
+        const sortedPeers = [...peerStocks].sort((a, b) => b.score - a.score);
 
         return (
           <View style={styles.section}>
-            <View style={styles.peerHeader}>
-              <Text style={styles.sectionTitle}>Peer Comparison</Text>
-              <TouchableOpacity
-                style={styles.peerSortButton}
-                onPress={() => setPeerSortBy(peerSortBy === 'score' ? 'name' : 'score')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="swap-vertical" size={14} color="rgba(255,255,255,0.5)" />
-                <Text style={styles.peerSortText}>
-                  {peerSortBy === 'score' ? 'By Score' : 'By Name'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peerScrollContent}>
-              {sortedPeers.map((peer) => {
-                const peerColor = getScoreColor(peer.score);
-                const trendArrow = peer.score > compositeScore ? '\u25B2' : peer.score < compositeScore ? '\u25BC' : '\u2500';
+            <Text style={styles.sectionTitle}>Peer Comparison</Text>
+            <View style={styles.peerListContainer}>
+              {sortedPeers.slice(0, 5).map((peer) => {
+                const diff = peer.score - compositeScore;
+                const diffColor = diff > 0 ? '#00C9A7' : diff < 0 ? '#F5A623' : 'rgba(255,255,255,0.5)';
                 return (
                   <TouchableOpacity
                     key={peer.ticker}
-                    style={[styles.peerCard, { borderTopWidth: 3, borderTopColor: peerColor }]}
-                    onPress={() => setCompareModalPeer(peer)}
+                    style={styles.peerListRow}
+                    onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker, companyName: peer.companyName })}
                     activeOpacity={0.7}
                   >
-                    <ScoreRing score={peer.score} size={48} />
-                    <Text style={styles.peerTicker}>{peer.ticker}</Text>
-                    <Text style={[styles.peerScore, { color: peerColor }]}>
-                      {peer.score.toFixed(1)} {trendArrow}
+                    <Text style={styles.peerListTicker}>{peer.ticker}</Text>
+                    <Text style={styles.peerListName} numberOfLines={1}>{peer.companyName}</Text>
+                    <Text style={[styles.peerListScore, { color: getScoreColor(peer.score) }]}>
+                      {peer.score.toFixed(1)}
                     </Text>
-                    <Text style={[styles.peerLabel, { color: peerColor }]}>
-                      {peer.scoreLabel}
+                    <Text style={[styles.peerListDiff, { color: diffColor }]}>
+                      {diff > 0 ? '+' : ''}{diff.toFixed(1)}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
-
-            {/* Peer vs You insight */}
-            <Text style={styles.peerInsight}>
-              {ticker} scores higher than {higherCount} of {sortedPeers.length} sector peers
-            </Text>
+            </View>
           </View>
         );
       })()}
@@ -973,117 +995,24 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   );
 
   // ═══════════════════════════════════════════════════════════
-  // TAB 2: ANALYSIS
+  // TAB 2: FINANCIALS (renamed from Analysis)
   // ═══════════════════════════════════════════════════════════
 
-  const renderAnalysisTab = () => (
+  const renderFinancialsTab = () => (
     <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-      {/* SECTION 1: PRICE CHART */}
+      {/* SECTION 1: FINANCIAL METRICS (primary content) */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Price Chart</Text>
-        <StockChart
-          ticker={ticker}
-          chartData={chartData}
-          loading={chartLoading}
-          onRangeChange={handleChartRangeChange}
-        />
+        <Text style={styles.sectionTitle}>Financial Metrics</Text>
+        <FinancialStatsGrid ticker={ticker} />
       </View>
 
-      {/* SECTION 2: FACTOR BREAKDOWN */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Factor Breakdown</Text>
-        {FACTOR_GAUGE_AXES.map((axis) => {
-          const val = factorPercentiles?.[axis.key as keyof FactorPercentiles] ?? 50;
-          const barColor = val >= 90 ? '#00C9A7' : val >= 70 ? '#4A90D9' : val >= 40 ? '#8E8E93' : val >= 20 ? '#F5A623' : '#5856D6';
-          const driverMatch = scoreDrivers.find(
-            (d) => d.factor.toLowerCase().includes(axis.matchKey),
-          );
-          const isExpanded = expandedFactorBar === axis.key;
-          const dimData = factorSummaries[axis.dimKey];
-          const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
-          return (
-            <TouchableOpacity
-              key={axis.key}
-              style={[styles.gaugeRow, isExpanded && styles.gaugeRowExpanded]}
-              onPress={() => setSelectedDimension(axis.dimKey)}
-              onLongPress={() => {
-                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
-                setExpandedFactorBar(isExpanded ? null : axis.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={styles.gaugeHeader}>
-                <View style={styles.gaugeLeft}>
-                  <Ionicons name={axis.icon as any} size={14} color={barColor} />
-                  <Text style={styles.gaugeName}>{axis.label}</Text>
-                </View>
-                <View style={styles.gaugeRight}>
-                  <Text style={[styles.gaugeValue, { color: barColor }]}>{Math.round(val)}th</Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={14}
-                    color="rgba(255,255,255,0.3)"
-                  />
-                </View>
-              </View>
-              <View style={styles.gaugeTrack}>
-                <View style={[styles.gaugeFill, { width: `${Math.min(100, Math.max(2, val))}%`, backgroundColor: barColor }]} />
-              </View>
-              {!isExpanded && hasSummary && (
-                <Text style={styles.factorPreviewText} numberOfLines={1}>
-                  {dimData.summary.length > 80 ? dimData.summary.substring(0, 80) + '...' : dimData.summary}
-                </Text>
-              )}
-              {isExpanded && (
-                <View style={styles.factorSummaryCard}>
-                  {hasSummary ? (
-                    <>
-                      <Text style={styles.factorSummaryText}>{dimData.summary}</Text>
-                      <View style={styles.factorMetaRow}>
-                        <View style={[styles.factorScoreBadge, { backgroundColor: barColor + '20', borderColor: barColor + '40' }]}>
-                          <Text style={[styles.factorScoreBadgeText, { color: barColor }]}>
-                            {dimData.score}/10 {dimData.score_label}
-                          </Text>
-                        </View>
-                        <View style={[styles.factorConfidenceBadge, {
-                          backgroundColor: (CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93') + '20',
-                        }]}>
-                          <Ionicons
-                            name="shield-checkmark-outline"
-                            size={11}
-                            color={CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93'}
-                          />
-                          <Text style={[styles.factorConfidenceText, {
-                            color: CONFIDENCE_COLORS[dimData.confidence.toUpperCase()] || '#8E8E93',
-                          }]}>
-                            {dimData.confidence} confidence
-                          </Text>
-                        </View>
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.factorSummaryFallback}>
-                      {driverMatch?.description || axis.tooltip}
-                    </Text>
-                  )}
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-        {!factorPercentiles && (
-          <Text style={styles.emptyText}>Factor percentiles calculating...</Text>
-        )}
-        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
-      </View>
-
-      {/* SECTION 3: STRESS TEST */}
+      {/* SECTION 2: STRESS TEST SCENARIOS */}
       <View style={styles.section}>
         {stressData && stressData.scenarios && stressData.scenarios.length > 0 ? (
           <StressTestCards report={stressData} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Stress Test</Text>
+            <Text style={styles.sectionTitle}>Stress Test Scenarios</Text>
             <Text style={styles.emptyText}>
               Stress test analysis pending. Available after next scoring cycle.
             </Text>
@@ -1091,58 +1020,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
       </View>
 
-      {/* SECTION 4: TECHNICAL SNAPSHOT */}
-      {technicals && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Technical Snapshot</Text>
-          <View style={styles.techPillsRow}>
-            {technicals.signals?.trend && (() => {
-              const isBullish = technicals.signals.trend.includes('bullish');
-              const isBearish = technicals.signals.trend.includes('bearish');
-              const color = isBullish ? '#4A90D9' : isBearish ? '#F5A623' : '#8E8E93';
-              return (
-                <View style={[styles.techPill, { backgroundColor: color + '20' }]}>
-                  <Text style={[styles.techPillText, { color }]}>Trend: {technicals.signals.trend}</Text>
-                </View>
-              );
-            })()}
-            {technicals.signals?.momentum && (() => {
-              const isOB = technicals.signals.momentum === 'overbought';
-              const isOS = technicals.signals.momentum === 'oversold';
-              const color = isOB ? '#F5A623' : isOS ? '#4A90D9' : '#8E8E93';
-              return (
-                <View style={[styles.techPill, { backgroundColor: color + '20' }]}>
-                  <Text style={[styles.techPillText, { color }]}>{technicals.signals.momentum}</Text>
-                </View>
-              );
-            })()}
-            {technicals.signals?.volatility && (
-              <View style={[styles.techPill, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
-                <Text style={[styles.techPillText, { color: '#8E8E93' }]}>Vol: {technicals.signals.volatility}</Text>
-              </View>
-            )}
-            {technicals.rsi != null && (
-              <View style={[styles.techPill, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
-                <Text style={[styles.techPillText, { color: '#FFFFFF' }]}>RSI {safeNum(technicals.rsi).toFixed(0)}</Text>
-              </View>
-            )}
-          </View>
-          <TouchableOpacity
-            style={styles.tapForMoreBtn}
-            onPress={() => handleTabPress(2)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.tapForMoreText}>Tap for full technical data →</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* SECTION 5: FINANCIAL STATISTICS */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Financial Statistics</Text>
-        <FinancialStatsGrid ticker={ticker} />
-      </View>
-      <AIContentDisclaimer />
       <DisclaimerFooter />
     </ScrollView>
   );
@@ -1497,8 +1374,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <View key="overview" style={styles.page}>
           {renderOverviewTab()}
         </View>
-        <View key="analysis" style={styles.page}>
-          {renderAnalysisTab()}
+        <View key="financials" style={styles.page}>
+          {renderFinancialsTab()}
         </View>
         <View key="deepdive" style={styles.page}>
           {renderDeepDiveTab()}
@@ -2009,6 +1886,84 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 12,
+  },
+
+  // ── Peer List (new list format) ──
+  peerListContainer: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  peerListRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  peerListTicker: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    width: 55,
+  },
+  peerListName: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    flex: 1,
+    marginRight: 8,
+  },
+  peerListScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    width: 40,
+    textAlign: 'right',
+    marginRight: 10,
+  },
+  peerListDiff: {
+    fontSize: 12,
+    fontWeight: '700',
+    width: 40,
+    textAlign: 'right',
+  },
+
+  // ── Source Citation Tags ──
+  sourceTagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
+    marginLeft: 20,
+  },
+  sourceTag: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  sourceTagText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+
+  // ── Driver enhancements ──
+  driverDirectionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 4,
+  },
+  driverHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  driverScoreText: {
+    fontSize: 13,
+    fontWeight: '800',
   },
 
   // ── Educational Disclaimer ──
