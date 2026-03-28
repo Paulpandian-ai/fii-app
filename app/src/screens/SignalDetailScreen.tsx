@@ -85,7 +85,7 @@ const COLLAPSE_ANIMATION = LayoutAnimation.create(
   LayoutAnimation.Properties.opacity,
 );
 
-const TAB_NAMES = ['Overview', 'Analysis', 'Deep Dive'] as const;
+const TAB_NAMES = ['Overview', 'Financials', 'Factor Scoring'] as const;
 
 const FACTOR_NAMES: Record<string, string> = {
   A1: 'Operational Disruption', A2: 'Supplier Earnings Miss', A3: 'Lead Time Extensions',

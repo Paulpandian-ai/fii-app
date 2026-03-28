@@ -146,12 +146,12 @@ export const RadarScreen: React.FC = () => {
             {item.companyName}
           </Text>
         </View>
-        <View style={styles.searchResultMid}>
-          <Text style={styles.searchResultSector} numberOfLines={1}>
-            {item.sector}
-          </Text>
+        <View style={styles.searchResultRight}>
+          {item.price > 0 && (
+            <Text style={styles.searchResultPrice}>${item.price.toFixed(2)}</Text>
+          )}
+          <ScoreBadge score={item.aiScore} label={item.scoreLabel} />
         </View>
-        <ScoreBadge score={item.aiScore} label={item.scoreLabel} />
       </TouchableOpacity>
     ),
     [goToStock],
@@ -190,6 +190,7 @@ export const RadarScreen: React.FC = () => {
             onChangeText={setQuery}
             autoCapitalize="characters"
             autoCorrect={false}
+            clearButtonMode="while-editing"
             returnKeyType="search"
           />
           {query.length > 0 && (
@@ -410,9 +411,15 @@ const styles = StyleSheet.create({
   searchResultLeft: {
     flex: 1,
   },
-  searchResultMid: {
-    width: 90,
-    marginRight: 8,
+  searchResultRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchResultPrice: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '600',
   },
   searchResultTicker: {
     color: '#FFFFFF',
@@ -423,11 +430,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
     marginTop: 2,
-  },
-  searchResultSector: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    textAlign: 'right',
   },
 
   // Score badge
