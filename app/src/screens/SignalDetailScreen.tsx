@@ -1025,310 +1025,183 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   );
 
   // ═══════════════════════════════════════════════════════════
-  // TAB 3: DEEP DIVE
+  // TAB 3: FACTOR SCORING (renamed from Deep Dive)
   // ═══════════════════════════════════════════════════════════
 
-  const renderDeepDiveTab = () => (
+  const renderFactorScoringTab = () => (
     <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-      {/* SECTION 1: ALL SUB-FACTORS */}
-      {categories.length > 0 && (
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.collapsibleHeader}
-            onPress={() => {
-              LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
-              setFactorDeepDiveExpanded(!factorDeepDiveExpanded);
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={styles.collapsibleHeaderLeft}>
-              <Ionicons name="layers-outline" size={20} color="#60A5FA" />
-              <Text style={styles.collapsibleTitle}>All Sub-Factors</Text>
-            </View>
-            <Ionicons
-              name={factorDeepDiveExpanded ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color="rgba(255,255,255,0.4)"
-            />
-          </TouchableOpacity>
-
-          {factorDeepDiveExpanded && (
-            <View>
-              {/* Simple / Advanced toggle */}
-              <View style={styles.toggleRow}>
-                <TouchableOpacity
-                  style={[styles.toggleBtn, factorDeepDiveMode === 'simple' && styles.toggleBtnActive]}
-                  onPress={() => setFactorDeepDiveMode('simple')}
-                >
-                  <Text style={[styles.toggleText, factorDeepDiveMode === 'simple' && styles.toggleTextActive]}>
-                    Simple
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.toggleBtn, factorDeepDiveMode === 'advanced' && styles.toggleBtnActive]}
-                  onPress={() => setFactorDeepDiveMode('advanced')}
-                >
-                  <Text style={[styles.toggleText, factorDeepDiveMode === 'advanced' && styles.toggleTextActive]}>
-                    Advanced
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {categories.map((cat) => (
-                <View key={`deep-${cat.id}`} style={styles.deepDiveGroup}>
-                  <Text style={styles.deepDiveGroupTitle}>
-                    {cat.id}. {cat.name}
-                  </Text>
-                  {cat.subFactors.map((sf) => {
-                    const sfVal = safeNum(sf.score);
-                    const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
-                    const sfColor = sfVal >= 1 ? '#00C9A7' : sfVal >= 0 ? '#4A90D9' : sfVal >= -1 ? '#8E8E93' : '#F5A623';
-                    return (
-                      <View key={sf.id} style={styles.deepDiveSubRow}>
-                        <Text style={styles.deepDiveSubName} numberOfLines={1}>
-                          {sf.id} {sf.name}
-                        </Text>
-                        <View style={styles.deepDiveSubTrack}>
-                          <View style={[styles.deepDiveSubFill, { width: `${barPct}%`, backgroundColor: sfColor }]} />
-                        </View>
-                        <Text style={[styles.deepDiveSubValue, { color: sfColor }]}>
-                          {factorDeepDiveMode === 'advanced'
-                            ? sfVal.toFixed(2)
-                            : `${Math.round(barPct)}%`}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* SECTION 2: FULL TECHNICAL DATA */}
-      {technicals && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Full Technical Data</Text>
-          <View style={styles.dataTable}>
-            {[
-              { label: 'RSI (14)', value: technicals.rsi != null ? safeNum(technicals.rsi).toFixed(1) : 'N/A' },
-              { label: 'MACD', value: technicals.macd?.value != null ? safeNum(technicals.macd.value).toFixed(2) : 'N/A' },
-              { label: 'MACD Signal', value: technicals.macd?.signal != null ? safeNum(technicals.macd.signal).toFixed(2) : 'N/A' },
-              { label: 'SMA 20', value: technicals.sma20 != null ? `$${safeNum(technicals.sma20).toFixed(2)}` : 'N/A' },
-              { label: 'SMA 50', value: technicals.sma50 != null ? `$${safeNum(technicals.sma50).toFixed(2)}` : 'N/A' },
-              { label: 'SMA 200', value: technicals.sma200 != null ? `$${safeNum(technicals.sma200).toFixed(2)}` : 'N/A' },
-              { label: 'ATR (14)', value: technicals.atr != null ? safeNum(technicals.atr).toFixed(2) : 'N/A' },
-              { label: 'Bollinger Upper', value: technicals.bollingerBands?.upper != null ? `$${safeNum(technicals.bollingerBands.upper).toFixed(2)}` : 'N/A' },
-              { label: 'Bollinger Lower', value: technicals.bollingerBands?.lower != null ? `$${safeNum(technicals.bollingerBands.lower).toFixed(2)}` : 'N/A' },
-            ].map((row) => (
-              <View key={row.label} style={styles.dataRow}>
-                <Text style={styles.dataLabel}>{row.label}</Text>
-                <Text style={styles.dataValue}>{row.value}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* SECTION 3: ALTERNATIVE DATA INSIGHTS */}
-      {altData && (altData.available ?? []).length > 0 && (
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.altDataCard}
-            onPress={() => navigation.push('AlternativeData', { ticker })}
-            activeOpacity={0.7}
-          >
-            <View style={styles.altDataLeft}>
-              <View style={styles.altDataIcons}>
-                {(altData.available ?? []).includes('patents') && (
-                  <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
-                )}
-                {(altData.available ?? []).includes('contracts') && (
-                  <Ionicons name="business-outline" size={16} color="#60A5FA" />
-                )}
-                {(altData.available ?? []).includes('fda') && (
-                  <Ionicons name="medical-outline" size={16} color="#8B5CF6" />
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.altDataTitle}>Alternative Data Insights</Text>
-                <Text style={styles.altDataInsight} numberOfLines={1}>
-                  {altData.patents && altData.patents.score > 0
-                    ? `Patent filings ${altData.patents.velocity >= 0 ? 'up' : 'down'} ${Math.abs(safeNum(altData.patents.velocity)).toFixed(0)}% YoY`
-                    : altData.fda && altData.fda.score > 0
-                    ? `${altData.fda.pdufaWithin90Days} PDUFA date${altData.fda.pdufaWithin90Days !== 1 ? 's' : ''} within 90 days`
-                    : altData.contracts && altData.contracts.score > 0
-                    ? `Gov contracts ${altData.contracts.awardGrowth >= 0 ? 'up' : 'down'} ${Math.abs(safeNum(altData.contracts.awardGrowth)).toFixed(0)}% YoY`
-                    : `${altData.available.length} alt data source${altData.available.length > 1 ? 's' : ''} available`}
-                </Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* SECTION 4: FACTOR DEEP DIVE ACCORDIONS */}
-      {categories.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Factor Breakdown</Text>
-          {categories.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              activeOpacity={0.8}
-              onPress={() => {
-                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
-                setExpandedCategory(expandedCategory === cat.id ? null : cat.id);
-              }}
-            >
-              <View style={styles.categoryCard}>
-                <View style={styles.categoryHeader}>
-                  <View style={styles.categoryLeft}>
-                    <Ionicons name={cat.icon as any} size={20} color="#60A5FA" />
-                    <Text style={styles.categoryName}>{cat.name}</Text>
-                  </View>
-                  <View style={styles.categoryRight}>
-                    <Text style={[styles.categoryScore, {
-                      color: cat.avgScore >= 0 ? '#00C9A7' : '#F5A623',
-                    }]}>
-                      {cat.avgScore >= 0 ? '+' : ''}{cat.avgScore.toFixed(1)}
-                    </Text>
-                    <Ionicons
-                      name={expandedCategory === cat.id ? 'chevron-up' : 'chevron-down'}
-                      size={18}
-                      color="rgba(255,255,255,0.4)"
-                      style={{ marginLeft: 8 }}
-                    />
-                  </View>
-                </View>
-                {expandedCategory === cat.id && (
-                  <View style={styles.subFactors}>
-                    {cat.subFactors.map((sf) => {
-                      const sfScore = safeNum(sf.score);
-                      const sfColor = sfScore >= 0 ? '#00C9A7' : '#F5A623';
-                      const sign = sfScore >= 0 ? '+' : '';
-                      return (
-                        <View key={sf.id} style={styles.subFactorRow}>
-                          <View style={styles.subFactorHeader}>
-                            <Text style={styles.subFactorId}>{sf.id}</Text>
-                            <Text style={styles.subFactorName}>{sf.name}</Text>
-                            <Text style={[styles.subFactorScore, { color: sfColor }]}>
-                              {sign}{sfScore.toFixed(1)}
-                            </Text>
-                          </View>
-                          <Text style={styles.subFactorReason}>{sf.reason}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* SECTION 5: FINANCIAL METRICS */}
-      {financials && Object.keys(financials).length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Financial Metrics</Text>
-          {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([catKey, catMeta]) => {
-            const catData = financials[catKey];
-            if (!catData || typeof catData !== 'object') return null;
-            // Filter out null values
-            const metrics = Object.entries(catData).filter(
-              ([, m]) => m && m.value != null,
-            );
-            if (metrics.length === 0) return null;
-            const isExpanded = expandedFinancialCats.has(catKey);
-            return (
-              <TouchableOpacity
-                key={catKey}
-                activeOpacity={0.8}
-                onPress={() => {
-                  LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
-                  setExpandedFinancialCats((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(catKey)) next.delete(catKey);
-                    else next.add(catKey);
-                    return next;
-                  });
-                }}
-              >
-                <View style={styles.finCategoryCard}>
-                  <View style={styles.finCategoryHeader}>
-                    <View style={styles.finCategoryLeft}>
-                      <Ionicons name={catMeta.icon as any} size={18} color="#60A5FA" />
-                      <Text style={styles.finCategoryName}>{catMeta.label}</Text>
-                      <View style={styles.finCategoryBadge}>
-                        <Text style={styles.finCategoryBadgeText}>{metrics.length}</Text>
-                      </View>
-                    </View>
-                    <Ionicons
-                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={18}
-                      color="rgba(255,255,255,0.4)"
-                    />
-                  </View>
-                  {isExpanded && (
-                    <View style={styles.finMetricsList}>
-                      {metrics.map(([metricKey, metric]) => (
-                        <View key={metricKey} style={styles.finMetricRow}>
-                          <Text style={styles.finMetricName} numberOfLines={1}>
-                            {METRIC_LABELS[metricKey] || metricKey.replace(/_/g, ' ')}
-                          </Text>
-                          <View style={styles.finMetricRight}>
-                            <Text style={styles.finMetricValue}>
-                              {formatMetricValue(metricKey, metric.value)}
-                            </Text>
-                            {metric.source ? (
-                              <View style={styles.finSourceBadge}>
-                                <Text style={styles.finSourceText}>{metric.source}</Text>
-                              </View>
-                            ) : null}
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-
-      {/* SECTION 6: COMMUNITY */}
+      {/* SECTION 1: ALL 18 SUB-FACTORS — Unified Score View */}
       <View style={styles.section}>
-        <View style={styles.sectionTitleRow}>
-          <Text style={styles.sectionTitle}>Community</Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Discussion', { ticker })}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.viewAllLink}>View All</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity
-          style={styles.communityCard}
-          onPress={() => navigation.navigate('Discussion', { ticker })}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chatbubbles-outline" size={24} color="#60A5FA" />
-          <View style={styles.communityContent}>
-            <Text style={styles.communityTitle}>Join the Discussion</Text>
-            <Text style={styles.communitySubtitle}>
-              Share your analysis and see what others think about {ticker}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
-        </TouchableOpacity>
+        <Text style={styles.sectionTitle}>All Sub-Factors</Text>
+        {categories.length > 0 ? (
+          categories.map((cat) => {
+            const dimKey = CATEGORIES.find(c => c.id === cat.id)?.id;
+            const factorAxisMap: Record<string, string> = { A: 'supply_chain_upstream', B: 'supply_chain_downstream', C: 'geopolitical', D: 'monetary', E: 'correlations', F: 'risk_performance' };
+            const dimData = factorSummaries[factorAxisMap[cat.id] || ''];
+            const parentScore = dimData?.score ?? 5;
+
+            return (
+              <View key={`fscore-${cat.id}`} style={styles.fsGroupCard}>
+                {/* Parent factor header */}
+                <View style={styles.fsGroupHeader}>
+                  <Ionicons name={cat.icon as any} size={16} color="#60A5FA" />
+                  <Text style={styles.fsGroupName}>{cat.name}</Text>
+                  <Text style={[styles.fsGroupScore, { color: parentScore >= 6 ? '#00C9A7' : parentScore >= 4 ? '#F5A623' : '#FF6B6B' }]}>
+                    {parentScore}/10
+                  </Text>
+                </View>
+
+                {/* Sub-factors */}
+                {cat.subFactors.map((sf) => {
+                  const sfVal = safeNum(sf.score);
+                  const hasSubScore = sf.score !== 0 || (analysis?.factorDetails?.[sf.id]?.score != null);
+                  const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
+                  const sfColor = sfVal > 0.5 ? '#00C9A7' : sfVal >= -0.5 ? '#F5A623' : '#FF6B6B';
+                  const confLabel = Math.abs(sfVal) > 1 ? 'High' : Math.abs(sfVal) > 0.3 ? 'Med' : 'Low';
+                  const dirLabel = sfVal > 0.5 ? 'Positive' : sfVal >= -0.5 ? 'Neutral' : 'Negative';
+
+                  return (
+                    <View key={sf.id} style={styles.fsSubRow}>
+                      <View style={styles.fsSubHeader}>
+                        <Text style={styles.fsSubId}>{sf.id}</Text>
+                        <Text style={styles.fsSubName}>{sf.name}</Text>
+                      </View>
+                      <View style={styles.fsSubScoreRow}>
+                        <Text style={[styles.fsSubScoreVal, { color: sfColor }]}>
+                          {sfVal >= 0 ? '+' : ''}{sfVal.toFixed(2)}
+                        </Text>
+                        <View style={styles.fsBarTrack}>
+                          <View style={[styles.fsBarFill, { width: `${barPct}%`, backgroundColor: sfColor }]} />
+                        </View>
+                        <Text style={[styles.fsSubLabel, { color: sfColor }]}>{dirLabel}</Text>
+                        <Text style={styles.fsSubConf}>{confLabel}</Text>
+                      </View>
+                      {!hasSubScore && (
+                        <Text style={styles.fsSubNote}>Based on overall factor assessment</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.emptyText}>Factor data loading...</Text>
+        )}
       </View>
 
-      <AIContentDisclaimer />
+      {/* SECTION 2: FACTOR BREAKDOWN — Expandable Commentary Cards */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Factor Commentary</Text>
+        {FACTOR_GAUGE_AXES.map((axis) => {
+          const dimData = factorSummaries[axis.dimKey];
+          const score = dimData?.score ?? 5;
+          const scoreLabel2 = dimData?.score_label || (score >= 7 ? 'Strong' : score >= 5 ? 'Moderate' : 'Weak');
+          const isExpanded = expandedCategory === axis.key;
+          const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
+          const scoreColor = score >= 7 ? '#00C9A7' : score >= 5 ? '#F5A623' : '#FF6B6B';
+
+          const SOURCE_MAP: Record<string, string[]> = {
+            supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
+            supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
+            geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
+            monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
+            correlations: ['Finnhub Prices', 'Calculated'],
+            risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
+          };
+
+          return (
+            <TouchableOpacity
+              key={`commentary-${axis.key}`}
+              style={styles.fsCommentaryCard}
+              onPress={() => {
+                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
+                setExpandedCategory(isExpanded ? null : axis.key);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.fsCommentaryHeader}>
+                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={16} color="rgba(255,255,255,0.5)" />
+                <Text style={styles.fsCommentaryName}>{axis.label}</Text>
+                <Text style={[styles.fsCommentaryScore, { color: scoreColor }]}>{score}/10</Text>
+                <Text style={[styles.fsCommentaryLabel, { color: scoreColor }]}>{scoreLabel2}</Text>
+              </View>
+              {isExpanded && (
+                <View style={styles.fsCommentaryBody}>
+                  {hasSummary ? (
+                    <>
+                      <Text style={styles.fsCommentaryTitle}>Key Findings:</Text>
+                      {dimData.summary.split('. ').filter(Boolean).slice(0, 3).map((finding: string, i: number) => (
+                        <View key={i} style={styles.fsCommentaryFinding}>
+                          <Text style={styles.fsCommentaryBullet}>{'\u2022'}</Text>
+                          <Text style={styles.fsCommentaryText}>
+                            {finding.endsWith('.') ? finding : `${finding}.`}
+                          </Text>
+                        </View>
+                      ))}
+                      <View style={styles.sourceTagRow}>
+                        {(SOURCE_MAP[axis.dimKey] || ['Calculated']).map(tag => (
+                          <View key={tag} style={styles.sourceTag}>
+                            <Text style={styles.sourceTagText}>{tag}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.fsCommentaryText}>{axis.tooltip}</Text>
+                  )}
+                  <View style={styles.fsCommentaryMeta}>
+                    <Text style={styles.fsCommentaryConf}>Confidence: {dimData?.confidence || 'Medium'}</Text>
+                    <Text style={styles.fsCommentaryDate}>Data as of: March 2026</Text>
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* SECTION 3: ALTERNATIVE DATA INSIGHTS */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Alternative Data</Text>
+        {altData && (altData.available ?? []).length > 0 ? (
+          <View style={styles.fsAltDataCard}>
+            {(altData.available ?? []).includes('patents') && altData.patents && (
+              <View style={styles.fsAltDataRow}>
+                <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
+                <View style={styles.fsAltDataContent}>
+                  <Text style={styles.fsAltDataLabel}>Patents: {altData.patents.total_filings ?? 'N/A'} filed, {altData.patents.velocity >= 0 ? '+' : ''}{safeNum(altData.patents.velocity).toFixed(0)}% YoY</Text>
+                  {altData.patents.key_areas && (
+                    <Text style={styles.fsAltDataSub}>Key areas: {altData.patents.key_areas.slice(0, 3).join(', ')}</Text>
+                  )}
+                </View>
+              </View>
+            )}
+            {(altData.available ?? []).includes('contracts') && altData.contracts && (
+              <View style={styles.fsAltDataRow}>
+                <Ionicons name="business-outline" size={16} color="#60A5FA" />
+                <View style={styles.fsAltDataContent}>
+                  <Text style={styles.fsAltDataLabel}>Gov Contracts: {altData.contracts.awardGrowth >= 0 ? '+' : ''}{safeNum(altData.contracts.awardGrowth).toFixed(0)}% YoY</Text>
+                </View>
+              </View>
+            )}
+            {(altData.available ?? []).includes('fda') && altData.fda && (
+              <View style={styles.fsAltDataRow}>
+                <Ionicons name="medical-outline" size={16} color="#8B5CF6" />
+                <View style={styles.fsAltDataContent}>
+                  <Text style={styles.fsAltDataLabel}>FDA: {altData.fda.pdufaWithin90Days} PDUFA date{altData.fda.pdufaWithin90Days !== 1 ? 's' : ''} within 90 days</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.fsAltDataCard}>
+            <Text style={styles.fsAltDataPlaceholder}>Alternative data coming soon for {ticker}</Text>
+          </View>
+        )}
+      </View>
+
       <DisclaimerFooter />
-      {/* Bottom padding */}
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -1377,8 +1250,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <View key="financials" style={styles.page}>
           {renderFinancialsTab()}
         </View>
-        <View key="deepdive" style={styles.page}>
-          {renderDeepDiveTab()}
+        <View key="factorscoring" style={styles.page}>
+          {renderFactorScoringTab()}
         </View>
       </PagerView>
 
@@ -2299,34 +2172,211 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // ── Deep Dive: Alt Data Card ──
-  altDataCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+  // ── Factor Scoring Tab ──
+  fsGroupCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: 12,
     padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  altDataLeft: {
+  fsGroupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  fsGroupName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fsGroupScore: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  fsSubRow: {
+    marginBottom: 10,
+    paddingLeft: 4,
+  },
+  fsSubHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  fsSubId: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    fontWeight: '700',
+    width: 22,
+  },
+  fsSubName: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '500',
     flex: 1,
   },
-  altDataIcons: {
+  fsSubScoreRow: {
     flexDirection: 'row',
-    gap: 4,
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 28,
   },
-  altDataTitle: {
+  fsSubScoreVal: {
+    fontSize: 11,
+    fontWeight: '700',
+    width: 42,
+    textAlign: 'right',
+  },
+  fsBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  fsBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  fsSubLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    width: 50,
+    textAlign: 'center',
+  },
+  fsSubConf: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 9,
+    fontWeight: '600',
+    width: 26,
+    textAlign: 'right',
+  },
+  fsSubNote: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 9,
+    fontStyle: 'italic',
+    paddingLeft: 28,
+    marginTop: 2,
+  },
+
+  // ── Factor Commentary Cards ──
+  fsCommentaryCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  fsCommentaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fsCommentaryName: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+    flex: 1,
   },
-  altDataInsight: {
-    color: 'rgba(255,255,255,0.45)',
+  fsCommentaryScore: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  fsCommentaryLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    width: 60,
+    textAlign: 'right',
+  },
+  fsCommentaryBody: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  fsCommentaryTitle: {
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  fsCommentaryFinding: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 6,
+  },
+  fsCommentaryBullet: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  fsCommentaryText: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
+  },
+  fsCommentaryMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.04)',
+  },
+  fsCommentaryConf: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  fsCommentaryDate: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 10,
+  },
+
+  // ── Alt Data (Factor Scoring tab) ──
+  fsAltDataCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  fsAltDataRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 12,
+  },
+  fsAltDataContent: {
+    flex: 1,
+  },
+  fsAltDataLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  fsAltDataSub: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
     marginTop: 2,
+  },
+  fsAltDataPlaceholder: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 8,
   },
 
   // ── Deep Dive: Factor Categories ──
