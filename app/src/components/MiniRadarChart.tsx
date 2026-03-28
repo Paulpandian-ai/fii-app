@@ -14,7 +14,7 @@ export interface MiniRadarChartProps {
   size?: number;
 }
 
-const LABELS = ['SC↑', 'SC↓', 'GEO', 'MON', 'COR', 'R&P'];
+const LABELS = ['SUP', 'CUS', 'GEO', 'RATE', 'SYNC', 'ERN'];
 const GRID_LEVELS = [0.33, 0.66, 1.0];
 
 function getPoint(center: number, angle: number, radius: number): [number, number] {

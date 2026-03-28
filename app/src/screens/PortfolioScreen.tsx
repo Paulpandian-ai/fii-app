@@ -21,7 +21,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
-import { getPortfolioHealth, getBatchPrices } from '../services/api';
+import { getPortfolioHealth, getBatchPrices, batchSignals, getSignalDetail } from '../services/api';
+import { MiniRadarChart } from '../components/MiniRadarChart';
 import { AddHoldingSheet } from '../components/AddHoldingSheet';
 import { CSVUploadSheet } from '../components/CSVUploadSheet';
 import { SearchOverlay } from '../components/SearchOverlay';
@@ -66,16 +67,16 @@ const COLORS = {
 const SECTOR_COLORS: Record<string, string> = {
   Technology: '#60A5FA',
   Healthcare: '#00C9A7',
-  'Financial Services': '#F59E0B',
-  Financials: '#F59E0B',
-  'Consumer Cyclical': '#A78BFA',
-  'Consumer Defensive': '#EC4899',
-  Energy: '#F5A623',
-  'Communication Services': '#F97316',
+  Financials: '#A78BFA',
+  'Consumer Disc.': '#F97316',
+  'Consumer Staples': '#EC4899',
+  Energy: '#F59E0B',
+  'Communication Services': '#F5A623',
   Industrials: '#34D399',
   'Real Estate': '#6366F1',
-  'Basic Materials': '#8B5CF6',
+  Materials: '#8B5CF6',
   Utilities: '#14B8A6',
+  Other: 'rgba(255,255,255,0.3)',
 };
 
 const GRADE_COLORS: Record<string, string> = {
@@ -84,6 +85,44 @@ const GRADE_COLORS: Record<string, string> = {
   C: '#F59E0B',
   D: '#F97316',
   F: '#F5A623',
+};
+
+// Fallback sector map for common S&P 500 stocks when enrichment data is missing
+const TICKER_SECTOR_MAP: Record<string, string> = {
+  'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology', 'GOOG': 'Technology',
+  'AMZN': 'Consumer Disc.', 'NVDA': 'Technology', 'META': 'Technology', 'TSLA': 'Consumer Disc.',
+  'LLY': 'Healthcare', 'JNJ': 'Healthcare', 'UNH': 'Healthcare', 'PFE': 'Healthcare',
+  'ABBV': 'Healthcare', 'MRK': 'Healthcare', 'TMO': 'Healthcare', 'ABT': 'Healthcare',
+  'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy', 'SLB': 'Energy', 'EOG': 'Energy',
+  'JPM': 'Financials', 'BAC': 'Financials', 'GS': 'Financials', 'WFC': 'Financials',
+  'V': 'Financials', 'MA': 'Financials', 'C': 'Financials', 'BLK': 'Financials',
+  'PG': 'Consumer Staples', 'KO': 'Consumer Staples', 'PEP': 'Consumer Staples',
+  'COST': 'Consumer Staples', 'WMT': 'Consumer Staples', 'PM': 'Consumer Staples',
+  'HD': 'Consumer Disc.', 'MCD': 'Consumer Disc.', 'NKE': 'Consumer Disc.', 'SBUX': 'Consumer Disc.',
+  'NEE': 'Utilities', 'DUK': 'Utilities', 'SO': 'Utilities', 'D': 'Utilities',
+  'DIS': 'Communication Services', 'NFLX': 'Communication Services', 'CMCSA': 'Communication Services',
+  'T': 'Communication Services', 'VZ': 'Communication Services',
+  'BA': 'Industrials', 'HON': 'Industrials', 'UPS': 'Industrials', 'CAT': 'Industrials',
+  'GE': 'Industrials', 'RTX': 'Industrials', 'LMT': 'Industrials', 'DE': 'Industrials',
+  'AMT': 'Real Estate', 'PLD': 'Real Estate', 'CCI': 'Real Estate',
+  'LIN': 'Materials', 'APD': 'Materials', 'FCX': 'Materials',
+  'AVGO': 'Technology', 'CRM': 'Technology', 'ADBE': 'Technology', 'AMD': 'Technology',
+  'INTC': 'Technology', 'ORCL': 'Technology', 'CSCO': 'Technology', 'QCOM': 'Technology',
+  'IBM': 'Technology', 'TXN': 'Technology', 'NOW': 'Technology', 'INTU': 'Technology',
+};
+
+// Normalize various sector name formats to display names
+const SECTOR_NAME_NORMALIZE: Record<string, string> = {
+  'Information Technology': 'Technology',
+  'Info Tech': 'Technology',
+  'Consumer Discretionary': 'Consumer Disc.',
+  'Consumer Cyclical': 'Consumer Disc.',
+  'Consumer Defensive': 'Consumer Staples',
+  'Health Care': 'Healthcare',
+  'Financial Services': 'Financials',
+  'Basic Materials': 'Materials',
+  'Communication Svcs': 'Communication Services',
+  'Comm Services': 'Communication Services',
 };
 
 // ─── Helpers ───
@@ -345,6 +384,7 @@ export const PortfolioScreen: React.FC = () => {
   const [wlCollapsed, setWlCollapsed] = useState<Record<string, boolean>>({});
 
   const [isPolling, setIsPolling] = useState(false);
+  const [wlSignalData, setWlSignalData] = useState<Record<string, any>>({});
 
   // ─── Data polling: holdings prices every 30s during market hours ───
   useDataRefresh(
@@ -433,6 +473,41 @@ export const PortfolioScreen: React.FC = () => {
     loadHealthData();
     loadWatchlists();
   }, []);
+
+  // Fetch signal data for watchlist tickers (for rich cards)
+  useEffect(() => {
+    const allTickers = watchlists.flatMap((wl) => wl.items.map((i) => i.ticker));
+    const uniqueTickers = [...new Set(allTickers)].filter((t) => !wlSignalData[t]);
+    if (uniqueTickers.length === 0) return;
+    let mounted = true;
+    (async () => {
+      try {
+        // Fetch batch signals first
+        const batch = await batchSignals(uniqueTickers);
+        const signalsArr = batch?.signals || [];
+        if (!mounted) return;
+        const newData: Record<string, any> = { ...wlSignalData };
+        for (const sig of signalsArr) {
+          if (sig?.ticker) newData[sig.ticker] = sig;
+        }
+        setWlSignalData(newData);
+
+        // Also try to get enrichment for tickers that don't have it
+        for (const ticker of uniqueTickers) {
+          if (enrichmentCache[ticker]) continue;
+          try {
+            const detail = await getSignalDetail(ticker);
+            if (!mounted) return;
+            if (detail?.ticker) {
+              newData[detail.ticker] = { ...newData[detail.ticker], ...detail };
+              setWlSignalData({ ...newData });
+            }
+          } catch {}
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [watchlists.length]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -543,7 +618,9 @@ export const PortfolioScreen: React.FC = () => {
     const sectorMap: Record<string, number> = {};
     for (const h of holdings) {
       const enrichment = enrichmentCache[h.ticker];
-      const sector = enrichment?.sector || 'Other';
+      // Try enrichment sector, then normalize, then fallback map
+      let rawSector = enrichment?.sector || TICKER_SECTOR_MAP[h.ticker] || 'Other';
+      const sector = SECTOR_NAME_NORMALIZE[rawSector] || rawSector;
       sectorMap[sector] = (sectorMap[sector] || 0) + (h.totalValue || 0);
     }
     return Object.entries(sectorMap)
@@ -635,12 +712,12 @@ export const PortfolioScreen: React.FC = () => {
   // ── Computed: Strongest & Weakest Factor ──
   const { strongestFactor, weakestFactor } = useMemo(() => {
     const labels: Record<keyof FactorPercentiles, string> = {
-      supply_chain_upstream: 'Supply Chain (Upstream)',
-      supply_chain_downstream: 'Supply Chain (Downstream)',
-      geopolitical: 'Geopolitical',
-      monetary: 'Monetary',
-      correlations: 'Correlations',
-      performance: 'Performance',
+      supply_chain_upstream: 'Suppliers',
+      supply_chain_downstream: 'Customers',
+      geopolitical: 'Geo Risk',
+      monetary: 'Rate Impact',
+      correlations: 'Market Sync',
+      performance: 'Earnings',
     };
 
     const entries = Object.entries(portfolioFactorPercentiles) as [keyof FactorPercentiles, number][];
@@ -663,12 +740,12 @@ export const PortfolioScreen: React.FC = () => {
 
     // Check for weak dimensions (< 30th percentile)
     const dimLabels: Record<keyof FactorPercentiles, string> = {
-      supply_chain_upstream: 'supply chain (upstream)',
-      supply_chain_downstream: 'supply chain (downstream)',
-      geopolitical: 'geopolitical',
-      monetary: 'monetary policy',
-      correlations: 'correlations',
-      performance: 'performance',
+      supply_chain_upstream: 'supplier',
+      supply_chain_downstream: 'customer',
+      geopolitical: 'geo risk',
+      monetary: 'rate impact',
+      correlations: 'market sync',
+      performance: 'earnings',
     };
 
     for (const [key, val] of Object.entries(portfolioFactorPercentiles) as [keyof FactorPercentiles, number][]) {
@@ -708,22 +785,22 @@ export const PortfolioScreen: React.FC = () => {
   }, [hasHoldings, portfolioFactorPercentiles, sectorData, weightedFIIScore]);
 
   // ── Computed: Risk Level ──
-  const riskLevel = useMemo(() => {
-    if (!healthData) return 'Medium';
-    const riskScore = healthData.riskBalance.score;
-    if (riskScore >= 70) return 'Low';
-    if (riskScore >= 40) return 'Medium';
-    return 'High';
+  const { riskLevel, riskScore } = useMemo(() => {
+    if (!healthData) return { riskLevel: 'Medium', riskScore: 50 };
+    const score = healthData.riskBalance.score;
+    const level = score >= 70 ? 'Low' : score >= 40 ? 'Medium' : 'High';
+    return { riskLevel: level, riskScore: Math.round(100 - score) }; // invert: higher = riskier
   }, [healthData]);
 
   // ── Computed: Diversification & Risk Factor ──
-  const { divGrade, topRiskFactor } = useMemo(() => {
-    if (!hasHoldings) return { divGrade: 'F' as string, topRiskFactor: '' };
+  const { divScore, topRiskFactor } = useMemo(() => {
+    if (!hasHoldings) return { divScore: 20, topRiskFactor: '' };
 
     const sectorMap: Record<string, number> = {};
     let totalVal = 0;
     for (const h of holdings) {
-      const sector = enrichmentCache[h.ticker]?.sector || 'Unknown';
+      const rawSector = enrichmentCache[h.ticker]?.sector || TICKER_SECTOR_MAP[h.ticker] || 'Unknown';
+      const sector = SECTOR_NAME_NORMALIZE[rawSector] || rawSector;
       const val = h.totalValue || 0;
       sectorMap[sector] = (sectorMap[sector] || 0) + val;
       totalVal += val;
@@ -732,13 +809,18 @@ export const PortfolioScreen: React.FC = () => {
     const sectorCount = Object.keys(sectorMap).filter((s) => s !== 'Unknown').length;
     const maxConcentration = totalVal > 0 ? Math.max(...Object.values(sectorMap)) / totalVal : 1;
 
-    let grade: string;
-    if (maxConcentration >= 0.8) grade = 'F';
-    else if (maxConcentration >= 0.6) grade = 'D';
-    else if (sectorCount >= 5) grade = 'A';
-    else if (sectorCount >= 4) grade = 'B';
-    else if (sectorCount >= 3) grade = 'C';
-    else grade = 'D';
+    // Compute a 0-100 score based on concentration and sector count
+    let score: number;
+    if (maxConcentration >= 0.8) score = 15;
+    else if (maxConcentration >= 0.6) score = 30;
+    else if (sectorCount >= 5) score = 90;
+    else if (sectorCount >= 4) score = 75;
+    else if (sectorCount >= 3) score = 55;
+    else score = 35;
+
+    // Refine score based on how spread the sectors are
+    const evenness = 1 - maxConcentration; // 0 = all in one, 1 = perfectly spread
+    score = Math.round(score * 0.7 + evenness * 100 * 0.3);
 
     let risk = '';
     if (maxConcentration >= 0.6) {
@@ -752,7 +834,7 @@ export const PortfolioScreen: React.FC = () => {
       risk = 'Portfolio is well-balanced';
     }
 
-    return { divGrade: grade, topRiskFactor: risk };
+    return { divScore: Math.min(100, Math.max(0, score)), topRiskFactor: risk };
   }, [holdings, enrichmentCache, healthData, hasHoldings]);
 
   // ── Computed: Sorted Holdings ──
@@ -976,6 +1058,14 @@ export const PortfolioScreen: React.FC = () => {
                       >
                         {riskLevel}
                       </Text>
+                      {/* Risk bar */}
+                      <View style={styles.scoreBarBg}>
+                        <View style={[styles.scoreBarFill, {
+                          width: `${riskScore}%`,
+                          backgroundColor: riskLevel === 'Low' ? COLORS.green : riskLevel === 'Medium' ? COLORS.amber : COLORS.red,
+                        }]} />
+                      </View>
+                      <Text style={styles.scoreBarLabel}>{riskScore}/100</Text>
                     </View>
 
                     <View style={styles.healthItem}>
@@ -983,11 +1073,19 @@ export const PortfolioScreen: React.FC = () => {
                       <Text
                         style={[
                           styles.healthValue,
-                          { color: GRADE_COLORS[divGrade] || COLORS.amber },
+                          { color: divScore >= 60 ? COLORS.green : divScore >= 30 ? COLORS.amber : COLORS.red },
                         ]}
                       >
-                        {divGrade}
+                        {divScore}
                       </Text>
+                      {/* Diversification bar */}
+                      <View style={styles.scoreBarBg}>
+                        <View style={[styles.scoreBarFill, {
+                          width: `${divScore}%`,
+                          backgroundColor: divScore >= 60 ? COLORS.green : divScore >= 30 ? COLORS.amber : COLORS.red,
+                        }]} />
+                      </View>
+                      <Text style={styles.scoreBarLabel}>{divScore}/100</Text>
                     </View>
                   </View>
                 </View>
@@ -1269,45 +1367,93 @@ export const PortfolioScreen: React.FC = () => {
                       {avgScore > 0 && <FIIBadge score={avgScore} size={22} />}
                     </TouchableOpacity>
 
-                    {/* Watchlist items (Part E: radar thumbnails) */}
+                    {/* Rich watchlist cards */}
                     {isExpanded && wl.items.length > 0 &&
                       wl.items.map((item) => {
                         const itemSignal = signals[item.ticker];
+                        const sigData = wlSignalData[item.ticker];
+                        const wlEnrichment = enrichmentCache[item.ticker];
                         const isUp = (item.changePercent ?? 0) >= 0;
                         const itemScore = itemSignal?.score ?? item.score ?? 5;
+                        const itemLabel = itemSignal?.scoreLabel ?? getScoreLabelFromUtil(itemScore);
+                        const scoreColor = getScoreColorFromUtil(itemScore);
 
-                        // Build factor percentiles from enrichment
-                        const wlEnrichment = enrichmentCache[item.ticker];
-                        const wlFP: FactorPercentiles = {
+                        // Sector from enrichment or fallback
+                        const rawSector = wlEnrichment?.sector || TICKER_SECTOR_MAP[item.ticker] || '';
+                        const sector = SECTOR_NAME_NORMALIZE[rawSector] || rawSector;
+
+                        // Metrics
+                        const peRatio = wlEnrichment?.peRatio ?? sigData?.pe_ratio ?? sigData?.trailingPE;
+                        const marketCap = wlEnrichment?.marketCap ?? sigData?.market_cap ?? sigData?.marketCap ?? 0;
+                        const w52Low = wlEnrichment?.w52Low ?? sigData?.fiftyTwoWeekLow;
+                        const w52High = wlEnrichment?.w52High ?? sigData?.fiftyTwoWeekHigh;
+                        const price = item.price ?? wlEnrichment?.price ?? 0;
+
+                        // Format market cap
+                        const fmtMCap = marketCap >= 1e12 ? `$${(marketCap / 1e12).toFixed(1)}T`
+                          : marketCap >= 1e9 ? `$${(marketCap / 1e9).toFixed(1)}B`
+                          : marketCap >= 1e6 ? `$${(marketCap / 1e6).toFixed(0)}M` : '';
+
+                        // Score drivers
+                        const drivers = sigData?.score_drivers ?? sigData?.scoreDrivers;
+                        let driverArr: any[] = [];
+                        try {
+                          driverArr = typeof drivers === 'string' ? JSON.parse(drivers) : (Array.isArray(drivers) ? drivers : []);
+                        } catch {}
+                        const topDriver = driverArr[0];
+
+                        // Build enriched factors (positive and negative)
+                        const enrichedFactors = wlEnrichment?.enrichedFactors ?? [];
+                        const posFactors = enrichedFactors.filter((f: any) => f.score > 0).slice(0, 2);
+                        const negFactors = enrichedFactors.filter((f: any) => f.score < 0).slice(0, 2);
+
+                        // Mini radar scores from enrichment dimensionScores
+                        const dimScores = wlEnrichment?.dimensionScores || {};
+                        const dimMap: Record<string, string> = {
+                          supplyChain: 'supply_chain_upstream',
+                          supply_chain_upstream: 'supply_chain_upstream',
+                          supply_chain_downstream: 'supply_chain_downstream',
+                          geopolitical: 'geopolitical',
+                          macroGeo: 'geopolitical',
+                          monetary: 'monetary',
+                          sentiment: 'monetary',
+                          correlations: 'correlations',
+                          fundamental: 'correlations',
+                          performance: 'risk_performance',
+                          technical: 'risk_performance',
+                        };
+                        const radarScores = {
                           supply_chain_upstream: 50,
                           supply_chain_downstream: 50,
                           geopolitical: 50,
                           monetary: 50,
                           correlations: 50,
-                          performance: 50,
+                          risk_performance: 50,
                         };
-                        if (wlEnrichment?.dimensionScores) {
-                          const ds = wlEnrichment.dimensionScores;
-                          const dimMap: Record<string, keyof FactorPercentiles> = {
-                            supplyChain: 'supply_chain_upstream',
-                            supply_chain_upstream: 'supply_chain_upstream',
-                            supply_chain_downstream: 'supply_chain_downstream',
-                            geopolitical: 'geopolitical',
-                            macroGeo: 'geopolitical',
-                            monetary: 'monetary',
-                            sentiment: 'monetary',
-                            correlations: 'correlations',
-                            fundamental: 'correlations',
-                            performance: 'performance',
-                            technical: 'performance',
-                          };
-                          for (const [k, v] of Object.entries(ds)) {
-                            const mapped = dimMap[k];
-                            if (mapped && typeof v === 'number') {
-                              wlFP[mapped] = Math.round((v / 10) * 100);
-                            }
+                        for (const [k, v] of Object.entries(dimScores)) {
+                          const mapped = dimMap[k];
+                          if (mapped && typeof v === 'number') {
+                            (radarScores as any)[mapped] = Math.round((v / 10) * 100);
                           }
                         }
+
+                        // 52-week position
+                        const w52Pct = (w52Low != null && w52High != null && w52High > w52Low && price > 0)
+                          ? Math.max(0, Math.min(100, ((price - w52Low) / (w52High - w52Low)) * 100))
+                          : null;
+
+                        // Factor label rename map
+                        const factorRename: Record<string, string> = {
+                          'Supply Chain (Upstream)': 'Suppliers',
+                          'Supply Chain (Downstream)': 'Customers',
+                          'Supply Chain': 'Suppliers',
+                          'Geopolitical': 'Geo Risk',
+                          'Monetary': 'Rate Impact',
+                          'Monetary Policy': 'Rate Impact',
+                          'Correlations': 'Market Sync',
+                          'Performance': 'Earnings',
+                          'Risk & Performance': 'Earnings',
+                        };
 
                         return (
                           <SwipeableWatchlistRow
@@ -1315,7 +1461,7 @@ export const PortfolioScreen: React.FC = () => {
                             onRemove={() => removeWatchlistTicker(wl.id, item.ticker)}
                           >
                             <TouchableOpacity
-                              style={styles.wlItemRow}
+                              style={styles.wlCard}
                               activeOpacity={0.8}
                               onPress={() =>
                                 navigation.navigate('SignalDetail', {
@@ -1325,41 +1471,88 @@ export const PortfolioScreen: React.FC = () => {
                               }
                               onLongPress={() => showWlItemOptions(wl.id, item)}
                             >
-                              {/* Radar thumbnail (40x40) */}
-                              <View style={styles.wlRadarThumb}>
-                                <View style={{ transform: [{ scale: 40 / 72 }] }}>
-                                  <FactorRadarChart
-                                    factorPercentiles={wlFP}
-                                    compositeScore={itemScore}
-                                    scoreLabel={itemSignal?.scoreLabel ?? getScoreLabelFromUtil(itemScore)}
-                                    size="thumbnail"
-                                  />
+                              {/* Row 1: Header — Ticker, Company, Score, Label */}
+                              <View style={styles.wlCardHeader}>
+                                <View style={{ flex: 1 }}>
+                                  <View style={styles.wlCardTickerRow}>
+                                    <Text style={styles.wlCardTicker}>{item.ticker}</Text>
+                                    <Text style={styles.wlCardCompany} numberOfLines={1}>{item.companyName}</Text>
+                                  </View>
+                                  <View style={styles.wlCardPriceRow}>
+                                    <Text style={styles.wlCardPrice}>{price ? `$${price.toFixed(2)}` : '\u2014'}</Text>
+                                    <Text style={[styles.wlCardChange, { color: isUp ? COLORS.green : COLORS.red }]}>
+                                      {isUp ? '\u25B2' : '\u25BC'}{isUp ? '+' : ''}{(item.changePercent ?? 0).toFixed(1)}%
+                                    </Text>
+                                    {sector ? <Text style={styles.wlCardSector}>{sector}</Text> : null}
+                                  </View>
+                                </View>
+                                <View style={[styles.wlCardScoreBadge, { backgroundColor: scoreColor + '20' }]}>
+                                  <Text style={[styles.wlCardScoreNum, { color: scoreColor }]}>{itemScore.toFixed(1)}</Text>
+                                  <Text style={[styles.wlCardScoreLabel, { color: scoreColor }]}>{itemLabel}</Text>
                                 </View>
                               </View>
-                              <View style={styles.wlItemLeft}>
-                                <Text style={styles.wlItemTicker}>{item.ticker}</Text>
-                                <Text style={styles.wlItemName} numberOfLines={1}>
-                                  {item.companyName}
-                                </Text>
+
+                              {/* Row 2: Mini radar + Key metrics */}
+                              <View style={styles.wlCardBody}>
+                                <MiniRadarChart scores={radarScores} size={64} />
+                                <View style={styles.wlCardMetrics}>
+                                  {peRatio != null && peRatio > 0 && (
+                                    <View style={styles.wlCardMetricItem}>
+                                      <Text style={styles.wlCardMetricLabel}>P/E</Text>
+                                      <Text style={styles.wlCardMetricValue}>{peRatio.toFixed(0)}</Text>
+                                    </View>
+                                  )}
+                                  {fmtMCap ? (
+                                    <View style={styles.wlCardMetricItem}>
+                                      <Text style={styles.wlCardMetricLabel}>MCap</Text>
+                                      <Text style={styles.wlCardMetricValue}>{fmtMCap}</Text>
+                                    </View>
+                                  ) : null}
+                                </View>
                               </View>
-                              <Text style={styles.wlItemPrice}>
-                                {item.price ? `$${item.price.toFixed(2)}` : '\u2014'}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.wlItemChange,
-                                  { color: isUp ? COLORS.green : COLORS.red },
-                                ]}
-                              >
-                                {isUp ? '+' : ''}
-                                {(item.changePercent ?? 0).toFixed(1)}%
-                              </Text>
-                              {(itemSignal || item.score) ? (
-                                <FIIBadge
-                                  score={itemScore}
-                                  size={24}
-                                />
-                              ) : null}
+
+                              {/* Row 3: Key signal / driver */}
+                              {topDriver?.description && (
+                                <View style={styles.wlCardSignalRow}>
+                                  <Ionicons name="key-outline" size={12} color={COLORS.primary} />
+                                  <Text style={styles.wlCardSignalText} numberOfLines={2}>
+                                    {topDriver.description}
+                                  </Text>
+                                </View>
+                              )}
+
+                              {/* Row 4: Factor chips */}
+                              {(posFactors.length > 0 || negFactors.length > 0) && (
+                                <View style={styles.wlCardFactors}>
+                                  {posFactors.map((f: any, i: number) => (
+                                    <View key={`p${i}`} style={[styles.wlCardChip, { backgroundColor: 'rgba(0,201,167,0.12)' }]}>
+                                      <Text style={[styles.wlCardChipText, { color: COLORS.green }]}>
+                                        {'\u2197'} {factorRename[f.name] || f.name} +{f.score.toFixed(1)}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                  {negFactors.map((f: any, i: number) => (
+                                    <View key={`n${i}`} style={[styles.wlCardChip, { backgroundColor: 'rgba(245,166,35,0.12)' }]}>
+                                      <Text style={[styles.wlCardChipText, { color: COLORS.red }]}>
+                                        {'\u2198'} {factorRename[f.name] || f.name} {f.score.toFixed(1)}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+
+                              {/* Row 5: 52-week range bar */}
+                              {w52Pct != null && w52Low != null && w52High != null && (
+                                <View style={styles.wlCard52w}>
+                                  <Text style={styles.wlCard52wLabel}>52W</Text>
+                                  <Text style={styles.wlCard52wVal}>${w52Low.toFixed(0)}</Text>
+                                  <View style={styles.wlCard52wBar}>
+                                    <View style={styles.wlCard52wTrack} />
+                                    <View style={[styles.wlCard52wDot, { left: `${w52Pct}%` }]} />
+                                  </View>
+                                  <Text style={styles.wlCard52wVal}>${w52High.toFixed(0)}</Text>
+                                </View>
+                              )}
                             </TouchableOpacity>
                           </SwipeableWatchlistRow>
                         );
@@ -1382,13 +1575,22 @@ export const PortfolioScreen: React.FC = () => {
                 );
               })}
 
-              {/* Create New Watchlist button */}
+              {/* Add to Watchlist button */}
               <TouchableOpacity
                 style={styles.createWlBtn}
-                onPress={() => setCreateWlVisible(true)}
+                onPress={() => setSearchVisible(true)}
               >
                 <Ionicons name="add-circle-outline" size={16} color={COLORS.primary} />
-                <Text style={styles.createWlText}>Create New Watchlist</Text>
+                <Text style={styles.createWlText}>+ Add to Watchlist</Text>
+              </TouchableOpacity>
+
+              {/* Create New Watchlist button */}
+              <TouchableOpacity
+                style={[styles.createWlBtn, { marginTop: 0 }]}
+                onPress={() => setCreateWlVisible(true)}
+              >
+                <Ionicons name="folder-open-outline" size={16} color={COLORS.textTertiary} />
+                <Text style={[styles.createWlText, { color: COLORS.textTertiary }]}>Create New Watchlist</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1745,6 +1947,24 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
   },
+  scoreBarBg: {
+    width: '100%',
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  scoreBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  scoreBarLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   riskFactorRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1901,42 +2121,172 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  wlItemRow: {
+  // Rich watchlist card styles
+  wlCard: {
+    marginHorizontal: 16,
+    marginVertical: 6,
+    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  wlCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  wlCardTickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingLeft: 36,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-    backgroundColor: COLORS.bg,
-    gap: 10,
+    gap: 8,
+    marginBottom: 3,
   },
-  wlItemLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-  wlItemTicker: {
+  wlCardTicker: {
     color: '#FFF',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
-  wlItemName: {
+  wlCardCompany: {
     color: COLORS.textTertiary,
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 12,
+    flex: 1,
   },
-  wlItemPrice: {
+  wlCardPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  wlCardPrice: {
     color: '#FFF',
     fontSize: 14,
     fontWeight: '600',
   },
-  wlItemChange: {
+  wlCardChange: {
     fontSize: 13,
+    fontWeight: '700',
+  },
+  wlCardSector: {
+    color: COLORS.textTertiary,
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  wlCardScoreBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minWidth: 56,
+  },
+  wlCardScoreNum: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  wlCardScoreLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  wlCardBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  wlCardMetrics: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  wlCardMetricItem: {
+    alignItems: 'center',
+  },
+  wlCardMetricLabel: {
+    color: COLORS.textTertiary,
+    fontSize: 10,
     fontWeight: '600',
-    minWidth: 50,
-    textAlign: 'right',
+    marginBottom: 1,
+  },
+  wlCardMetricValue: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  wlCardSignalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    backgroundColor: 'rgba(96,165,250,0.06)',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  wlCardSignalText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    flex: 1,
+  },
+  wlCardFactors: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  wlCardChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  wlCardChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  wlCard52w: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  wlCard52wLabel: {
+    color: COLORS.textHint,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  wlCard52wVal: {
+    color: COLORS.textHint,
+    fontSize: 10,
+    fontWeight: '500',
+    minWidth: 28,
+  },
+  wlCard52wBar: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    position: 'relative',
+  },
+  wlCard52wTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  wlCard52wDot: {
+    position: 'absolute',
+    top: -3,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.primary,
+    marginLeft: -5,
   },
   wlEmpty: {
     alignItems: 'center',

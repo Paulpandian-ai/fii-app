@@ -26,12 +26,12 @@ interface FactorRadarChartProps {
 
 // ─── Axis Config ───
 const AXES = [
-  { key: 'supply_chain_upstream', label: 'Supply \u2191', fullLabel: 'Supply Chain (Upstream)' },
-  { key: 'supply_chain_downstream', label: 'Supply \u2193', fullLabel: 'Supply Chain (Downstream)' },
-  { key: 'geopolitical', label: 'Geopolitical', fullLabel: 'Geopolitical' },
-  { key: 'monetary', label: 'Monetary', fullLabel: 'Monetary Policy' },
-  { key: 'correlations', label: 'Correlations', fullLabel: 'Correlations' },
-  { key: 'performance', label: 'Performance', fullLabel: 'Risk & Performance' },
+  { key: 'supply_chain_upstream', label: 'Suppliers', fullLabel: 'Suppliers' },
+  { key: 'supply_chain_downstream', label: 'Customers', fullLabel: 'Customers' },
+  { key: 'geopolitical', label: 'Geo Risk', fullLabel: 'Geo Risk' },
+  { key: 'monetary', label: 'Rate Impact', fullLabel: 'Rate Impact' },
+  { key: 'correlations', label: 'Mkt Sync', fullLabel: 'Market Sync' },
+  { key: 'performance', label: 'Earnings', fullLabel: 'Earnings' },
 ] as const;
 
 const NUM_AXES = 6;
