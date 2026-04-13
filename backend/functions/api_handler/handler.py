@@ -2069,7 +2069,7 @@ def _handle_charts(method, ticker, query_params):
 
     # Convert range to from_ts
     now_ts = int(datetime.now(timezone.utc).timestamp())
-    range_days = {"1M": 30, "3M": 91, "6M": 183, "1Y": 365, "2Y": 730}.get(time_range, 183)
+    range_days = {"1W": 7, "1M": 30, "3M": 91, "6M": 183, "1Y": 365, "2Y": 730, "5Y": 1825}.get(time_range, 183)
     from_ts = now_ts - (range_days * 24 * 3600)
 
     try:
