@@ -799,6 +799,99 @@ export interface AlternativeData {
   fda?: FDAData;
 }
 
+// ─── Alt Data (unified tab payload) ───
+
+export interface AltDataPatentsBlock {
+  last_12_months: number;
+  prior_12_months: number;
+  yoy_change_pct: number;
+  top_areas: string[];
+  recent_notable?: Array<any>;
+  innovation_score?: number | null;
+  data_source: string;
+}
+
+export interface AltDataContractsBlock {
+  active_count: number;
+  total_value: number;
+  prior_value: number;
+  distinct_agencies: number;
+  major_awards_count: number;
+  top_agencies: string[];
+  recent_awards?: Array<any>;
+  revenue_score?: number | null;
+  data_source: string;
+}
+
+export interface AltDataFDABlock {
+  totalActiveTrials?: number;
+  phaseCounts?: Record<string, number>;
+  upcomingPDUFA?: Array<any>;
+  recentApprovals?: Array<any>;
+  score?: number | null;
+  [k: string]: any;
+}
+
+export interface AltDataInsiderBlock {
+  buys_90d: number;
+  sells_90d: number;
+  net_sentiment: string;
+  notable: Array<any>;
+  data_source: string;
+  status?: 'ok' | 'pending' | 'error';
+  pending_reason?: string;
+}
+
+export interface AltDataInstitutionalBlock {
+  top_holders: Array<any>;
+  net_change_qoq: number;
+  notable_new_positions: Array<any>;
+  notable_exits: Array<any>;
+  data_source: string;
+  status?: 'ok' | 'pending' | 'error';
+  pending_reason?: string;
+}
+
+export interface AltDataNewsHeadline {
+  headline: string;
+  summary?: string;
+  url?: string;
+  source?: string;
+  datetime?: number;
+  [k: string]: any;
+}
+
+export interface AltDataNewsBlock {
+  recent_headlines: AltDataNewsHeadline[];
+  sentiment_score: number;  // -1 to 1
+  sentiment_label: 'positive' | 'neutral' | 'negative';
+  counts: { positive: number; negative: number };
+  data_source: string;
+}
+
+export interface AltDataSectorSpecificBlock {
+  type: 'healthcare' | 'technology' | 'energy' | 'financials' | 'consumer' | 'generic';
+  label: string;
+  data: Record<string, any>;
+  data_source: string;
+}
+
+export interface AltDataFullPayload {
+  ticker: string;
+  sector: string | null;
+  available: string[];
+  patents?: AltDataPatentsBlock | null;
+  contracts?: AltDataContractsBlock | null;
+  fda?: AltDataFDABlock | null;
+  insider_activity?: AltDataInsiderBlock;
+  institutional?: AltDataInstitutionalBlock;
+  news_sentiment?: AltDataNewsBlock;
+  sector_specific?: AltDataSectorSpecificBlock;
+  disclaimer?: string;
+  generated_at?: string;
+  cached?: boolean;
+}
+
 // ─── Screener Types ───
 
 export interface ScreenerResult {

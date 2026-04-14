@@ -265,6 +265,32 @@ def get_company_profile(ticker):
     }
 
 
+def get_news(ticker, days=7):
+    """Get recent news for a ticker (last `days` days). Returns list of dicts."""
+    from datetime import timedelta
+    to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    from_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    data = _request("company-news", {
+        "symbol": ticker,
+        "from": from_date,
+        "to": to_date,
+    })
+    if not data or not isinstance(data, list):
+        return []
+
+    return [
+        {
+            "headline": n.get("headline", ""),
+            "source": n.get("source", ""),
+            "url": n.get("url", ""),
+            "datetime": n.get("datetime", 0),
+            "summary": (n.get("summary") or "")[:200],
+        }
+        for n in data[:10]
+    ]
+
+
 def get_basic_financials(ticker):
     """Get basic financial metrics (PE, beta, 52-week range, etc.)."""
     data = _request("stock/metric", {"symbol": ticker, "metric": "all"})

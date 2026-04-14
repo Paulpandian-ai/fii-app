@@ -59,6 +59,8 @@ Routes:
   GET  /stocks/<ticker>/factors/<dimension>    — Full factor detail with findings
   GET  /stocks/<ticker>/financials             — 69 financial metrics + sector benchmarks
   GET  /stocks/<ticker>/financials/<category>  — Single category metrics (e.g., valuation)
+  GET  /stocks/<ticker>/alt-data               — Unified alt-data (patents, contracts, FDA,
+                                                  insider, institutional, news, sector-specific)
 
   # ── User Data (DynamoDB sync) ──
   GET    /user/portfolio              — List holdings (raw, no price enrichment)
@@ -222,6 +224,8 @@ def lambda_handler(event, context):
             elif sub == "financials":
                 category = parts[3] if len(parts) == 4 else None
                 return _handle_stock_financials(http_method, ticker, query_params, category)
+            elif sub == "alt-data":
+                return _handle_alt_data_full(http_method, ticker)
             else:
                 return _response(404, {"error": "Unknown stocks endpoint"})
         elif path.startswith("/stock/") and "/stress-test" in path:
@@ -1943,6 +1947,383 @@ def _handle_altdata(method, ticker):
         "contracts": alt_data.get("contracts"),
         "fda": alt_data.get("fda"),
     })
+
+
+# ─── Unified Alt-Data Endpoint (Alt Data Tab) ───
+
+
+_ALT_DATA_CACHE_HOURS = 24
+_SECTOR_INTEL_TYPE = {
+    "technology": "technology",
+    "information technology": "technology",
+    "communication services": "technology",
+    "healthcare": "healthcare",
+    "health care": "healthcare",
+    "biotech": "healthcare",
+    "energy": "energy",
+    "oil & gas": "energy",
+    "financial services": "financials",
+    "financials": "financials",
+    "banks": "financials",
+    "consumer discretionary": "consumer",
+    "consumer cyclical": "consumer",
+    "consumer staples": "consumer",
+    "consumer defensive": "consumer",
+    "retail": "consumer",
+}
+
+
+def _sector_intel_type(sector: str) -> str:
+    s = (sector or "").strip().lower()
+    if not s:
+        return "generic"
+    for key, val in _SECTOR_INTEL_TYPE.items():
+        if key in s:
+            return val
+    return "generic"
+
+
+def _resolve_ticker_sector(ticker: str) -> str:
+    """Try SIGNAL then FINANCIALS records to find the sector."""
+    try:
+        sig = db.get_item(f"SIGNAL#{ticker}", "LATEST") or {}
+        sec = sig.get("sector")
+        if sec:
+            return str(sec)
+    except Exception:
+        pass
+    try:
+        fin = db.get_item(f"FINANCIALS#{ticker}", "LATEST") or {}
+        sec = fin.get("sector")
+        if sec:
+            return str(sec)
+    except Exception:
+        pass
+    return ""
+
+
+def _score_news_sentiment(headlines: list) -> dict:
+    """Rough keyword-based sentiment over recent headlines.
+
+    Returns {score: -1..+1, label: 'positive'|'neutral'|'negative', counts: {...}}.
+    This is a stopgap until we wire a dedicated sentiment model; it is
+    intentionally coarse and labeled as educational on the client.
+    """
+    positives = [
+        "beat", "beats", "surge", "surges", "record", "jump", "rally", "upgrade",
+        "upgrades", "outperform", "strong", "growth", "approval", "approved",
+        "wins", "win", "acquires", "acquisition", "raise", "raised", "buy",
+    ]
+    negatives = [
+        "miss", "misses", "plunge", "plunges", "drop", "falls", "fell", "downgrade",
+        "downgrades", "underperform", "weak", "decline", "reject", "rejected",
+        "loss", "layoffs", "probe", "lawsuit", "investigation", "sell", "sells",
+    ]
+    pos_count = 0
+    neg_count = 0
+    for item in headlines or []:
+        text = f"{item.get('headline', '')} {item.get('summary', '')}".lower()
+        pos_count += sum(1 for w in positives if w in text)
+        neg_count += sum(1 for w in negatives if w in text)
+
+    total = pos_count + neg_count
+    if total == 0:
+        return {"score": 0.0, "label": "neutral", "counts": {"positive": 0, "negative": 0}}
+    score = round((pos_count - neg_count) / max(total, 1), 2)
+    if score >= 0.2:
+        label = "positive"
+    elif score <= -0.2:
+        label = "negative"
+    else:
+        label = "neutral"
+    return {
+        "score": score,
+        "label": label,
+        "counts": {"positive": pos_count, "negative": neg_count},
+    }
+
+
+def _gather_insider_activity(ticker: str) -> dict:
+    """Insider Form 4 activity — stubbed until SEC EDGAR Form 4 ingestion is live.
+
+    The schema is still returned so the client renders the section with a
+    "Data pending" state rather than hiding it. Once we wire a Form 4 fetcher
+    (SEC EDGAR EFTS search for form=4&company=ticker), populate `notable` from
+    the filings.
+    """
+    return {
+        "buys_90d": 0,
+        "sells_90d": 0,
+        "net_sentiment": "unknown",
+        "notable": [],
+        "data_source": "SEC Form 4",
+        "status": "pending",
+        "pending_reason": "SEC EDGAR Form 4 ingestion in progress",
+    }
+
+
+def _gather_institutional(ticker: str) -> dict:
+    """13F institutional holdings — stubbed until 13F parsing is live."""
+    return {
+        "top_holders": [],
+        "net_change_qoq": 0.0,
+        "notable_new_positions": [],
+        "notable_exits": [],
+        "data_source": "SEC 13F",
+        "status": "pending",
+        "pending_reason": "SEC 13F parsing in progress",
+    }
+
+
+def _gather_news_sentiment(ticker: str) -> dict:
+    """Pull the latest week of Finnhub headlines and score sentiment."""
+    try:
+        news = finnhub_client.get_news(ticker, days=7) or []
+    except Exception as e:
+        logger.warning(f"[AltData] Finnhub news failed for {ticker}: {e}")
+        news = []
+
+    # Sort newest first, take top 10
+    try:
+        news = sorted(news, key=lambda x: x.get("datetime", 0), reverse=True)[:10]
+    except Exception:
+        news = news[:10]
+
+    sentiment = _score_news_sentiment(news)
+    return {
+        "recent_headlines": news,
+        "sentiment_score": sentiment["score"],
+        "sentiment_label": sentiment["label"],
+        "counts": sentiment["counts"],
+        "data_source": "Finnhub",
+    }
+
+
+def _build_sector_specific(sector: str, alt_data: dict) -> dict:
+    """Assemble the sector_specific block from existing alt-data signals.
+
+    Reuses FDA for healthcare, patents for technology, contracts for energy /
+    financials / consumer, etc. Each branch produces a dict the client knows
+    how to render.
+    """
+    intel_type = _sector_intel_type(sector)
+    patents = alt_data.get("patents") or {}
+    contracts = alt_data.get("contracts") or {}
+    fda = alt_data.get("fda") or {}
+
+    if intel_type == "healthcare":
+        return {
+            "type": "healthcare",
+            "label": "FDA Pipeline & Catalysts",
+            "data": {
+                "active_trials": fda.get("totalActiveTrials", 0),
+                "phase_counts": fda.get("phaseCounts", {}),
+                "upcoming_pdufa": fda.get("upcomingPDUFA", [])[:5],
+                "recent_approvals": fda.get("recentApprovals", [])[:5],
+                "catalyst_score": fda.get("score"),
+            },
+            "data_source": "ClinicalTrials.gov, FDA OpenData",
+        }
+    if intel_type == "technology":
+        return {
+            "type": "technology",
+            "label": "Patent Portfolio & Tech Signals",
+            "data": {
+                "patents_12m": patents.get("totalLast12Mo", 0),
+                "yoy_change_pct": _patent_yoy_change(patents),
+                "top_areas": _top_tech_areas(patents),
+                "recent_notable": patents.get("recentPatents", [])[:5],
+                "innovation_score": patents.get("score"),
+            },
+            "data_source": "USPTO PatentsView",
+        }
+    if intel_type == "energy":
+        return {
+            "type": "energy",
+            "label": "Government Contracts & Production",
+            "data": {
+                "active_contracts": contracts.get("activeContracts", 0),
+                "total_value": contracts.get("totalValueCurrent", 0),
+                "top_agencies": [a.get("agency") for a in contracts.get("agencyBreakdown", [])[:5]],
+                "recent_awards": contracts.get("recentAwards", [])[:5],
+            },
+            "data_source": "USASpending.gov",
+        }
+    if intel_type == "financials":
+        return {
+            "type": "financials",
+            "label": "Regulatory & Institutional Footprint",
+            "data": {
+                "active_contracts": contracts.get("activeContracts", 0),
+                "total_value": contracts.get("totalValueCurrent", 0),
+                "notes": [
+                    "Federal stress-test results and enforcement actions "
+                    "ingestion is pending.",
+                ],
+            },
+            "data_source": "USASpending.gov",
+        }
+    if intel_type == "consumer":
+        return {
+            "type": "consumer",
+            "label": "Brand Signals & Traffic",
+            "data": {
+                "notes": [
+                    "Foot traffic and card-spending integrations are pending.",
+                    "Check news sentiment below for brand-level signals.",
+                ],
+            },
+            "data_source": "Pending integration",
+        }
+    # Generic / other sectors — surface whichever alt-data we have
+    return {
+        "type": "generic",
+        "label": "General Intelligence",
+        "data": {
+            "patents_12m": patents.get("totalLast12Mo", 0),
+            "active_contracts": contracts.get("activeContracts", 0),
+        },
+        "data_source": "Aggregate",
+    }
+
+
+def _patent_yoy_change(patents: dict) -> float:
+    prior = patents.get("totalPrior12Mo") or 0
+    curr = patents.get("totalLast12Mo") or 0
+    if not prior:
+        return 0.0
+    try:
+        return round(((curr - prior) / prior) * 100, 1)
+    except (TypeError, ZeroDivisionError):
+        return 0.0
+
+
+def _top_tech_areas(patents: dict) -> list:
+    dist = patents.get("techDistribution") or {}
+    if not isinstance(dist, dict):
+        return []
+    try:
+        ordered = sorted(dist.items(), key=lambda kv: kv[1], reverse=True)
+        return [name for name, _ in ordered[:5]]
+    except Exception:
+        return []
+
+
+def _compact_patents(patents: dict) -> dict | None:
+    if not patents:
+        return None
+    return {
+        "last_12_months": patents.get("totalLast12Mo", 0),
+        "prior_12_months": patents.get("totalPrior12Mo", 0),
+        "yoy_change_pct": _patent_yoy_change(patents),
+        "top_areas": _top_tech_areas(patents),
+        "recent_notable": patents.get("recentPatents", [])[:5],
+        "innovation_score": patents.get("score"),
+        "data_source": "USPTO PatentsView",
+    }
+
+
+def _compact_contracts(contracts: dict) -> dict | None:
+    if not contracts:
+        return None
+    return {
+        "active_count": contracts.get("activeContracts", 0),
+        "total_value": contracts.get("totalValueCurrent", 0),
+        "prior_value": contracts.get("totalValuePrior", 0),
+        "distinct_agencies": contracts.get("distinctAgencies", 0),
+        "major_awards_count": contracts.get("majorAwardsCount", 0),
+        "top_agencies": [a.get("agency") for a in (contracts.get("agencyBreakdown") or [])[:5]],
+        "recent_awards": contracts.get("recentAwards", [])[:5],
+        "revenue_score": contracts.get("score"),
+        "data_source": "USASpending.gov",
+    }
+
+
+def _handle_alt_data_full(method, ticker):
+    """GET /stocks/<ticker>/alt-data — Unified alternative-data payload.
+
+    Aggregates patents, contracts, FDA, insider (pending), institutional
+    (pending), news sentiment, and a sector-specific slice. Caches the
+    full payload in DynamoDB under ALT_DATA#<ticker> for 24 hours so the
+    frontend can render the whole tab with a single request.
+    """
+    from datetime import datetime, timezone
+    import time
+
+    if method != "GET":
+        return _response(405, {"error": "Method not allowed"})
+    if not ticker or len(ticker) > 10:
+        return _response(400, {"error": "Invalid ticker"})
+
+    # Try the unified cache first
+    try:
+        cached = db.get_item(f"ALT_DATA#{ticker}", "LATEST")
+        if cached:
+            cached_at = cached.get("cachedAt", "")
+            if cached_at:
+                try:
+                    ts = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                    age_hours = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                    if age_hours < _ALT_DATA_CACHE_HOURS and cached.get("payload"):
+                        payload = cached["payload"]
+                        payload["cached"] = True
+                        return _response(200, payload)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"[AltData] unified cache read failed for {ticker}: {e}")
+
+    # Gather the raw sources (leans on existing per-source caches)
+    raw = _gather_alt_data(ticker) or {}
+    sector = _resolve_ticker_sector(ticker)
+
+    patents_block = _compact_patents(raw.get("patents"))
+    contracts_block = _compact_contracts(raw.get("contracts"))
+    fda_block = raw.get("fda") or None
+    insider_block = _gather_insider_activity(ticker)
+    institutional_block = _gather_institutional(ticker)
+    news_block = _gather_news_sentiment(ticker)
+    sector_specific = _build_sector_specific(sector, raw)
+
+    available = []
+    if patents_block and patents_block.get("last_12_months"):
+        available.append("patents")
+    if contracts_block and contracts_block.get("active_count"):
+        available.append("contracts")
+    if fda_block and fda_block.get("totalActiveTrials"):
+        available.append("fda")
+    if news_block and news_block.get("recent_headlines"):
+        available.append("news")
+
+    payload = {
+        "ticker": ticker,
+        "sector": sector,
+        "available": available,
+        "patents": patents_block,
+        "contracts": contracts_block,
+        "fda": fda_block,
+        "insider_activity": insider_block,
+        "institutional": institutional_block,
+        "news_sentiment": news_block,
+        "sector_specific": sector_specific,
+        "disclaimer": "Alternative data is educational. Not investment advice.",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cached": False,
+    }
+
+    # Cache the unified payload (24h TTL) so subsequent requests are cheap
+    try:
+        db.put_item({
+            "PK": f"ALT_DATA#{ticker}",
+            "SK": "LATEST",
+            "payload": payload,
+            "cachedAt": datetime.now(timezone.utc).isoformat(),
+            "TTL": int(time.time()) + (_ALT_DATA_CACHE_HOURS * 3600),
+        })
+    except Exception as e:
+        logger.warning(f"[AltData] unified cache write failed for {ticker}: {e}")
+
+    return _response(200, payload)
 
 
 # ─── Chart Data Endpoint ───

@@ -179,6 +179,11 @@ export const getAltData = async (ticker: string) => {
   return _deduplicatedGet(`/altdata/${ticker}`);
 };
 
+// Unified alt data payload (24h cached) for the new Alt Data tab
+export const getAltDataFull = async (ticker: string) => {
+  return _deduplicatedGet(`/stocks/${ticker}/alt-data`);
+};
+
 export const getFairPrice = async (ticker: string) => {
   return _deduplicatedGet(`/fair-price/${ticker}`);
 };

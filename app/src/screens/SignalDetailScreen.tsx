@@ -26,6 +26,7 @@ import { StockChart } from '../components/StockChart';
 import { FactorDetailCard } from '../components/FactorDetailCard';
 import { FinancialStatsGrid } from '../components/FinancialStatsGrid';
 import { StressTestCards } from '../components/StressTestCards';
+import { AltDataTab } from '../components/AltDataTab';
 import type { ChartData } from '../components/StockChart';
 import type { StockEvent, SignalHistoryPoint } from '../types';
 import type {
@@ -35,7 +36,7 @@ import type {
   FundamentalAnalysis,
   FactorAnalysis,
   FactorContribution,
-  AlternativeData,
+  AltDataFullPayload,
   FactorCategory,
   Confidence,
   ScoreLabel,
@@ -55,7 +56,7 @@ import {
   getFactorDetail,
   getFundamentals,
   getFactors,
-  getAltData,
+  getAltDataFull,
   getChartData,
   getEventsForTicker,
   getSignalHistory,
@@ -85,7 +86,7 @@ const COLLAPSE_ANIMATION = LayoutAnimation.create(
   LayoutAnimation.Properties.opacity,
 );
 
-const TAB_NAMES = ['Overview', 'Financials', 'Factor Scoring'] as const;
+const TAB_NAMES = ['Overview', 'Financials', 'Factor Scoring', 'Alt Data'] as const;
 
 const FACTOR_NAMES: Record<string, string> = {
   A1: 'Operational Disruption', A2: 'Supplier Earnings Miss', A3: 'Lead Time Extensions',
@@ -353,7 +354,8 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
   const [technicals, setTechnicals] = useState<TechnicalAnalysis | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalAnalysis | null>(null);
   const [factors, setFactors] = useState<FactorAnalysis | null>(null);
-  const [altData, setAltData] = useState<AlternativeData | null>(null);
+  const [altDataFull, setAltDataFull] = useState<AltDataFullPayload | null>(null);
+  const [altDataLoading, setAltDataLoading] = useState(false);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [chartRange, setChartRange] = useState('6M');
   const [chartLoading, setChartLoading] = useState(false);
@@ -533,8 +535,6 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
               });
             }
           }),
-        fetchWithTimeout(() => getAltData(ticker), controller.signal)
-          .then((altResult: any) => { if (altResult && altResult.available && altResult.available.length > 0) setAltData(altResult); }),
         fetchWithTimeout(() => getChartData(ticker, 'D', '6M'), controller.signal)
           .then((chartResult: any) => { if (chartResult && chartResult.candles && chartResult.candles.length > 0) setChartData(chartResult); }),
         fetchWithTimeout(() => getEventsForTicker(ticker, { limit: '5' }), controller.signal)
@@ -606,6 +606,18 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
     setActiveTab(index);
     pagerRef.current?.setPage(index);
   }, []);
+
+  // Lazy-load the unified alt-data payload when the Alt Data tab is opened
+  useEffect(() => {
+    if (activeTab !== 3 || altDataFull || altDataLoading) return;
+    setAltDataLoading(true);
+    getAltDataFull(ticker)
+      .then((res: any) => {
+        if (res) setAltDataFull(res as AltDataFullPayload);
+      })
+      .catch(() => {})
+      .finally(() => setAltDataLoading(false));
+  }, [activeTab, ticker, altDataFull, altDataLoading]);
 
   // ═══════════════════════════════════════════════════════════
   // Loading State
@@ -1164,48 +1176,21 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
       </View>
 
-      {/* SECTION 3: ALTERNATIVE DATA INSIGHTS */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Alternative Data</Text>
-        {altData && (altData.available ?? []).length > 0 ? (
-          <View style={styles.fsAltDataCard}>
-            {(altData.available ?? []).includes('patents') && altData.patents && (
-              <View style={styles.fsAltDataRow}>
-                <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
-                <View style={styles.fsAltDataContent}>
-                  <Text style={styles.fsAltDataLabel}>Patents: {altData.patents.total_filings ?? 'N/A'} filed, {altData.patents.velocity >= 0 ? '+' : ''}{safeNum(altData.patents.velocity).toFixed(0)}% YoY</Text>
-                  {altData.patents.key_areas && (
-                    <Text style={styles.fsAltDataSub}>Key areas: {altData.patents.key_areas.slice(0, 3).join(', ')}</Text>
-                  )}
-                </View>
-              </View>
-            )}
-            {(altData.available ?? []).includes('contracts') && altData.contracts && (
-              <View style={styles.fsAltDataRow}>
-                <Ionicons name="business-outline" size={16} color="#60A5FA" />
-                <View style={styles.fsAltDataContent}>
-                  <Text style={styles.fsAltDataLabel}>Gov Contracts: {altData.contracts.awardGrowth >= 0 ? '+' : ''}{safeNum(altData.contracts.awardGrowth).toFixed(0)}% YoY</Text>
-                </View>
-              </View>
-            )}
-            {(altData.available ?? []).includes('fda') && altData.fda && (
-              <View style={styles.fsAltDataRow}>
-                <Ionicons name="medical-outline" size={16} color="#8B5CF6" />
-                <View style={styles.fsAltDataContent}>
-                  <Text style={styles.fsAltDataLabel}>FDA: {altData.fda.pdufaWithin90Days} PDUFA date{altData.fda.pdufaWithin90Days !== 1 ? 's' : ''} within 90 days</Text>
-                </View>
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={styles.fsAltDataCard}>
-            <Text style={styles.fsAltDataPlaceholder}>Alternative data coming soon for {ticker}</Text>
-          </View>
-        )}
-      </View>
+      {/* NOTE: Alternative Data has moved to its own "Alt Data" tab. */}
 
       <DisclaimerFooter />
       <View style={{ height: 40 }} />
+    </ScrollView>
+  );
+
+  // ═══════════════════════════════════════════════════════════
+  // Alt Data Tab
+  // ═══════════════════════════════════════════════════════════
+
+  const renderAltDataTab = () => (
+    <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
+      <AltDataTab ticker={ticker} data={altDataFull} loading={altDataLoading} />
+      <DisclaimerFooter />
     </ScrollView>
   );
 
@@ -1255,6 +1240,9 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         </View>
         <View key="factorscoring" style={styles.page}>
           {renderFactorScoringTab()}
+        </View>
+        <View key="altdata" style={styles.page}>
+          {renderAltDataTab()}
         </View>
       </PagerView>
 
@@ -1464,13 +1452,14 @@ const styles = StyleSheet.create({
   // ── Tab Bar ──
   tabBar: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   tab: {
     flex: 1,
     paddingVertical: 12,
+    paddingHorizontal: 4,
     alignItems: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
@@ -1480,7 +1469,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   tabTextActive: {
