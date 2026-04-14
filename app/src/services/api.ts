@@ -194,6 +194,11 @@ export const getFinancials = async (ticker: string) => {
   return _deduplicatedGet(`/stocks/${ticker}/financials`);
 };
 
+/** Alias — rich Finnhub-sourced financials (valuation, profitability, growth, dividends, etc.) */
+export const getStockFinancials = async (ticker: string) => {
+  return _deduplicatedGet(`/stocks/${ticker}/financials`);
+};
+
 // ─── Charts ───
 
 export const getChartData = async (ticker: string, resolution: string = 'D', range: string = '6M') => {

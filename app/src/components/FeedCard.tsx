@@ -8,7 +8,7 @@ import { SignalBadge } from './SignalBadge';
 import { SwipeHint } from './SwipeHint';
 import { Skeleton } from './Skeleton';
 import { MiniRadarChart } from './MiniRadarChart';
-import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker, getStressTestAll } from '../services/api';
+import { getPrice, getSignalDetail, getTechnicals, getFundamentals, getFactors, getFairPrice, getInsightsForTicker, getStressTestAll, getStockFinancials } from '../services/api';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
@@ -356,7 +356,8 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       getInsightsForTicker(item.ticker, 1),
       getFairPrice(item.ticker),
       getStressTestAll(item.ticker),
-    ]).then(([priceR, signalR, techR, fundR, factorR, insightR, fairPriceR, stressR]) => {
+      getStockFinancials(item.ticker),
+    ]).then(([priceR, signalR, techR, fundR, factorR, insightR, fairPriceR, stressR, finR]) => {
       if (!mounted) return;
 
       const _ok = (r: PromiseSettledResult<any>) => {
@@ -370,10 +371,18 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       const fund = _ok(fundR);
       const factors = _ok(factorR);
       const insightData = insightR.status === 'fulfilled' ? insightR.value : null;
+      const finData = _ok(finR);
 
       const sigRaw = signalR.status === 'fulfilled' ? signalR.value : null;
       const fundRaw = fundR.status === 'fulfilled' ? fundR.value : null;
       const factorsRaw = factorR.status === 'fulfilled' ? factorR.value : null;
+
+      // Helper to extract typed values from /stocks/{ticker}/financials.
+      // The endpoint returns { categories: { <group>: { <metric>: { value, ... } } } }
+      const getCategoryValue = (d: any, category: string, key: string): any => {
+        const v = d?.categories?.[category]?.[key]?.value;
+        return v === undefined ? null : v;
+      };
 
       const ed: Partial<EnrichmentData> & Record<string, any> = {};
 
@@ -397,6 +406,14 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
         if (priceData.beta) { const b = safeNum(priceData.beta); setBeta(b); ed.beta = b; }
       }
 
+      // ── Market Cap from /stocks/financials (raw dollars, preferred when price didn't have it) ──
+      const finMarketCap = getCategoryValue(finData, 'valuation', 'market_cap');
+      if (finMarketCap != null && safeNum(finMarketCap) > 0) {
+        const mc = safeNum(finMarketCap);
+        setMarketCap(mc);
+        ed.marketCap = mc;
+      }
+
       // ── Technical Score ──
       const ta = sig?.technicalAnalysis || {};
       const ts = sig?.technicalScore ?? ta.technicalScore ?? tech?.technicalScore;
@@ -411,7 +428,8 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       if (grade && grade !== 'N/A') { setHealthGrade(grade); ed.healthGrade = grade; }
 
       // ── P/E Ratio ──
-      const pe = sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio
+      const pe = getCategoryValue(finData, 'valuation', 'trailing_pe')
+        ?? sig?.peRatio ?? sig?.ratios?.peRatio ?? fund?.ratios?.peRatio
         ?? fundRaw?.ratios?.peRatio ?? priceData?.trailingPE;
       if (pe != null && pe !== 0) {
         const v = safeNum(pe);
@@ -421,7 +439,8 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
           || fund?.ratios?.negativeEarnings || fundRaw?.ratios?.negativeEarnings;
         if (isNegEarnings) { setNegativeEarnings(true); ed.negativeEarnings = true; }
       }
-      const fpe = sig?.forwardPE ?? sig?.ratios?.forwardPE ?? fund?.ratios?.forwardPE
+      const fpe = getCategoryValue(finData, 'valuation', 'forward_pe')
+        ?? sig?.forwardPE ?? sig?.ratios?.forwardPE ?? fund?.ratios?.forwardPE
         ?? fundRaw?.ratios?.forwardPE ?? priceData?.forwardPE;
       if (fpe != null && fpe > 0) { const v = safeNum(fpe); setForwardPE(v); ed.forwardPE = v; }
 
@@ -447,37 +466,49 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       if (f != null) { const v = safeNum(f); setFScoreVal(v); ed.fScoreVal = v; }
 
       // ── Beta ──
-      const betaVal = sig?.beta ?? fund?.beta ?? fundRaw?.beta ?? priceData?.beta;
+      const betaVal = getCategoryValue(finData, 'momentum_technicals', 'beta')
+        ?? sig?.beta ?? fund?.beta ?? fundRaw?.beta ?? priceData?.beta;
       if (betaVal != null) { const v = safeNum(betaVal); setBeta(v); ed.beta = v; }
 
-      // ── New 3-row metrics from fundamentals ──
-      // Extract from categorized fundamentals (fund?.profitability?.net_margin?.value)
-      // or flat signal data (sig?.net_margin)
-      const cats = fund?.categories || fund;
-      const profitCat = cats?.profitability;
-      const growthCat = cats?.growth;
-      const divCat = cats?.dividends;
-      const valCat = cats?.valuation;
-      const ownCat = cats?.ownership;
-      const analystCat = cats?.analyst_estimates;
-
-      const revGr = sig?.revenue_growth_yoy ?? growthCat?.revenue_growth_yoy?.value ?? fundRaw?.revenue_growth_yoy;
+      // ── New 3-row metrics — prefer /stocks/financials (categories), then fund, then sig, then snapshot ──
+      const revGr = getCategoryValue(finData, 'growth', 'revenue_growth_yoy')
+        ?? sig?.revenue_growth_yoy ?? fund?.categories?.growth?.revenue_growth_yoy?.value ?? fundRaw?.revenue_growth_yoy;
       if (revGr != null) { const v = safeNum(revGr); setRevGrowth(v); ed.revGrowth = v; }
-      const epsGr = sig?.eps_growth_yoy ?? growthCat?.eps_growth_yoy?.value ?? fundRaw?.eps_growth_yoy;
+
+      const epsGr = getCategoryValue(finData, 'growth', 'eps_growth_yoy')
+        ?? sig?.eps_growth_yoy ?? fund?.categories?.growth?.eps_growth_yoy?.value ?? fundRaw?.eps_growth_yoy;
       if (epsGr != null) { const v = safeNum(epsGr); setEpsGrowth(v); ed.epsGrowth = v; }
-      const nm = sig?.net_margin ?? profitCat?.net_margin?.value ?? fundRaw?.net_margin;
+
+      const nm = getCategoryValue(finData, 'profitability', 'net_margin')
+        ?? sig?.net_margin ?? fund?.categories?.profitability?.net_margin?.value ?? fundRaw?.net_margin;
       if (nm != null) { const v = safeNum(nm); setNetMargin(v); ed.netMargin = v; }
-      const roeVal = sig?.roe ?? profitCat?.roe?.value ?? fundRaw?.roe;
+
+      const roeVal = getCategoryValue(finData, 'profitability', 'roe')
+        ?? sig?.roe ?? fund?.categories?.profitability?.roe?.value ?? fundRaw?.roe;
       if (roeVal != null) { const v = safeNum(roeVal); setRoe(v); ed.roe = v; }
-      const dy = sig?.dividend_yield ?? divCat?.dividend_yield?.value ?? fundRaw?.dividend_yield;
+
+      const dy = getCategoryValue(finData, 'dividends', 'dividend_yield')
+        ?? sig?.dividend_yield ?? fund?.categories?.dividends?.dividend_yield?.value ?? fundRaw?.dividend_yield;
       if (dy != null) { const v = safeNum(dy); setDivYield(v); ed.divYield = v; }
-      const tp = sig?.target_price ?? sig?.target_price_mean ?? analystCat?.target_price?.value ?? fundRaw?.target_price;
+
+      const tp = getCategoryValue(finData, 'analyst_estimates', 'target_price_mean')
+        ?? getCategoryValue(finData, 'analyst_estimates', 'target_price')
+        ?? sig?.target_price ?? sig?.target_price_mean
+        ?? fund?.categories?.analyst_estimates?.target_price?.value ?? fundRaw?.target_price;
       if (tp != null && tp > 0) { const v = safeNum(tp); setTargetPrice(v); ed.targetPrice = v; }
-      const si = sig?.short_pct_float ?? ownCat?.short_pct_float?.value ?? fundRaw?.short_pct_float ?? sig?.short_interest;
+
+      const si = getCategoryValue(finData, 'ownership', 'short_pct_float')
+        ?? sig?.short_pct_float ?? fund?.categories?.ownership?.short_pct_float?.value
+        ?? fundRaw?.short_pct_float ?? sig?.short_interest;
       if (si != null) { const v = safeNum(si); setShortInterest(v); ed.shortInterest = v; }
-      const eDate = sig?.earnings_date ?? sig?.earningsDate ?? analystCat?.earnings_date?.value;
+
+      const eDate = getCategoryValue(finData, 'analyst_estimates', 'earnings_date')
+        ?? sig?.earnings_date ?? sig?.earningsDate
+        ?? fund?.categories?.analyst_estimates?.earnings_date?.value;
       if (eDate) { const s = String(eDate); setEarningsDate(s); ed.earningsDate = s; }
-      const fcfy = sig?.fcf_yield ?? valCat?.fcf_yield?.value ?? fundRaw?.fcf_yield;
+
+      const fcfy = getCategoryValue(finData, 'valuation', 'fcf_yield')
+        ?? sig?.fcf_yield ?? fund?.categories?.valuation?.fcf_yield?.value ?? fundRaw?.fcf_yield;
       if (fcfy != null) { const v = safeNum(fcfy); setFcfYield(v); ed.fcfYield = v; }
 
       // ── Factor Percentiles ──
