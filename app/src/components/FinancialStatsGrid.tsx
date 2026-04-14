@@ -114,6 +114,31 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   working_capital: 'Current assets minus current liabilities. Positive means the company can fund daily operations.',
   cash_per_share: 'Total cash divided by shares outstanding. How much cash backs each share.',
   debt_to_fcf: 'Total debt divided by free cash flow. Shows how many years of FCF needed to pay off all debt.',
+  // Backend-authoritative additions
+  eps_ttm: 'Earnings per share over the trailing 12 months. A core profitability measure.',
+  earnings_growth_qoq: 'Quarter-over-quarter earnings growth. Shows the most recent profit momentum.',
+  book_value_per_share: 'Net asset value attributable to each share. A conservative anchor for valuation.',
+  years_of_consecutive_dividends: 'Consecutive years the company has paid a dividend. 25+ years earns "Dividend Aristocrat" status.',
+  target_price_low: 'Lowest analyst price target. The bearish end of the Wall Street range.',
+  target_price_mean: 'Average of analyst price targets. The consensus view on fair value.',
+  target_price_high: 'Highest analyst price target. The bullish end of the Wall Street range.',
+  recommendation_score: 'Consensus analyst rating on a 1 (Strong Sell) to 5 (Strong Buy) scale.',
+  current_q_eps_estimate: 'Expected earnings per share for the current quarter.',
+  current_y_eps_estimate: 'Expected earnings per share for the current fiscal year.',
+  eps_revision_trend: 'Net direction of analyst EPS revisions. Positive means estimates are being raised.',
+  price_change_1m: 'Price change over the last 1 month. A short-term momentum indicator.',
+  price_change_3m: 'Price change over the last 3 months. A medium-term momentum indicator.',
+  price_change_6m: 'Price change over the last 6 months. Often mirrors earnings cycles.',
+  price_change_1y: 'Price change over the last 12 months. A long-term momentum indicator.',
+  rsi_14: '14-day Relative Strength Index. Above 70 is overbought, below 30 is oversold.',
+  macd_signal: 'MACD signal line — trend-following momentum indicator. Positive favors upside.',
+  sma_20_distance: 'Percent distance from the 20-day simple moving average. Above 0 is above trend.',
+  sma_200_distance: 'Percent distance from the 200-day simple moving average. Above 0 is in a long-term uptrend.',
+  atr_14: '14-day Average True Range. A volatility gauge — higher means wider daily price swings.',
+  institutional_pct: 'Percent of shares held by funds and institutions. High levels add stability.',
+  insider_pct: 'Percent of shares held by company executives and directors.',
+  insider_buys_6m: 'Shares purchased by insiders in the last six months. Insider buying often signals confidence.',
+  insider_sells_6m: 'Shares sold by insiders in the last six months. Elevated selling can signal caution.',
 };
 
 // ── Category configuration ──
@@ -127,6 +152,50 @@ const CATEGORIES = [
   { key: 'momentum_technicals', label: 'Momentum & Technicals', icon: 'pulse-outline', emoji: '\u{26A1}' },
   { key: 'ownership', label: 'Ownership', icon: 'pie-chart-outline', emoji: '\u{1F465}' },
 ];
+
+// ── Authoritative metric keys per category (mirrors backend METRIC_CATEGORIES, 69 total) ──
+// Keeping this in sync with financial_metrics.METRIC_CATEGORIES guarantees every
+// metric renders even when the backend omits a key (we show "—" + "Data pending").
+const CATEGORY_METRICS: Record<string, string[]> = {
+  valuation: [
+    'trailing_pe', 'forward_pe', 'peg_ratio', 'price_to_sales',
+    'price_to_book', 'ev_to_ebitda', 'ev_to_revenue', 'enterprise_value',
+    'fcf_yield', 'earnings_yield', 'market_cap',
+  ],
+  profitability: [
+    'gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa',
+    'roic', 'ebitda', 'eps_ttm', 'revenue_per_share',
+  ],
+  growth: [
+    'revenue_growth_yoy', 'revenue_growth_3y_cagr', 'eps_growth_yoy',
+    'eps_growth_3y_cagr', 'fcf_growth_yoy', 'book_value_growth_yoy',
+    'revenue_growth_qoq', 'earnings_growth_qoq',
+  ],
+  financial_health: [
+    'debt_to_equity', 'current_ratio', 'quick_ratio', 'interest_coverage',
+    'total_cash', 'total_debt', 'book_value_per_share', 'cash_per_share',
+    'altman_z_score',
+  ],
+  dividends: [
+    'dividend_yield', 'payout_ratio', 'dividend_growth_5y',
+    'ex_dividend_date', 'dividend_per_share', 'years_of_consecutive_dividends',
+  ],
+  analyst_estimates: [
+    'target_price_low', 'target_price_mean', 'target_price_high',
+    'recommendation_score', 'num_analysts', 'current_q_eps_estimate',
+    'current_y_eps_estimate', 'eps_revision_trend',
+  ],
+  momentum_technicals: [
+    'price_change_1m', 'price_change_3m', 'price_change_6m',
+    'price_change_1y', 'rsi_14', 'macd_signal', 'sma_20_distance',
+    'sma_200_distance', 'beta', 'atr_14',
+  ],
+  ownership: [
+    'institutional_pct', 'insider_pct', 'short_pct_float',
+    'short_ratio', 'shares_outstanding', 'float_shares',
+    'insider_buys_6m', 'insider_sells_6m',
+  ],
+};
 
 // ── Metric display names ──
 const METRIC_LABELS: Record<string, string> = {
@@ -169,6 +238,22 @@ const METRIC_LABELS: Record<string, string> = {
   earnings_per_share: 'EPS', revenue_per_share: 'Revenue/Share',
   tangible_book_value: 'Tangible Book Value', working_capital: 'Working Capital',
   cash_per_share: 'Cash/Share', debt_to_fcf: 'Debt/FCF',
+  // Backend-authoritative keys
+  eps_ttm: 'EPS (TTM)', earnings_growth_qoq: 'Earnings Growth (QoQ)',
+  book_value_per_share: 'Book Value/Share',
+  years_of_consecutive_dividends: 'Years of Consecutive Dividends',
+  target_price_low: 'Price Target (Low)', target_price_mean: 'Price Target (Mean)',
+  target_price_high: 'Price Target (High)', recommendation_score: 'Analyst Recommendation',
+  current_q_eps_estimate: 'EPS Est. (Current Q)',
+  current_y_eps_estimate: 'EPS Est. (Current Y)',
+  eps_revision_trend: 'EPS Revision Trend',
+  price_change_1m: 'Price Change (1M)', price_change_3m: 'Price Change (3M)',
+  price_change_6m: 'Price Change (6M)', price_change_1y: 'Price Change (1Y)',
+  rsi_14: 'RSI (14)', macd_signal: 'MACD Signal',
+  sma_20_distance: 'Distance from 20D SMA', sma_200_distance: 'Distance from 200D SMA',
+  atr_14: 'ATR (14-Day)',
+  institutional_pct: 'Institutional Ownership', insider_pct: 'Insider Ownership',
+  insider_buys_6m: 'Insider Buys (6M)', insider_sells_6m: 'Insider Sells (6M)',
 };
 
 // ── Higher-is-better vs lower-is-better ──
@@ -180,12 +265,16 @@ const HIGHER_IS_BETTER = new Set([
   'free_cash_flow_margin', 'ebitda_margin', 'current_ratio', 'quick_ratio',
   'interest_coverage', 'dividend_yield', 'dividend_growth_5y', 'years_of_growth',
   'altman_z_score', 'total_cash', 'fcf_yield', 'earnings_yield',
+  'earnings_growth_qoq', 'years_of_consecutive_dividends', 'recommendation_score',
+  'eps_revision_trend', 'price_change_1m', 'price_change_3m', 'price_change_6m',
+  'price_change_1y', 'institutional_pct', 'insider_pct', 'insider_buys_6m',
 ]);
 
 const LOWER_IS_BETTER = new Set([
   'trailing_pe', 'forward_pe', 'peg_ratio', 'debt_to_equity', 'debt_to_assets',
   'short_interest', 'short_pct_float', 'short_ratio', 'ev_to_ebitda', 'ev_to_revenue',
-  'total_debt', 'net_debt', 'payout_ratio', 'shares_short',
+  'total_debt', 'net_debt', 'payout_ratio', 'shares_short', 'insider_sells_6m',
+  'atr_14',
 ]);
 
 // ── Formatting helpers ──
@@ -198,6 +287,9 @@ const PCT_METRICS = new Set([
   'short_interest', 'short_pct_float', 'price_to_52w_high', 'debt_to_assets',
   'fcf_yield', 'earnings_yield', 'book_value_growth_yoy', 'fcf_growth_yoy',
   'revenue_growth_3y_cagr', 'eps_growth_3y_cagr', 'free_cash_flow_margin',
+  'earnings_growth_qoq', 'price_change_1m', 'price_change_3m',
+  'price_change_6m', 'price_change_1y', 'sma_20_distance', 'sma_200_distance',
+  'institutional_pct', 'insider_pct',
 ]);
 
 const CURRENCY_LARGE = new Set([
@@ -208,6 +300,9 @@ const CURRENCY_LARGE = new Set([
 const PER_SHARE = new Set([
   'dividend_per_share', 'eps_estimate_current', 'eps_estimate_next', 'target_price',
   'fifty_two_week_high', 'fifty_two_week_low', 'fifty_day_ma', 'two_hundred_day_ma',
+  'target_price_low', 'target_price_mean', 'target_price_high',
+  'current_q_eps_estimate', 'current_y_eps_estimate', 'eps_ttm',
+  'book_value_per_share',
 ]);
 
 const ordinalSuffix = (n: number): string => {
@@ -223,10 +318,10 @@ const safeNum = (v: unknown): number => {
 };
 
 const formatValue = (key: string, value: unknown): string => {
-  if (value == null) return 'N/A';
+  if (value == null || value === '') return '\u2014';
   if (typeof value === 'string') return value;
   const num = safeNum(value);
-  if (!Number.isFinite(num)) return 'N/A';
+  if (!Number.isFinite(num)) return '\u2014';
   if (PCT_METRICS.has(key)) {
     const pct = Math.abs(num) < 1 && Math.abs(num) > 0 ? num * 100 : num;
     return `${pct.toFixed(2)}%`;
@@ -238,7 +333,10 @@ const formatValue = (key: string, value: unknown): string => {
     return `$${num.toLocaleString()}`;
   }
   if (PER_SHARE.has(key)) return `$${num.toFixed(2)}`;
-  if (key === 'avg_volume' || key === 'shares_outstanding' || key === 'float_shares' || key === 'shares_short') {
+  if (
+    key === 'avg_volume' || key === 'shares_outstanding' || key === 'float_shares' ||
+    key === 'shares_short' || key === 'insider_buys_6m' || key === 'insider_sells_6m'
+  ) {
     if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
     if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
     if (num >= 1e3) return `${(num / 1e3).toFixed(0)}K`;
@@ -320,28 +418,21 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = React.memo(
     );
   }
 
-  if (!financials || Object.keys(financials).length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, fontStyle: 'italic', textAlign: 'center' }}>
-          Financial data is being compiled. Check back shortly.
-        </Text>
-      </View>
-    );
-  }
+  // If the backend returns nothing, still fall through to render the schema
+  // scaffolding so every category header + metric row shows up with "Data pending".
+  const resolvedFinancials: Record<string, Record<string, MetricData>> = financials ?? {};
 
   return (
     <View>
       {CATEGORIES.map(({ key: catKey, label, icon, emoji }) => {
-        const catData = financials[catKey];
-        if (!catData || typeof catData !== 'object') return null;
-        const metrics = Object.entries(catData).filter(([, m]) => m && m.value != null);
-        if (metrics.length === 0) return null;
-        // Hide dividends if no meaningful data
-        if (catKey === 'dividends') {
-          const hasYield = metrics.some(([k, m]) => k === 'dividend_yield' && safeNum(m.value) > 0);
-          if (!hasYield) return null;
-        }
+        const catData = (resolvedFinancials[catKey] ?? {}) as Record<string, MetricData>;
+        // Always render the authoritative metric list — never filter out nulls.
+        // Missing values render as "—" with a "Data pending" hint so users see the
+        // full schema (69 metrics total across 8 categories) and know what will
+        // populate once the backend catches up.
+        const expectedKeys = CATEGORY_METRICS[catKey] || Object.keys(catData);
+        const metrics: Array<[string, MetricData]> = expectedKeys.map((k) => [k, (catData[k] ?? { value: null }) as MetricData]);
+        const availableCount = metrics.filter(([, m]) => m && m.value != null).length;
         const isExpanded = expandedCats.has(catKey);
 
         return (
@@ -356,7 +447,9 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = React.memo(
                 <Ionicons name={icon as any} size={18} color="#60A5FA" />
                 <Text style={styles.categoryName}>{label}</Text>
                 <View style={styles.metricCountBadge}>
-                  <Text style={styles.metricCountText}>{metrics.length}</Text>
+                  <Text style={styles.metricCountText}>
+                    {availableCount}/{metrics.length}
+                  </Text>
                 </View>
               </View>
               <Ionicons
@@ -412,11 +505,19 @@ export const FinancialStatsGrid: React.FC<FinancialStatsGridProps> = React.memo(
                           )}
                         </View>
                         <View style={styles.metricValueCol}>
-                          <Text style={styles.metricValue}>{formatValue(metricKey, metric.value)}</Text>
-                          {sectorMedian != null && (
-                            <Text style={styles.sectorMedian}>
-                              Sector: {formatValue(metricKey, sectorMedian)}
-                            </Text>
+                          <Text
+                            style={[styles.metricValue, metric.value == null && styles.metricValuePending]}
+                          >
+                            {formatValue(metricKey, metric.value)}
+                          </Text>
+                          {metric.value == null ? (
+                            <Text style={styles.metricPendingHint}>Data pending</Text>
+                          ) : (
+                            sectorMedian != null && (
+                              <Text style={styles.sectorMedian}>
+                                Sector: {formatValue(metricKey, sectorMedian)}
+                              </Text>
+                            )
                           )}
                         </View>
                       </View>
@@ -541,6 +642,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  metricValuePending: {
+    color: 'rgba(255,255,255,0.35)',
+    fontWeight: '600',
+  },
+  metricPendingHint: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   sectorMedian: {
     color: 'rgba(255,255,255,0.35)',

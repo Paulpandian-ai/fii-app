@@ -18,6 +18,13 @@ SCENARIOS = {
         "id": "moderate",
         "label": "Market Pullback",
         "description": "A typical correction — happens roughly every 2 years",
+        "context": (
+            "Markets sometimes pull back 10-15% without any recession in sight, "
+            "often triggered by rate scares, earnings disappointments, or "
+            "geopolitical flare-ups. Think 2018 Q4 or the 2015-2016 selloff — "
+            "painful but short-lived. Most diversified portfolios recover within "
+            "a year."
+        ),
         "historical_analog": "2018 Q4 selloff, 2015-2016 correction",
         "market_decline": -0.15,
         "rate_change": 0.01,        # +100bps
@@ -32,6 +39,13 @@ SCENARIOS = {
         "id": "recession",
         "label": "Recession",
         "description": "Similar to the 2001 downturn or 2022 bear market",
+        "context": (
+            "A classic recession drags earnings down 20-30% as consumers and "
+            "businesses tighten spending. Stocks typically lead the economy "
+            "both down and back up — the 2001 dot-com unwind and 2022 rate "
+            "cycle are the closest recent analogs. Unemployment rises, the Fed "
+            "cuts, and recoveries tend to take 1-2 years."
+        ),
         "historical_analog": "2001 dot-com recession, 2022 rate cycle",
         "market_decline": -0.30,
         "rate_change": -0.015,       # -150bps (Fed cuts)
@@ -46,6 +60,14 @@ SCENARIOS = {
         "id": "severe",
         "label": "Severe Crisis",
         "description": "A 2008-style financial crisis",
+        "context": (
+            "A once-in-a-decade financial crisis with cascading defaults, "
+            "credit markets freezing, and equities down 40-60%. The 2008 GFC "
+            "and the 2020 COVID crash are the playbook here — severe, "
+            "frightening, but historically temporary. Recoveries have taken "
+            "2-4 years in the past, and the Fed has consistently intervened "
+            "aggressively to backstop markets."
+        ),
         "historical_analog": "2008 GFC, 2020 COVID crash",
         "market_decline": -0.50,
         "rate_change": -0.03,         # -300bps
@@ -60,6 +82,14 @@ SCENARIOS = {
         "id": "sector_shock",
         "label": "Sector Shock",
         "description": "Sector-specific adverse event",
+        "context": (
+            "A targeted event hits this stock's sector while the broader "
+            "market holds up — think drug pricing reform for healthcare, tech "
+            "regulation for software, or an oil price collapse for energy. "
+            "The damage is concentrated, so diversification matters: a "
+            "single-sector tilt can amplify losses even when the S&P 500 is "
+            "flat."
+        ),
         "historical_analog": "Varies by sector",
         "market_decline": -0.15,  # default fallback = moderate
         "rate_change": 0.01,
@@ -69,6 +99,27 @@ SCENARIOS = {
         "spread_widening": 0.005,
         "risk_level": "ELEVATED",
         "recovery_estimate": "1-2 years based on historical analogs",
+    },
+    "bull_rally": {
+        "id": "bull_rally",
+        "label": "Bull Market Rally",
+        "description": "A strong 6-12 month rally — typical of early cycle recovery or AI-style melt-up",
+        "context": (
+            "Bulls don't show up on schedule, but when they do the gains are "
+            "concentrated and fast. The 2020-2021 post-COVID rally and the "
+            "2023 AI-driven advance both delivered 25-40% in 6-12 months. "
+            "Sitting in cash through these periods is one of the biggest "
+            "risks most investors underestimate."
+        ),
+        "historical_analog": "2020-2021 post-COVID rally, 2023 AI rally",
+        "market_decline": 0.32,       # +32% baseline upside (beta-adjusted per stock)
+        "rate_change": -0.005,        # mildly accommodative or stable
+        "unemployment_change": -0.01,  # improving jobs backdrop
+        "gdp_change": 0.02,
+        "vix_peak": 18,
+        "spread_widening": -0.005,    # credit tightens
+        "risk_level": "UPSIDE",
+        "recovery_estimate": "6-12 months of sustained upside based on historical analogs",
     },
 }
 
@@ -194,8 +245,13 @@ def run_stress_test(ticker, scenario_key, price_data, tech_data, health_data,
         description = scenario["description"]
 
     stress_return = (beta * market_decline) + sector_adj + idiosyncratic
-    # Apply floor/ceiling
-    stress_return = max(-0.95, min(0.10, stress_return))
+    # Apply floor/ceiling. Bull Rally uses a higher ceiling since the scenario
+    # is explicitly modeling 25-40% 6-12 month rallies; defensive sectors with
+    # sub-1 betas should still show meaningful upside rather than clipping at 10%.
+    if scenario_key == "bull_rally":
+        stress_return = max(-0.05, min(0.60, stress_return))
+    else:
+        stress_return = max(-0.95, min(0.10, stress_return))
 
     estimated_impact_pct = round(stress_return * 100, 1)
     invested = 10000
@@ -206,6 +262,7 @@ def run_stress_test(ticker, scenario_key, price_data, tech_data, health_data,
         "id": scenario.get("id", scenario_key),
         "label": label,
         "description": description,
+        "context": scenario.get("context", ""),
         "historical_analog": scenario.get("historical_analog", ""),
         "scenarioKey": scenario_key,
         "estimated_impact": estimated_impact_pct,
@@ -230,9 +287,9 @@ def run_stress_test(ticker, scenario_key, price_data, tech_data, health_data,
 
 
 def run_all_scenarios(ticker, price_data, tech_data, health_data, signal_data):
-    """Run all 4 scenarios and return enriched results with overall risk rating."""
+    """Run all 5 scenarios and return enriched results with overall risk rating."""
     results = []
-    for key in ["moderate", "recession", "severe", "sector_shock"]:
+    for key in ["moderate", "recession", "severe", "sector_shock", "bull_rally"]:
         results.append(
             run_stress_test(ticker, key, price_data, tech_data,
                             health_data, signal_data)
@@ -424,13 +481,19 @@ def _sector_adjustment(sector, scenario_key):
 
     for name, adj in cyclical_sectors.items():
         if name in sector:
-            # Scale adjustment by scenario severity
+            # Scale adjustment by scenario severity. In bull rallies cyclicals
+            # get a tailwind, so we invert the sign and cap the magnitude.
+            if scenario_key == "bull_rally":
+                return -adj * 0.8
             severity = {"moderate": 0.5, "recession": 1.0, "severe": 1.5,
                         "sector_shock": 1.2}.get(scenario_key, 1.0)
             return adj * severity
 
     for name, adj in defensive_sectors.items():
         if name in sector:
+            # Defensives underperform in rip-your-face-off bull rallies.
+            if scenario_key == "bull_rally":
+                return -adj * 0.6
             severity = {"moderate": 0.5, "recession": 1.0, "severe": 1.5,
                         "sector_shock": 0.3}.get(scenario_key, 1.0)
             return adj * severity

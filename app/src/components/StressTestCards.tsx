@@ -14,11 +14,13 @@ interface StressScenario {
   id: string;
   label: string;
   description: string;
+  context?: string;
   scenarioKey: string;
   estimated_impact: number;
   dollar_impact: DollarImpact;
   recovery_estimate: string;
   risk_level: string;
+  historical_analog?: string;
 }
 
 interface HistoricalEvent {
@@ -59,6 +61,26 @@ const RISK_COLORS: Record<string, { bg: string; text: string; bar: string }> = {
     text: '#5856D6',
     bar: '#5856D6',
   },
+  UPSIDE: {
+    bg: 'rgba(0,201,167,0.12)',
+    text: '#00C9A7',
+    bar: '#00C9A7',
+  },
+};
+
+// Fallback context strings for scenarios that ship without a `context` field
+// (older cached reports, sector_shock fallback, etc.).
+const FALLBACK_CONTEXTS: Record<string, string> = {
+  moderate:
+    'Markets sometimes pull back 10-15% without any recession in sight. Think 2018 Q4 or the 2015-2016 selloff \u2014 painful but short-lived. Most diversified portfolios recover within a year.',
+  recession:
+    'A classic recession drags earnings down 20-30% as consumers tighten spending. The 2001 dot-com unwind and 2022 rate cycle are the closest analogs. Recoveries typically take 1-2 years.',
+  severe:
+    'A once-in-a-decade crisis with cascading defaults and equities down 40-60%. 2008 and 2020 are the playbook \u2014 severe, frightening, but historically temporary. Recoveries have taken 2-4 years.',
+  sector_shock:
+    'A targeted event hits this stock\u2019s sector while the broader market holds up. Damage is concentrated, so diversification matters \u2014 a single-sector tilt can amplify losses even when the S&P 500 is flat.',
+  bull_rally:
+    'Bulls don\u2019t show up on schedule, but when they do the gains are concentrated and fast. The 2020-2021 post-COVID rally and 2023 AI advance both delivered 25-40% in 6-12 months. Sitting in cash through these periods is one of the biggest risks investors underestimate.',
 };
 
 function getRiskColors(level: string) {
@@ -108,6 +130,12 @@ export const StressTestCards: React.FC<Props> = React.memo(({ report, investment
         const impactPct = sc.estimated_impact;
         const resultAmt = Math.max(0, Math.round(investmentAmount * (1 + impactPct / 100)));
         const isSevere = sc.scenarioKey === 'severe';
+        const isUpside = sc.scenarioKey === 'bull_rally' || impactPct > 0;
+        const contextText = sc.context || FALLBACK_CONTEXTS[sc.scenarioKey] || '';
+        const durationLabel = isUpside ? 'Typical duration' : 'Recovery';
+        const cleanedDuration = (sc.recovery_estimate || '')
+          .replace('based on historical analogs', '')
+          .trim();
 
         return (
           <View
@@ -116,7 +144,7 @@ export const StressTestCards: React.FC<Props> = React.memo(({ report, investment
           >
             <View style={s.cardHeaderRow}>
               <Text style={[s.cardLabel, { color: colors.text }]}>
-                {isSevere ? '\u26A0\uFE0F ' : ''}{sc.label}
+                {isSevere ? '\u26A0\uFE0F ' : isUpside ? '\u{1F680} ' : ''}{sc.label}
               </Text>
               <Text style={[s.cardImpact, { color: colors.text }]}>
                 Est. {impactPct > 0 ? '+' : ''}{impactPct}%
@@ -129,9 +157,21 @@ export const StressTestCards: React.FC<Props> = React.memo(({ report, investment
 
             <RiskBar impact={impactPct} riskLevel={sc.risk_level} />
 
-            <Text style={s.recoveryText}>
-              Recovery: ~{sc.recovery_estimate.replace('based on historical analogs', '').trim()}
-            </Text>
+            {!!cleanedDuration && (
+              <Text style={s.recoveryText}>
+                {durationLabel}: ~{cleanedDuration}
+              </Text>
+            )}
+
+            {!!contextText && (
+              <Text style={s.contextText}>{contextText}</Text>
+            )}
+
+            {!!sc.historical_analog && (
+              <Text style={s.analogText}>
+                Historical analog: {sc.historical_analog}
+              </Text>
+            )}
           </View>
         );
       })}
@@ -239,6 +279,18 @@ const s = StyleSheet.create({
   recoveryText: {
     color: 'rgba(255,255,255,0.45)',
     fontSize: 12,
+  },
+  contextText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+  },
+  analogText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 
   // ── Historical ──

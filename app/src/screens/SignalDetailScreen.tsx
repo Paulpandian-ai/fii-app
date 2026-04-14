@@ -750,7 +750,89 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         )}
       </View>
 
-      {/* SECTION 2: RESILIENCE ASSESSMENT (renamed from Risk Check) */}
+      {/* SECTION 2: SCORE DRIVERS — Moved up so users see WHY before risk scenarios */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Score Drivers</Text>
+        {(() => {
+          const SOURCE_MAP: Record<string, string[]> = {
+            supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
+            supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
+            geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
+            monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
+            correlations: ['Finnhub Prices', 'Calculated'],
+            risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
+          };
+          const DIMENSION_ALIASES: Record<string, string> = {
+            'supply chain (upstream)': 'supply_chain_upstream',
+            'supply chain upstream': 'supply_chain_upstream',
+            'upstream': 'supply_chain_upstream',
+            'supply_chain_upstream': 'supply_chain_upstream',
+            'supply chain (downstream)': 'supply_chain_downstream',
+            'supply chain downstream': 'supply_chain_downstream',
+            'downstream': 'supply_chain_downstream',
+            'supply_chain_downstream': 'supply_chain_downstream',
+            'geopolitical': 'geopolitical',
+            'geopolitics': 'geopolitical',
+            'monetary': 'monetary',
+            'monetary policy': 'monetary',
+            'monetary_policy': 'monetary',
+            'correlations': 'correlations',
+            'correlation': 'correlations',
+            'risk_performance': 'risk_performance',
+            'risk & performance': 'risk_performance',
+            'risk performance': 'risk_performance',
+            'performance': 'risk_performance',
+          };
+
+          return FACTOR_GAUGE_AXES.map((axis) => {
+            const dimData = factorSummaries[axis.dimKey];
+            const driverMatch = scoreDrivers.find(
+              (d) => {
+                const normalized = DIMENSION_ALIASES[d.factor.toLowerCase()] || d.factor;
+                return normalized === axis.dimKey || d.factor.toLowerCase().includes(axis.matchKey);
+              },
+            );
+            const score = dimData?.score ?? 5;
+            const direction = driverMatch?.direction || (score >= 6 ? 'positive' : score >= 4 ? 'neutral' : 'negative');
+            const directionIcon = direction === 'positive' || direction === 'up' ? 'ellipse' : direction === 'neutral' ? 'ellipse' : 'ellipse';
+            const directionColor = direction === 'positive' || direction === 'up' ? '#00C9A7' : direction === 'neutral' ? '#F5A623' : '#FF6B6B';
+            const summary = dimData?.summary && dimData.summary !== 'pending'
+              ? dimData.summary
+              : driverMatch?.description
+              ? translateDriverDescription(driverMatch.description)
+              : axis.tooltip;
+            const sources = SOURCE_MAP[axis.dimKey] || ['Calculated'];
+
+            return (
+              <TouchableOpacity
+                key={axis.key}
+                style={styles.driverRow}
+                onPress={() => setSelectedDimension(axis.dimKey)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.driverDirectionDot, { backgroundColor: directionColor }]} />
+                <View style={styles.driverContent}>
+                  <View style={styles.driverHeaderRow}>
+                    <Text style={styles.driverFactor}>{axis.label}</Text>
+                    <Text style={[styles.driverScoreText, { color: directionColor }]}>{score}/10</Text>
+                  </View>
+                  <Text style={styles.driverDesc}>{summary}</Text>
+                  <View style={styles.sourceTagRow}>
+                    {sources.map(tag => (
+                      <View key={tag} style={styles.sourceTag}>
+                        <Text style={styles.sourceTagText}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          });
+        })()}
+        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
+      </View>
+
+      {/* SECTION 3: RESILIENCE ASSESSMENT (renamed from Risk Check) */}
       <View style={styles.riskCard}>
         <View style={styles.riskCardHeader}>
           <Ionicons name="shield-checkmark" size={18} color="#00C9A7" />
@@ -871,89 +953,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
       </View>
 
-      {/* SECTION 3: SCORE DRIVERS — ALL 6 FACTORS with source citations */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Score Drivers</Text>
-        {(() => {
-          const SOURCE_MAP: Record<string, string[]> = {
-            supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
-            supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
-            geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
-            monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
-            correlations: ['Finnhub Prices', 'Calculated'],
-            risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
-          };
-          const DIMENSION_ALIASES: Record<string, string> = {
-            'supply chain (upstream)': 'supply_chain_upstream',
-            'supply chain upstream': 'supply_chain_upstream',
-            'upstream': 'supply_chain_upstream',
-            'supply_chain_upstream': 'supply_chain_upstream',
-            'supply chain (downstream)': 'supply_chain_downstream',
-            'supply chain downstream': 'supply_chain_downstream',
-            'downstream': 'supply_chain_downstream',
-            'supply_chain_downstream': 'supply_chain_downstream',
-            'geopolitical': 'geopolitical',
-            'geopolitics': 'geopolitical',
-            'monetary': 'monetary',
-            'monetary policy': 'monetary',
-            'monetary_policy': 'monetary',
-            'correlations': 'correlations',
-            'correlation': 'correlations',
-            'risk_performance': 'risk_performance',
-            'risk & performance': 'risk_performance',
-            'risk performance': 'risk_performance',
-            'performance': 'risk_performance',
-          };
-
-          return FACTOR_GAUGE_AXES.map((axis) => {
-            const dimData = factorSummaries[axis.dimKey];
-            const driverMatch = scoreDrivers.find(
-              (d) => {
-                const normalized = DIMENSION_ALIASES[d.factor.toLowerCase()] || d.factor;
-                return normalized === axis.dimKey || d.factor.toLowerCase().includes(axis.matchKey);
-              },
-            );
-            const score = dimData?.score ?? 5;
-            const direction = driverMatch?.direction || (score >= 6 ? 'positive' : score >= 4 ? 'neutral' : 'negative');
-            const directionIcon = direction === 'positive' || direction === 'up' ? 'ellipse' : direction === 'neutral' ? 'ellipse' : 'ellipse';
-            const directionColor = direction === 'positive' || direction === 'up' ? '#00C9A7' : direction === 'neutral' ? '#F5A623' : '#FF6B6B';
-            const summary = dimData?.summary && dimData.summary !== 'pending'
-              ? dimData.summary
-              : driverMatch?.description
-              ? translateDriverDescription(driverMatch.description)
-              : axis.tooltip;
-            const sources = SOURCE_MAP[axis.dimKey] || ['Calculated'];
-
-            return (
-              <TouchableOpacity
-                key={axis.key}
-                style={styles.driverRow}
-                onPress={() => setSelectedDimension(axis.dimKey)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.driverDirectionDot, { backgroundColor: directionColor }]} />
-                <View style={styles.driverContent}>
-                  <View style={styles.driverHeaderRow}>
-                    <Text style={styles.driverFactor}>{axis.label}</Text>
-                    <Text style={[styles.driverScoreText, { color: directionColor }]}>{score}/10</Text>
-                  </View>
-                  <Text style={styles.driverDesc}>{summary}</Text>
-                  <View style={styles.sourceTagRow}>
-                    {sources.map(tag => (
-                      <View key={tag} style={styles.sourceTag}>
-                        <Text style={styles.sourceTagText}>{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          });
-        })()}
-        <Text style={styles.aiSectionDisclaimer}>AI-generated analysis for educational purposes</Text>
-      </View>
-
-      {/* SECTION 4: PEER COMPARISON — List format */}
+      {/* SECTION 4: PEER COMPARISON — List format with sticky header + zebra rows */}
       {peerStocks.length > 0 && (() => {
         const sortedPeers = [...peerStocks].sort((a, b) => b.score - a.score);
 
@@ -961,13 +961,20 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Peer Comparison</Text>
             <View style={styles.peerListContainer}>
-              {sortedPeers.slice(0, 5).map((peer) => {
+              <View style={styles.peerListHeaderRow}>
+                <Text style={[styles.peerListHeaderCell, styles.peerListHeaderTicker]}>Ticker</Text>
+                <Text style={[styles.peerListHeaderCell, styles.peerListHeaderName]}>Company</Text>
+                <Text style={[styles.peerListHeaderCell, styles.peerListHeaderScore]}>Score</Text>
+                <Text style={[styles.peerListHeaderCell, styles.peerListHeaderDiff]}>vs {ticker}</Text>
+              </View>
+              {sortedPeers.slice(0, 5).map((peer, idx) => {
                 const diff = peer.score - compositeScore;
                 const diffColor = diff > 0 ? '#00C9A7' : diff < 0 ? '#F5A623' : 'rgba(255,255,255,0.5)';
+                const isAlt = idx % 2 === 1;
                 return (
                   <TouchableOpacity
                     key={peer.ticker}
-                    style={styles.peerListRow}
+                    style={[styles.peerListRow, isAlt && styles.peerListRowAlt]}
                     onPress={() => navigation.push('SignalDetail', { ticker: peer.ticker, companyName: peer.companyName })}
                     activeOpacity={0.7}
                   >
@@ -1030,135 +1037,131 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
 
   const renderFactorScoringTab = () => (
     <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-      {/* SECTION 1: ALL 18 SUB-FACTORS — Unified Score View */}
+      {/* SECTION 1: PARENT FACTORS — Collapsible card per factor with
+          sub-factors FIRST and commentary BELOW. Replaces the old split of
+          "All Sub-Factors" + "Factor Commentary". */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>All Sub-Factors</Text>
+        <Text style={styles.sectionTitle}>Factor Breakdown</Text>
         {categories.length > 0 ? (
           categories.map((cat) => {
-            const dimKey = CATEGORIES.find(c => c.id === cat.id)?.id;
             const factorAxisMap: Record<string, string> = { A: 'supply_chain_upstream', B: 'supply_chain_downstream', C: 'geopolitical', D: 'monetary', E: 'correlations', F: 'risk_performance' };
-            const dimData = factorSummaries[factorAxisMap[cat.id] || ''];
+            const SOURCE_MAP: Record<string, string[]> = {
+              supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
+              supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
+              geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
+              monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
+              correlations: ['Finnhub Prices', 'Calculated'],
+              risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
+            };
+
+            const dimKey = factorAxisMap[cat.id] || '';
+            const dimData = factorSummaries[dimKey];
+            const axis = FACTOR_GAUGE_AXES.find((a) => a.dimKey === dimKey);
             const parentScore = dimData?.score ?? 5;
+            const isExpanded = expandedCategory === cat.id;
+            const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
+            const parentScoreColor = parentScore >= 6 ? '#00C9A7' : parentScore >= 4 ? '#F5A623' : '#FF6B6B';
+            const parentLabel = dimData?.score_label || (parentScore >= 7 ? 'Strong' : parentScore >= 5 ? 'Moderate' : 'Weak');
 
             return (
               <View key={`fscore-${cat.id}`} style={styles.fsGroupCard}>
-                {/* Parent factor header */}
-                <View style={styles.fsGroupHeader}>
+                {/* Parent factor header — now collapsible */}
+                <TouchableOpacity
+                  style={styles.fsGroupHeader}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
+                    setExpandedCategory(isExpanded ? null : cat.id);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={isExpanded ? 'chevron-down' : 'chevron-forward'}
+                    size={14}
+                    color="rgba(255,255,255,0.5)"
+                  />
                   <Ionicons name={cat.icon as any} size={16} color="#60A5FA" />
                   <Text style={styles.fsGroupName}>{cat.name}</Text>
-                  <Text style={[styles.fsGroupScore, { color: parentScore >= 6 ? '#00C9A7' : parentScore >= 4 ? '#F5A623' : '#FF6B6B' }]}>
+                  <Text style={[styles.fsGroupLabel, { color: parentScoreColor }]}>{parentLabel}</Text>
+                  <Text style={[styles.fsGroupScore, { color: parentScoreColor }]}>
                     {parentScore}/10
                   </Text>
-                </View>
+                </TouchableOpacity>
 
-                {/* Sub-factors */}
-                {cat.subFactors.map((sf) => {
-                  const sfVal = safeNum(sf.score);
-                  const hasSubScore = sf.score !== 0 || (analysis?.factorDetails?.[sf.id]?.score != null);
-                  const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
-                  const sfColor = sfVal > 0.5 ? '#00C9A7' : sfVal >= -0.5 ? '#F5A623' : '#FF6B6B';
-                  const confLabel = Math.abs(sfVal) > 1 ? 'High' : Math.abs(sfVal) > 0.3 ? 'Med' : 'Low';
-                  const dirLabel = sfVal > 0.5 ? 'Positive' : sfVal >= -0.5 ? 'Neutral' : 'Negative';
+                {isExpanded && (
+                  <>
+                    {/* Sub-factors FIRST */}
+                    {cat.subFactors.map((sf) => {
+                      const sfVal = safeNum(sf.score);
+                      const hasSubScore = sf.score !== 0 || (analysis?.factorDetails?.[sf.id]?.score != null);
+                      const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
+                      const sfColor = sfVal > 0.5 ? '#00C9A7' : sfVal >= -0.5 ? '#F5A623' : '#FF6B6B';
+                      const confLabel = Math.abs(sfVal) > 1 ? 'High' : Math.abs(sfVal) > 0.3 ? 'Med' : 'Low';
+                      const dirLabel = sfVal > 0.5 ? 'Positive' : sfVal >= -0.5 ? 'Neutral' : 'Negative';
 
-                  return (
-                    <View key={sf.id} style={styles.fsSubRow}>
-                      <View style={styles.fsSubHeader}>
-                        <Text style={styles.fsSubId}>{sf.id}</Text>
-                        <Text style={styles.fsSubName}>{sf.name}</Text>
-                      </View>
-                      <View style={styles.fsSubScoreRow}>
-                        <Text style={[styles.fsSubScoreVal, { color: sfColor }]}>
-                          {sfVal >= 0 ? '+' : ''}{sfVal.toFixed(2)}
-                        </Text>
-                        <View style={styles.fsBarTrack}>
-                          <View style={[styles.fsBarFill, { width: `${barPct}%`, backgroundColor: sfColor }]} />
+                      return (
+                        <View key={sf.id} style={styles.fsSubRow}>
+                          <View style={styles.fsSubHeader}>
+                            <Text style={styles.fsSubId}>{sf.id}</Text>
+                            <Text style={styles.fsSubName}>{sf.name}</Text>
+                          </View>
+                          <View style={styles.fsSubScoreRow}>
+                            <Text style={[styles.fsSubScoreVal, { color: sfColor }]}>
+                              {sfVal >= 0 ? '+' : ''}{sfVal.toFixed(2)}
+                            </Text>
+                            <View style={styles.fsBarTrack}>
+                              <View style={[styles.fsBarFill, { width: `${barPct}%`, backgroundColor: sfColor }]} />
+                            </View>
+                            <Text style={[styles.fsSubLabel, { color: sfColor }]}>{dirLabel}</Text>
+                            <Text style={styles.fsSubConf}>{confLabel}</Text>
+                          </View>
+                          {!hasSubScore && (
+                            <Text style={styles.fsSubNote}>Based on overall factor assessment</Text>
+                          )}
                         </View>
-                        <Text style={[styles.fsSubLabel, { color: sfColor }]}>{dirLabel}</Text>
-                        <Text style={styles.fsSubConf}>{confLabel}</Text>
-                      </View>
-                      {!hasSubScore && (
-                        <Text style={styles.fsSubNote}>Based on overall factor assessment</Text>
+                      );
+                    })}
+
+                    {/* Commentary BELOW sub-factors */}
+                    <View style={styles.fsCommentaryBody}>
+                      <Text style={styles.fsCommentaryTitle}>Commentary:</Text>
+                      {hasSummary ? (
+                        <>
+                          {dimData.summary.split('. ').filter(Boolean).slice(0, 3).map((finding: string, i: number) => (
+                            <View key={i} style={styles.fsCommentaryFinding}>
+                              <Text style={styles.fsCommentaryBullet}>{'\u2022'}</Text>
+                              <Text style={styles.fsCommentaryText}>
+                                {finding.endsWith('.') ? finding : `${finding}.`}
+                              </Text>
+                            </View>
+                          ))}
+                          <View style={styles.sourceTagRow}>
+                            {(SOURCE_MAP[dimKey] || ['Calculated']).map((tag) => (
+                              <View key={tag} style={styles.sourceTag}>
+                                <Text style={styles.sourceTagText}>{tag}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </>
+                      ) : (
+                        <Text style={styles.fsCommentaryText}>
+                          {axis?.tooltip || 'Detailed commentary is pending for this factor.'}
+                        </Text>
                       )}
+                      <View style={styles.fsCommentaryMeta}>
+                        <Text style={styles.fsCommentaryConf}>
+                          Confidence: {dimData?.confidence || 'Medium'}
+                        </Text>
+                        <Text style={styles.fsCommentaryDate}>Data as of: March 2026</Text>
+                      </View>
                     </View>
-                  );
-                })}
+                  </>
+                )}
               </View>
             );
           })
         ) : (
           <Text style={styles.emptyText}>Factor data loading...</Text>
         )}
-      </View>
-
-      {/* SECTION 2: FACTOR BREAKDOWN — Expandable Commentary Cards */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Factor Commentary</Text>
-        {FACTOR_GAUGE_AXES.map((axis) => {
-          const dimData = factorSummaries[axis.dimKey];
-          const score = dimData?.score ?? 5;
-          const scoreLabel2 = dimData?.score_label || (score >= 7 ? 'Strong' : score >= 5 ? 'Moderate' : 'Weak');
-          const isExpanded = expandedCategory === axis.key;
-          const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
-          const scoreColor = score >= 7 ? '#00C9A7' : score >= 5 ? '#F5A623' : '#FF6B6B';
-
-          const SOURCE_MAP: Record<string, string[]> = {
-            supply_chain_upstream: ['SEC EDGAR', 'Finnhub Supply Chain'],
-            supply_chain_downstream: ['SEC EDGAR', 'Finnhub Revenue'],
-            geopolitical: ['GPR Index', 'SEC EDGAR Risk Factors'],
-            monetary: ['FRED Fed Funds', 'FRED CPI', 'FRED Treasury'],
-            correlations: ['Finnhub Prices', 'Calculated'],
-            risk_performance: ['Finnhub Fundamentals', 'SEC EDGAR Earnings'],
-          };
-
-          return (
-            <TouchableOpacity
-              key={`commentary-${axis.key}`}
-              style={styles.fsCommentaryCard}
-              onPress={() => {
-                LayoutAnimation.configureNext(COLLAPSE_ANIMATION);
-                setExpandedCategory(isExpanded ? null : axis.key);
-              }}
-              activeOpacity={0.8}
-            >
-              <View style={styles.fsCommentaryHeader}>
-                <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={16} color="rgba(255,255,255,0.5)" />
-                <Text style={styles.fsCommentaryName}>{axis.label}</Text>
-                <Text style={[styles.fsCommentaryScore, { color: scoreColor }]}>{score}/10</Text>
-                <Text style={[styles.fsCommentaryLabel, { color: scoreColor }]}>{scoreLabel2}</Text>
-              </View>
-              {isExpanded && (
-                <View style={styles.fsCommentaryBody}>
-                  {hasSummary ? (
-                    <>
-                      <Text style={styles.fsCommentaryTitle}>Key Findings:</Text>
-                      {dimData.summary.split('. ').filter(Boolean).slice(0, 3).map((finding: string, i: number) => (
-                        <View key={i} style={styles.fsCommentaryFinding}>
-                          <Text style={styles.fsCommentaryBullet}>{'\u2022'}</Text>
-                          <Text style={styles.fsCommentaryText}>
-                            {finding.endsWith('.') ? finding : `${finding}.`}
-                          </Text>
-                        </View>
-                      ))}
-                      <View style={styles.sourceTagRow}>
-                        {(SOURCE_MAP[axis.dimKey] || ['Calculated']).map(tag => (
-                          <View key={tag} style={styles.sourceTag}>
-                            <Text style={styles.sourceTagText}>{tag}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.fsCommentaryText}>{axis.tooltip}</Text>
-                  )}
-                  <View style={styles.fsCommentaryMeta}>
-                    <Text style={styles.fsCommentaryConf}>Confidence: {dimData?.confidence || 'Medium'}</Text>
-                    <Text style={styles.fsCommentaryDate}>Data as of: March 2026</Text>
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
       </View>
 
       {/* SECTION 3: ALTERNATIVE DATA INSIGHTS */}
@@ -1767,6 +1770,38 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
+  peerListHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(96,165,250,0.08)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(96,165,250,0.18)',
+  },
+  peerListHeaderCell: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  peerListHeaderTicker: {
+    width: 55,
+  },
+  peerListHeaderName: {
+    flex: 1,
+    marginRight: 8,
+  },
+  peerListHeaderScore: {
+    width: 40,
+    textAlign: 'right',
+    marginRight: 10,
+  },
+  peerListHeaderDiff: {
+    width: 60,
+    textAlign: 'right',
+  },
   peerListRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1774,6 +1809,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  peerListRowAlt: {
+    backgroundColor: 'rgba(255,255,255,0.02)',
   },
   peerListTicker: {
     color: '#FFFFFF',
@@ -1797,7 +1835,7 @@ const styles = StyleSheet.create({
   peerListDiff: {
     fontSize: 12,
     fontWeight: '700',
-    width: 40,
+    width: 60,
     textAlign: 'right',
   },
 
@@ -2197,6 +2235,13 @@ const styles = StyleSheet.create({
     flex: 1,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  fsGroupLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginRight: 4,
   },
   fsGroupScore: {
     fontSize: 14,
