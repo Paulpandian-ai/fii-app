@@ -21,7 +21,14 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { usePortfolioStore } from '../store/portfolioStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useSignalStore } from '../store/signalStore';
-import { getPortfolioHealth, getBatchPrices, batchSignals, getSignalDetail } from '../services/api';
+import {
+  getPortfolioHealth,
+  getBatchPrices,
+  batchSignals,
+  getSignalDetail,
+  getFundamentals,
+  getStressTestAll,
+} from '../services/api';
 import { MiniRadarChart } from '../components/MiniRadarChart';
 import { AddHoldingSheet } from '../components/AddHoldingSheet';
 import { CSVUploadSheet } from '../components/CSVUploadSheet';
@@ -494,14 +501,66 @@ export const PortfolioScreen: React.FC = () => {
         }
         setWlSignalData(newData);
 
-        // Fetch full signal detail for each ticker to get enrichment data
+        // Fetch full signal detail for each ticker to get enrichment data.
+        // Also fetch fundamentals + stress in parallel so the rich watchlist
+        // card matches FeedCard richness (growth, margins, ROE, div yield,
+        // stress summary line).
         for (const ticker of uniqueTickers) {
           try {
-            const detail = await getSignalDetail(ticker);
+            const [detail, fund, stress] = await Promise.all([
+              getSignalDetail(ticker).catch(() => null) as Promise<any>,
+              getFundamentals(ticker).catch(() => null) as Promise<any>,
+              getStressTestAll(ticker).catch(() => null) as Promise<any>,
+            ]);
             if (!mounted) return;
             if (detail?.ticker) {
               newData[detail.ticker] = { ...newData[detail.ticker], ...detail };
               setWlSignalData({ ...newData });
+
+              // ── Extract richer fundamentals (categorized or flat) ──
+              const fundRaw = fund?.fundamentals ?? fund ?? {};
+              const growthCat = fundRaw?.growth ?? {};
+              const profitCat = fundRaw?.profitability ?? {};
+              const divCat = fundRaw?.dividends ?? {};
+              const sigRaw: any = detail ?? {};
+
+              const pickNum = (v: any): number | null => {
+                if (v == null) return null;
+                const n = typeof v === 'number' ? v : Number(v);
+                return Number.isFinite(n) ? n : null;
+              };
+
+              const revGrowth = pickNum(
+                sigRaw.revenue_growth_yoy ?? growthCat?.revenue_growth_yoy?.value ?? fundRaw?.revenue_growth_yoy,
+              );
+              const epsGrowth = pickNum(
+                sigRaw.eps_growth_yoy ?? growthCat?.eps_growth_yoy?.value ?? fundRaw?.eps_growth_yoy,
+              );
+              const netMargin = pickNum(
+                sigRaw.net_margin ?? profitCat?.net_margin?.value ?? fundRaw?.net_margin,
+              );
+              const roe = pickNum(
+                sigRaw.roe ?? profitCat?.roe?.value ?? fundRaw?.roe,
+              );
+              const divYield = pickNum(
+                sigRaw.dividend_yield ?? divCat?.dividend_yield?.value ?? fundRaw?.dividend_yield,
+              );
+
+              // ── Stress summary (pullback / recession / severe) ──
+              const scenarios: any[] = Array.isArray(stress?.report?.scenarios)
+                ? stress.report.scenarios
+                : Array.isArray(stress?.scenarios)
+                  ? stress.scenarios
+                  : [];
+              const stressByKey: Record<string, number | null> = {
+                moderate: null, recession: null, severe: null,
+              };
+              for (const sc of scenarios) {
+                const key = sc?.scenarioKey || sc?.id || sc?.scenario_key;
+                const imp = pickNum(sc?.estimated_impact ?? sc?.impact);
+                if (key && key in stressByKey) stressByKey[key] = imp;
+              }
+
               // Populate enrichmentCache so price/metrics are available
               setEnrichment(ticker, {
                 price: detail.price ?? detail.currentPrice ?? null,
@@ -528,6 +587,14 @@ export const PortfolioScreen: React.FC = () => {
                 enrichedInsight: detail.enrichedInsight ?? detail.enriched_insight ?? null,
                 aiHeadline: detail.aiHeadline ?? detail.ai_headline ?? null,
                 aiAction: detail.aiAction ?? detail.ai_action ?? null,
+                revGrowth,
+                epsGrowth,
+                netMargin,
+                roe,
+                divYield,
+                stressPullback: stressByKey.moderate,
+                stressRecession: stressByKey.recession,
+                stressSevere: stressByKey.severe,
                 cachedAt: Date.now(),
               });
             }
@@ -1552,29 +1619,83 @@ export const PortfolioScreen: React.FC = () => {
                                 </View>
                               </View>
 
-                              {/* Row 2: Key metrics inline */}
-                              {(peRatio != null || beta != null || fmtMCap) ? (
-                                <View style={styles.wlCardMetricsRow}>
-                                  {peRatio != null && peRatio > 0 && (
-                                    <View style={styles.wlCardMetricItem}>
-                                      <Text style={styles.wlCardMetricLabel}>P/E</Text>
-                                      <Text style={styles.wlCardMetricValue}>{peRatio.toFixed(1)}</Text>
-                                    </View>
-                                  )}
-                                  {beta != null && beta > 0 && (
-                                    <View style={styles.wlCardMetricItem}>
-                                      <Text style={styles.wlCardMetricLabel}>Beta</Text>
-                                      <Text style={styles.wlCardMetricValue}>{beta.toFixed(1)}</Text>
-                                    </View>
-                                  )}
-                                  {fmtMCap ? (
-                                    <View style={styles.wlCardMetricItem}>
-                                      <Text style={styles.wlCardMetricLabel}>MCap</Text>
-                                      <Text style={styles.wlCardMetricValue}>{fmtMCap}</Text>
-                                    </View>
-                                  ) : null}
+                              {/* Row 2a: Valuation & Growth (P/E, Rev Growth, EPS Growth, Mkt Cap) */}
+                              <View style={styles.wlCardMetricsRow}>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>P/E</Text>
+                                  <Text style={styles.wlCardMetricValue}>
+                                    {peRatio != null && peRatio > 0 ? peRatio.toFixed(1) : '\u2014'}
+                                  </Text>
                                 </View>
-                              ) : null}
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>Rev Growth</Text>
+                                  <Text
+                                    style={[
+                                      styles.wlCardMetricValue,
+                                      wlEnrichment?.revGrowth != null
+                                        ? { color: wlEnrichment.revGrowth >= 0 ? COLORS.green : COLORS.amber }
+                                        : null,
+                                    ]}
+                                  >
+                                    {wlEnrichment?.revGrowth != null
+                                      ? `${wlEnrichment.revGrowth >= 0 ? '+' : ''}${wlEnrichment.revGrowth.toFixed(1)}%`
+                                      : '\u2014'}
+                                  </Text>
+                                </View>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>EPS Growth</Text>
+                                  <Text
+                                    style={[
+                                      styles.wlCardMetricValue,
+                                      wlEnrichment?.epsGrowth != null
+                                        ? { color: wlEnrichment.epsGrowth >= 0 ? COLORS.green : COLORS.amber }
+                                        : null,
+                                    ]}
+                                  >
+                                    {wlEnrichment?.epsGrowth != null
+                                      ? `${wlEnrichment.epsGrowth >= 0 ? '+' : ''}${wlEnrichment.epsGrowth.toFixed(1)}%`
+                                      : '\u2014'}
+                                  </Text>
+                                </View>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>Mkt Cap</Text>
+                                  <Text style={styles.wlCardMetricValue}>{fmtMCap || '\u2014'}</Text>
+                                </View>
+                              </View>
+
+                              {/* Row 2b: Profitability & Risk (Net Margin, ROE, Beta, Div Yield) */}
+                              <View style={styles.wlCardMetricsRowTight}>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>Net Mgn</Text>
+                                  <Text style={styles.wlCardMetricValue}>
+                                    {wlEnrichment?.netMargin != null
+                                      ? `${wlEnrichment.netMargin.toFixed(1)}%`
+                                      : '\u2014'}
+                                  </Text>
+                                </View>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>ROE</Text>
+                                  <Text style={styles.wlCardMetricValue}>
+                                    {wlEnrichment?.roe != null
+                                      ? `${wlEnrichment.roe.toFixed(1)}%`
+                                      : '\u2014'}
+                                  </Text>
+                                </View>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>Beta</Text>
+                                  <Text style={styles.wlCardMetricValue}>
+                                    {beta != null && beta > 0 ? beta.toFixed(2) : '\u2014'}
+                                  </Text>
+                                </View>
+                                <View style={styles.wlCardMetricItem}>
+                                  <Text style={styles.wlCardMetricLabel}>Div Yield</Text>
+                                  <Text style={styles.wlCardMetricValue}>
+                                    {wlEnrichment?.divYield != null && wlEnrichment.divYield > 0
+                                      ? `${wlEnrichment.divYield.toFixed(1)}%`
+                                      : '\u2014'}
+                                  </Text>
+                                </View>
+                              </View>
 
                               {/* Row 3: 52-week range bar (moved up) */}
                               {w52Pct != null && w52Low != null && w52High != null && (
@@ -1621,6 +1742,28 @@ export const PortfolioScreen: React.FC = () => {
                                       </Text>
                                     </View>
                                   ))}
+                                </View>
+                              )}
+
+                              {/* Row 6: Stress test summary line */}
+                              {(wlEnrichment?.stressPullback != null ||
+                                wlEnrichment?.stressRecession != null ||
+                                wlEnrichment?.stressSevere != null) && (
+                                <View style={styles.wlCardStressRow}>
+                                  <Ionicons name="shield-outline" size={12} color={COLORS.textTertiary} />
+                                  <Text style={styles.wlCardStressText}>
+                                    {wlEnrichment?.stressPullback != null
+                                      ? `${wlEnrichment.stressPullback.toFixed(0)}% pullback`
+                                      : '\u2014'}
+                                    {'  \u2022  '}
+                                    {wlEnrichment?.stressRecession != null
+                                      ? `${wlEnrichment.stressRecession.toFixed(0)}% recession`
+                                      : '\u2014'}
+                                    {'  \u2022  '}
+                                    {wlEnrichment?.stressSevere != null
+                                      ? `${wlEnrichment.stressSevere.toFixed(0)}% severe`
+                                      : '\u2014'}
+                                  </Text>
                                 </View>
                               )}
 
@@ -2264,12 +2407,36 @@ const styles = StyleSheet.create({
   },
   wlCardMetricsRow: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
     paddingVertical: 6,
     paddingHorizontal: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  wlCardMetricsRowTight: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  wlCardStressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  wlCardStressText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 11,
+    fontWeight: '500',
+    flex: 1,
   },
   wlCardBody: {
     flexDirection: 'row',
@@ -2282,6 +2449,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wlCardMetricItem: {
+    flex: 1,
     alignItems: 'center',
   },
   wlCardMetricLabel: {

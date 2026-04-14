@@ -35,6 +35,16 @@ export interface EnrichmentData {
   enrichedInsight: string | null;
   aiHeadline: string | null;
   aiAction: string | null;
+  // Extended metrics for richer cards (feed + watchlist)
+  revGrowth?: number | null;
+  epsGrowth?: number | null;
+  netMargin?: number | null;
+  roe?: number | null;
+  divYield?: number | null;
+  // Stress-test summary (pullback / recession / severe percentages)
+  stressPullback?: number | null;
+  stressRecession?: number | null;
+  stressSevere?: number | null;
   cachedAt: number;
 }
 
