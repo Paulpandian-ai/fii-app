@@ -94,10 +94,106 @@ def lambda_handler(event, context):
         }
 
 
+_DEFAULT_FACTOR_DIMS = (
+    "supply_chain_upstream",
+    "supply_chain_downstream",
+    "geopolitical",
+    "monetary",
+    "correlations",
+    "risk_performance",
+)
+
+
+def _has_real_factor_data(factor_pcts: dict) -> bool:
+    """Return True when factor_percentiles contain real (non-default) data.
+
+    The signal engine writes a placeholder of 50 for every dimension before the
+    normalization pass runs. If we still see that pattern here the bars would
+    render as a flat 50p row for every factor, which looks broken, so we tell
+    the client to surface a "data pending" state instead.
+    """
+    if not isinstance(factor_pcts, dict) or not factor_pcts:
+        return False
+    values = [factor_pcts.get(dim) for dim in _DEFAULT_FACTOR_DIMS]
+    if any(v is None for v in values):
+        return False
+    try:
+        nums = [float(v) for v in values]
+    except (TypeError, ValueError):
+        return False
+    return not all(n == 50 for n in nums)
+
+
+def _snapshot_value(cats: dict, category: str, key: str):
+    """Pull ``categories[category][key].value`` safely from a metrics dict."""
+    try:
+        entry = cats.get(category, {}).get(key)
+        if not isinstance(entry, dict):
+            return None
+        val = entry.get("value")
+        if val is None:
+            return None
+        # Guard against stringified NaN / None that occasionally slip through
+        if isinstance(val, (int, float)):
+            return val
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+    except Exception:
+        return None
+
+
+def _build_financial_snapshot(fin_item: dict | None) -> dict | None:
+    """Build a compact financial_snapshot from a cached FINANCIALS record.
+
+    Returns a dict with the 12 metrics the Feed card needs, or ``None`` if the
+    ticker has no cached financials yet. Individual missing metrics are kept as
+    ``None`` so the client can render "—" for them without inventing values.
+    """
+    if not fin_item:
+        return None
+
+    cats = fin_item.get("categories")
+    if isinstance(cats, str):
+        try:
+            cats = json.loads(cats)
+        except (json.JSONDecodeError, TypeError):
+            cats = {}
+    if not isinstance(cats, dict):
+        return None
+
+    snapshot = {
+        "pe_ratio": _snapshot_value(cats, "valuation", "trailing_pe"),
+        "forward_pe": _snapshot_value(cats, "valuation", "forward_pe"),
+        "market_cap": _snapshot_value(cats, "valuation", "market_cap"),
+        "fcf_yield": _snapshot_value(cats, "valuation", "fcf_yield"),
+        "revenue_growth_yoy": _snapshot_value(cats, "growth", "revenue_growth_yoy"),
+        "eps_growth_yoy": _snapshot_value(cats, "growth", "eps_growth_yoy"),
+        "net_margin": _snapshot_value(cats, "profitability", "net_margin"),
+        "operating_margin": _snapshot_value(cats, "profitability", "operating_margin"),
+        "roe": _snapshot_value(cats, "profitability", "roe"),
+        "beta": _snapshot_value(cats, "momentum_technicals", "beta"),
+        "dividend_yield": _snapshot_value(cats, "dividends", "dividend_yield"),
+        "target_price_mean": _snapshot_value(cats, "analyst_estimates", "target_price_mean"),
+        "short_pct_float": _snapshot_value(cats, "ownership", "short_pct_float"),
+        # earnings_date is supplied via a separate calendar feed today; leave a
+        # slot so clients can read it when the pipeline starts to populate it.
+        "earnings_date": fin_item.get("earnings_date") or None,
+    }
+    # If literally every field is None there's no point shipping the block
+    if all(v is None for v in snapshot.values()):
+        return None
+    return snapshot
+
+
 def _compile_feed() -> list[dict]:
     """Read all signals from DynamoDB and build ranked feed with educational cards.
 
     Prioritizes TIER_1 stocks (richest data), then TIER_2, then TIER_3/ETF.
+    Each signal is enriched with a ``financial_snapshot`` block pulled from
+    the cached FINANCIALS#{ticker} record so the feed cards can render the
+    valuation/profitability/growth rows without a per-card round-trip.
     """
     from models import ALL_SECURITIES, TIER_1_SET, ETF_SET, get_tier
 
@@ -114,6 +210,21 @@ def _compile_feed() -> list[dict]:
     if not items:
         logger.warning("[FeedCompiler] No signal items found in DynamoDB")
         return []
+
+    # Batch-read FINANCIALS#* | LATEST for every ticker in the universe so we
+    # can build per-signal financial_snapshot blocks in a single pass.
+    fin_keys = [{"PK": f"FINANCIALS#{t}", "SK": "LATEST"} for t in ALL_SECURITIES]
+    fin_items = []
+    for i in range(0, len(fin_keys), 100):
+        chunk = fin_keys[i:i + 100]
+        try:
+            fin_items.extend(db.batch_get(chunk))
+        except Exception as e:
+            logger.warning(f"[FeedCompiler] FINANCIALS batch_get chunk failed: {e}")
+    fin_by_ticker = {it.get("ticker"): it for it in fin_items if it.get("ticker")}
+    logger.info(
+        f"[FeedCompiler] Loaded {len(fin_by_ticker)} FINANCIALS records for snapshot enrichment"
+    )
 
     # Parse each item into a feed-ready dict
     signals = []
@@ -140,6 +251,18 @@ def _compile_feed() -> list[dict]:
         except Exception:
             pass
 
+        # Flag signals whose factor_percentiles are still the defaults (all 50),
+        # so the client can render "Data pending" instead of a flat bar row.
+        # Prefer the authoritative flag written by _normalize_signals; fall
+        # back to value inspection for items that predate the flag.
+        stored_flag = item.get("factor_data_available")
+        if stored_flag is None:
+            factor_data_available = _has_real_factor_data(factor_pcts)
+        else:
+            factor_data_available = bool(stored_flag)
+        if not factor_data_available:
+            factor_pcts = None
+
         signals.append({
             "id": f"signal-{ticker}",
             "type": "signal",
@@ -150,11 +273,14 @@ def _compile_feed() -> list[dict]:
             "score_label": item.get("score_label", item.get("signal", "Neutral")),
             "percentile_rank": int(item.get("percentile_rank", 50)),
             "sector_percentile": int(item.get("sector_percentile", 50)),
+            "sector": item.get("sector") or "",
             "factor_percentiles": factor_pcts,
+            "factor_data_available": factor_data_available,
             "score_drivers": score_drivers,
             "confidence": item.get("confidence", "MEDIUM"),
             "insight": item.get("insight", ""),
             "topFactors": top_factors,
+            "financial_snapshot": _build_financial_snapshot(fin_by_ticker.get(ticker)),
             "updatedAt": item.get("lastUpdated", ""),
             "tier": tier,
             "isETF": is_etf,

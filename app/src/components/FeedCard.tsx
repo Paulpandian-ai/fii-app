@@ -105,29 +105,116 @@ const computeHealthGrade = (
   return 'D';
 };
 
-/** Build AI insight from score_drivers data */
-const buildInsightFromDrivers = (drivers: any[]): string => {
-  if (!Array.isArray(drivers) || drivers.length === 0) return '';
-  const positive = drivers
-    .filter((d: any) => d.direction === 'positive')
-    .sort((a: any, b: any) => Math.abs(b.magnitude ?? 0) - Math.abs(a.magnitude ?? 0));
-  const negative = drivers
-    .filter((d: any) => d.direction === 'negative')
-    .sort((a: any, b: any) => Math.abs(b.magnitude ?? 0) - Math.abs(a.magnitude ?? 0));
+const _driverMagnitude = (d: any): number => {
+  const m = d?.magnitude ?? d?.score;
+  if (typeof m === 'number' && Number.isFinite(m)) return m;
+  const n = Number(m);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Format a ranking phrase from a 0–100 percentile (higher = better). */
+const _formatRanking = (ticker: string, percentile: number | null, sector: string | null): string => {
+  if (percentile == null) return `${ticker} scored by the FII factor model`;
+  const pctl = Math.max(1, Math.min(99, Math.round(percentile)));
+  const context = sector ? ` in ${sector}` : ' across the FII universe';
+  if (pctl >= 80) return `${ticker} ranks in the top ${100 - pctl}%${context}`;
+  if (pctl >= 60) return `${ticker} ranks ${pctl}th percentile${context}`;
+  if (pctl >= 40) return `${ticker} ranks mid-pack (${pctl}th percentile)${context}`;
+  if (pctl >= 20) return `${ticker} ranks in the bottom ${pctl}%${context}`;
+  return `${ticker} ranks in the bottom ${pctl}%${context} — deep caution zone`;
+};
+
+const _driverSentence = (prefix: string, driver: any): string => {
+  if (!driver) return '';
+  const mag = _driverMagnitude(driver);
+  const sign = mag >= 0 ? '+' : '';
+  const desc = String(driver.description || driver.factor || '').trim();
+  if (!desc) return '';
+  const trimmed = desc.replace(/\.+$/, '');
+  return mag !== 0
+    ? `${prefix}: ${trimmed} (${sign}${mag.toFixed(1)} factor score)`
+    : `${prefix}: ${trimmed}`;
+};
+
+const _formatEarningsWatch = (raw: string | null | undefined): string => {
+  if (!raw) return '';
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `Watch ${months[d.getMonth()]} ${d.getDate()} earnings for updated guidance`;
+  } catch {
+    return '';
+  }
+};
+
+interface InsightContext {
+  ticker: string;
+  sector: string | null;
+  percentileRank: number | null;
+  sectorPercentile: number | null;
+  earningsDate: string | null;
+  aiHeadline: string | null;
+}
+
+/**
+ * Build a richer 2–3 sentence insight.
+ *
+ * Combines sector-relative ranking, the top positive + top negative driver
+ * with their factor-score magnitudes, and a forward-looking watch item
+ * (earnings date or AI headline). Falls back gracefully when individual
+ * ingredients are missing.
+ */
+const buildInsightFromDrivers = (drivers: any[], ctx: InsightContext): string => {
+  const safeDrivers = Array.isArray(drivers) ? drivers : [];
+  const positive = safeDrivers
+    .filter((d: any) => (d?.direction === 'positive') || _driverMagnitude(d) > 0)
+    .sort((a: any, b: any) => Math.abs(_driverMagnitude(b)) - Math.abs(_driverMagnitude(a)));
+  const negative = safeDrivers
+    .filter((d: any) => (d?.direction === 'negative') || _driverMagnitude(d) < 0)
+    .sort((a: any, b: any) => Math.abs(_driverMagnitude(b)) - Math.abs(_driverMagnitude(a)));
 
   const topPositive = positive[0];
   const topNegative = negative[0];
 
-  const posText = topPositive?.description || 'No major positive factors';
-  const negText = topNegative ? `Risk: ${topNegative.description}` : '';
+  const sentences: string[] = [];
+  // Sentence 1: sector ranking (prefer sector_percentile when we know the sector)
+  const rankingPctl = ctx.sector ? (ctx.sectorPercentile ?? ctx.percentileRank) : ctx.percentileRank;
+  sentences.push(`${_formatRanking(ctx.ticker, rankingPctl, ctx.sector)}.`);
 
-  return negText ? `${posText}. ${negText}.` : `${posText}.`;
+  // Sentence 2: top positive driver
+  const posLine = _driverSentence('Primary strength', topPositive);
+  if (posLine) sentences.push(`${posLine}.`);
+
+  // Sentence 3: top negative driver (risk)
+  const negLine = _driverSentence('Primary risk', topNegative);
+  if (negLine) sentences.push(`${negLine}.`);
+
+  // Sentence 4 (optional): forward-looking catalyst
+  const watch = _formatEarningsWatch(ctx.earningsDate)
+    || (ctx.aiHeadline ? `Recent catalyst: ${ctx.aiHeadline.replace(/\.+$/, '')}` : '');
+  if (watch) sentences.push(`${watch}.`);
+
+  // Safety net: if we only produced the ranking sentence, bail so the card
+  // can fall back to the server-provided insight string.
+  if (sentences.length <= 1) return '';
+  return sentences.join(' ');
 };
 
 /** Inline skeleton for metric values while loading */
 const MetricSkeleton: React.FC = () => (
   <Skeleton width={36} height={16} borderRadius={4} />
 );
+
+/** Pull a seed value from an optional financial_snapshot attached to the feed item. */
+const fromSnapshot = (item: FeedItem, key: keyof NonNullable<FeedItem['financial_snapshot']>) => {
+  const snap = item.financial_snapshot;
+  if (!snap) return null;
+  const v = (snap as any)[key];
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  return v;
+};
 
 const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const score = safeNum(item.compositeScore);
@@ -154,17 +241,25 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [price, setPrice] = useState<number | null>(cached?.price ?? null);
   const [changePercent, setChangePercent] = useState<number>(cached?.changePercent ?? 0);
   const [change, setChange] = useState<number>(cached?.change ?? 0);
-  const [marketCap, setMarketCap] = useState<number>(cached?.marketCap ?? 0);
+  const [marketCap, setMarketCap] = useState<number>(
+    cached?.marketCap ?? (fromSnapshot(item, 'market_cap') as number | null) ?? 0,
+  );
   const [w52Low, setW52Low] = useState<number | null>(cached?.w52Low ?? null);
   const [w52High, setW52High] = useState<number | null>(cached?.w52High ?? null);
-  const [sector, setSector] = useState<string | null>(cached?.sector ?? null);
+  const [sector, setSector] = useState<string | null>(
+    cached?.sector ?? (item.sector || null),
+  );
 
   // ─── Signal-enriched data ───
   const [techScore, setTechScore] = useState<number | null>(cached?.techScore ?? null);
   const [rsi, setRsi] = useState<number | null>(cached?.rsi ?? null);
   const [healthGrade, setHealthGrade] = useState<string | null>(cached?.healthGrade ?? null);
-  const [peRatio, setPeRatio] = useState<number | null>(cached?.peRatio ?? null);
-  const [forwardPE, setForwardPE] = useState<number | null>(cached?.forwardPE ?? null);
+  const [peRatio, setPeRatio] = useState<number | null>(
+    cached?.peRatio ?? (fromSnapshot(item, 'pe_ratio') as number | null) ?? null,
+  );
+  const [forwardPE, setForwardPE] = useState<number | null>(
+    cached?.forwardPE ?? (fromSnapshot(item, 'forward_pe') as number | null) ?? null,
+  );
   const [negativeEarnings, setNegativeEarnings] = useState<boolean>(cached?.negativeEarnings ?? false);
   const [fairPriceDollars, setFairPriceDollars] = useState<number | null>(cached?.fairPriceDollars ?? null);
   const [fairPriceLabel, setFairPriceLabel] = useState<string | null>(cached?.fairPriceLabel ?? null);
@@ -174,36 +269,75 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
   const [enrichedFactors, setEnrichedFactors] = useState<{ name: string; score: number }[]>(cached?.enrichedFactors ?? []);
   const [enrichedInsight, setEnrichedInsight] = useState<string | null>(cached?.enrichedInsight ?? null);
 
-  // ─── Factor percentiles for radar chart ───
-  const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(
-    (cached as any)?.factorPercentiles ?? null,
+  // ─── Factor percentiles for radar chart (seeded from feed if backend marked them real) ───
+  const seedFactorPercentiles: FactorPercentiles | null = (() => {
+    if ((cached as any)?.factorPercentiles) return (cached as any).factorPercentiles;
+    if (item.factor_data_available === false) return null;
+    const fp = item.factor_percentiles;
+    if (!fp) return null;
+    return {
+      supply_chain_upstream: safeNum(fp.supply_chain_upstream ?? 50),
+      supply_chain_downstream: safeNum(fp.supply_chain_downstream ?? 50),
+      geopolitical: safeNum(fp.geopolitical ?? 50),
+      monetary: safeNum(fp.monetary ?? 50),
+      correlations: safeNum(fp.correlations ?? 50),
+      performance: safeNum(fp.risk_performance ?? fp.performance ?? 50),
+    };
+  })();
+  const [factorPercentiles, setFactorPercentiles] = useState<FactorPercentiles | null>(seedFactorPercentiles);
+  const [factorDataAvailable, setFactorDataAvailable] = useState<boolean>(
+    seedFactorPercentiles != null && item.factor_data_available !== false,
   );
   const [percentileRank, setPercentileRank] = useState<number | null>(
-    (cached as any)?.percentileRank ?? null,
+    (cached as any)?.percentileRank ?? (item.percentile_rank != null ? safeNum(item.percentile_rank) : null),
   );
 
   // ─── Score drivers for AI insight ───
-  const [scoreDrivers, setScoreDrivers] = useState<any[]>((cached as any)?.scoreDrivers ?? []);
+  const [scoreDrivers, setScoreDrivers] = useState<any[]>(
+    (cached as any)?.scoreDrivers ?? (Array.isArray(item.score_drivers) ? item.score_drivers : []),
+  );
 
   // ─── AI Agent insight ───
   const [aiHeadline, setAiHeadline] = useState<string | null>(cached?.aiHeadline ?? null);
 
   // ─── Beta from financials ───
-  const [beta, setBeta] = useState<number | null>((cached as any)?.beta ?? null);
+  const [beta, setBeta] = useState<number | null>(
+    (cached as any)?.beta ?? (fromSnapshot(item, 'beta') as number | null) ?? null,
+  );
 
-  // ─── New 3-row financial stats ───
-  const [revGrowth, setRevGrowth] = useState<number | null>((cached as any)?.revGrowth ?? null);
-  const [epsGrowth, setEpsGrowth] = useState<number | null>((cached as any)?.epsGrowth ?? null);
-  const [netMargin, setNetMargin] = useState<number | null>((cached as any)?.netMargin ?? null);
-  const [roe, setRoe] = useState<number | null>((cached as any)?.roe ?? null);
-  const [divYield, setDivYield] = useState<number | null>((cached as any)?.divYield ?? null);
-  const [targetPrice, setTargetPrice] = useState<number | null>((cached as any)?.targetPrice ?? null);
-  const [shortInterest, setShortInterest] = useState<number | null>((cached as any)?.shortInterest ?? null);
-  const [earningsDate, setEarningsDate] = useState<string | null>((cached as any)?.earningsDate ?? null);
-  const [fcfYield, setFcfYield] = useState<number | null>((cached as any)?.fcfYield ?? null);
+  // ─── New 3-row financial stats (seeded from feed snapshot when available) ───
+  const [revGrowth, setRevGrowth] = useState<number | null>(
+    (cached as any)?.revGrowth ?? (fromSnapshot(item, 'revenue_growth_yoy') as number | null) ?? null,
+  );
+  const [epsGrowth, setEpsGrowth] = useState<number | null>(
+    (cached as any)?.epsGrowth ?? (fromSnapshot(item, 'eps_growth_yoy') as number | null) ?? null,
+  );
+  const [netMargin, setNetMargin] = useState<number | null>(
+    (cached as any)?.netMargin ?? (fromSnapshot(item, 'net_margin') as number | null) ?? null,
+  );
+  const [roe, setRoe] = useState<number | null>(
+    (cached as any)?.roe ?? (fromSnapshot(item, 'roe') as number | null) ?? null,
+  );
+  const [divYield, setDivYield] = useState<number | null>(
+    (cached as any)?.divYield ?? (fromSnapshot(item, 'dividend_yield') as number | null) ?? null,
+  );
+  const [targetPrice, setTargetPrice] = useState<number | null>(
+    (cached as any)?.targetPrice ?? (fromSnapshot(item, 'target_price_mean') as number | null) ?? null,
+  );
+  const [shortInterest, setShortInterest] = useState<number | null>(
+    (cached as any)?.shortInterest ?? (fromSnapshot(item, 'short_pct_float') as number | null) ?? null,
+  );
+  const [earningsDate, setEarningsDate] = useState<string | null>(
+    (cached as any)?.earningsDate ?? (fromSnapshot(item, 'earnings_date') as string | null) ?? null,
+  );
+  const [fcfYield, setFcfYield] = useState<number | null>(
+    (cached as any)?.fcfYield ?? (fromSnapshot(item, 'fcf_yield') as number | null) ?? null,
+  );
 
   // ─── Sector percentile for peer ranking ───
-  const [sectorPercentile, setSectorPercentile] = useState<number | null>((cached as any)?.sectorPercentile ?? null);
+  const [sectorPercentile, setSectorPercentile] = useState<number | null>(
+    (cached as any)?.sectorPercentile ?? (item.sector_percentile != null ? safeNum(item.sector_percentile) : null),
+  );
 
   // ─── Stress test data ───
   const [stressData, setStressData] = useState<any | null>((cached as any)?.stressData ?? null);
@@ -347,18 +481,37 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
       if (fcfy != null) { const v = safeNum(fcfy); setFcfYield(v); ed.fcfYield = v; }
 
       // ── Factor Percentiles ──
+      // The backend may flag factor_data_available=false for stocks whose
+      // factor_percentiles are still placeholder 50s. Treat that case as
+      // "no data" so the UI can show a pending state instead of a row of 50p bars.
+      const sigDataAvailable = sig?.factor_data_available;
       const fpctls = sig?.factor_percentiles ?? factors?.factor_percentiles ?? factorsRaw?.factor_percentiles;
-      if (fpctls && typeof fpctls === 'object') {
+      if (fpctls && typeof fpctls === 'object' && sigDataAvailable !== false) {
         const parsed: FactorPercentiles = {
           supply_chain_upstream: safeNum(fpctls.supply_chain_upstream ?? 50),
           supply_chain_downstream: safeNum(fpctls.supply_chain_downstream ?? 50),
           geopolitical: safeNum(fpctls.geopolitical ?? 50),
           monetary: safeNum(fpctls.monetary ?? 50),
           correlations: safeNum(fpctls.correlations ?? 50),
-          performance: safeNum(fpctls.performance ?? 50),
+          performance: safeNum(fpctls.risk_performance ?? fpctls.performance ?? 50),
         };
-        setFactorPercentiles(parsed);
-        ed.factorPercentiles = parsed;
+        const allDefault = [
+          parsed.supply_chain_upstream,
+          parsed.supply_chain_downstream,
+          parsed.geopolitical,
+          parsed.monetary,
+          parsed.correlations,
+          parsed.performance,
+        ].every((v) => v === 50);
+        if (!allDefault) {
+          setFactorPercentiles(parsed);
+          setFactorDataAvailable(true);
+          ed.factorPercentiles = parsed;
+        } else {
+          setFactorDataAvailable(false);
+        }
+      } else if (sigDataAvailable === false) {
+        setFactorDataAvailable(false);
       }
 
       // ── Percentile rank ──
@@ -472,11 +625,20 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
     : (Array.isArray(item.topFactors) ? item.topFactors.slice(0, 4) : []);
 
   // AI Insight: prefer score_drivers-based insight, then aiHeadline, then enrichedInsight
-  const driverInsight = scoreDrivers.length > 0 ? buildInsightFromDrivers(scoreDrivers) : '';
-  const insightText = driverInsight || enrichedInsight || item.insight || '';
+  const driverInsight = scoreDrivers.length > 0
+    ? buildInsightFromDrivers(scoreDrivers, {
+        ticker: item.ticker,
+        sector,
+        percentileRank,
+        sectorPercentile,
+        earningsDate,
+        aiHeadline,
+      })
+    : '';
+  const insightText = driverInsight || enrichedInsight || item.insight || aiHeadline || '';
 
   // Radar chart scores
-  const radarScores = factorPercentiles ? {
+  const radarScores = factorPercentiles && factorDataAvailable ? {
     supply_chain_upstream: factorPercentiles.supply_chain_upstream,
     supply_chain_downstream: factorPercentiles.supply_chain_downstream,
     geopolitical: factorPercentiles.geopolitical,
@@ -497,8 +659,10 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
     ? Math.min(100, Math.max(0, ((price - w52Low) / (w52High - w52Low)) * 100))
     : null;
 
-  // Factor bar data
-  const factorBarData = factorPercentiles ? [
+  // Factor bar data — only rendered when we have real percentiles. When the
+  // backend marks factor_data_available=false we render a pending row instead
+  // so the card never shows six identical 50p bars.
+  const factorBarData = factorPercentiles && factorDataAvailable ? [
     { key: 'sc_up', label: 'SC Upstream', percentile: factorPercentiles.supply_chain_upstream },
     { key: 'sc_down', label: 'SC Downstream', percentile: factorPercentiles.supply_chain_downstream },
     { key: 'geo', label: 'Geopolitical', percentile: factorPercentiles.geopolitical },
@@ -506,6 +670,7 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
     { key: 'corr', label: 'Correlations', percentile: factorPercentiles.correlations },
     { key: 'risk', label: 'Risk & Perf', percentile: factorPercentiles.performance },
   ] : null;
+  const showFactorPending = !factorBarData && (factorDataAvailable === false || dataLoaded);
 
   // Map factor percentiles to raw scores (1-10) from score_drivers if available
   const factorScoreMap: Record<string, number> = {};
@@ -733,7 +898,7 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
         )}
 
         {/* ── Factor Score Bars ── */}
-        {factorBarData && (
+        {factorBarData ? (
           <View style={styles.factorBarsContainer}>
             {factorBarData.map((f) => {
               const pctl = f.percentile;
@@ -751,7 +916,12 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
               );
             })}
           </View>
-        )}
+        ) : showFactorPending ? (
+          <View style={[styles.factorBarsContainer, styles.factorPendingContainer]}>
+            <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.4)" />
+            <Text style={styles.factorPendingText}>Factor data pending — re-scoring in progress</Text>
+          </View>
+        ) : null}
 
         {/* ── Stress Test Summary ── */}
         {hasStressData && (
@@ -803,7 +973,7 @@ const FeedCardInner: React.FC<FeedCardProps> = ({ item, onPress }) => {
               <Ionicons name="sparkles" size={12} color="#00C9A7" />
               <Text style={styles.insightLabel}>AI Insight</Text>
             </View>
-            <Text style={styles.insightText} numberOfLines={3}>{insightText}</Text>
+            <Text style={styles.insightText} numberOfLines={5}>{insightText}</Text>
           </View>
         ) : null}
 
@@ -1156,6 +1326,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     width: 28,
     textAlign: 'right',
+  },
+  factorPendingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  factorPendingText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    fontStyle: 'italic',
   },
 
   // ── Stress Test ──

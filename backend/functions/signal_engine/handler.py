@@ -802,6 +802,16 @@ def _normalize_signals() -> None:
         # Get factor percentiles for this stock
         fp = factor_percentiles_map.get(ticker, {})
 
+        # Mark factor data as available only when we actually have a spread —
+        # if every dimension came back as the default 50 the bars would render
+        # as a row of identical "50p" placeholders (MRNA bug). This flag tells
+        # the client to surface a "data pending" state instead.
+        fp_values = [fp.get(dk) for dk in dimension_keys]
+        factor_data_available = (
+            all(v is not None for v in fp_values)
+            and not all(v == 50 for v in fp_values)
+        )
+
         # Track distribution
         distribution[fii_score] = distribution.get(fii_score, 0) + 1
 
@@ -814,6 +824,7 @@ def _normalize_signals() -> None:
             "sector_percentile": sect_pct,
             "score_drivers": json.dumps(score_drivers),
             "factor_percentiles": json.dumps(fp),
+            "factor_data_available": factor_data_available,
         }
 
         db.update_item(f"SIGNAL#{ticker}", "LATEST", update_fields)
@@ -830,6 +841,7 @@ def _normalize_signals() -> None:
                 s3_data["sector_percentile"] = sect_pct
                 s3_data["score_drivers"] = score_drivers
                 s3_data["factor_percentiles"] = fp
+                s3_data["factor_data_available"] = factor_data_available
                 s3.write_json(f"signals/{ticker}.json", s3_data)
         except Exception:
             pass
@@ -1027,10 +1039,13 @@ def _store_signal(ticker: str, result: dict) -> None:
 
     # Default factor_percentiles (50th for all dimensions).
     # Real percentiles are computed in _normalize_signals during batch runs.
+    # We also write factor_data_available=False so consumers can render a
+    # "data pending" state instead of six flat 50p bars.
     default_fp = {dk: 50 for dk in [
         "supply_chain_upstream", "supply_chain_downstream",
         "geopolitical", "monetary", "correlations", "risk_performance",
     ]}
+    factor_data_available = False
 
     # DynamoDB: LATEST summary
     db.put_item({
@@ -1050,6 +1065,7 @@ def _store_signal(ticker: str, result: dict) -> None:
         "score_drivers": json.dumps(score_drivers),
         "dimensionScores": json.dumps(dim_scores),
         "factor_percentiles": json.dumps(default_fp),
+        "factor_data_available": factor_data_available,
         "technicalScore": str(result.get("technicalAnalysis", {}).get("technicalScore", 0)),
         "tier": result.get("tier", "TIER_1"),
         "isETF": result.get("isETF", False),
@@ -1072,6 +1088,7 @@ def _store_signal(ticker: str, result: dict) -> None:
     result["score_drivers"] = score_drivers
     result["dimensionScores"] = dim_scores
     result["factor_percentiles"] = default_fp
+    result["factor_data_available"] = factor_data_available
 
     # S3: Full signal JSON
     s3.write_json(f"signals/{ticker}.json", result)
@@ -1515,6 +1532,59 @@ def _run_queue_processor(event):
     }
 
 
+def _find_priority_rescore_tickers(candidate_tickers: list) -> list:
+    """Return tickers that need priority re-scoring because their percentiles are stale.
+
+    A ticker qualifies if its SIGNAL#LATEST record either has
+    factor_data_available=False, or every dimension in factor_percentiles is
+    still the default 50. These rows render as a row of identical bars in the
+    feed, so we push them to the front of the orchestration queue.
+    """
+    priority = []
+    dimension_keys = [
+        "supply_chain_upstream", "supply_chain_downstream",
+        "geopolitical", "monetary", "correlations", "risk_performance",
+    ]
+
+    for ticker in candidate_tickers:
+        try:
+            item = db.get_item(f"SIGNAL#{ticker}", "LATEST")
+        except Exception:
+            continue
+        if not item:
+            # Missing signals are already picked up by the normal pass.
+            continue
+
+        flag = item.get("factor_data_available")
+        if flag is False:
+            priority.append(ticker)
+            continue
+        if flag is True:
+            continue
+
+        # Legacy records may not have the flag — inspect percentiles directly.
+        fp_raw = item.get("factor_percentiles", "{}")
+        try:
+            fp = json.loads(fp_raw) if isinstance(fp_raw, str) else fp_raw
+        except (json.JSONDecodeError, TypeError):
+            fp = {}
+        if not isinstance(fp, dict) or not fp:
+            priority.append(ticker)
+            continue
+
+        values = [fp.get(dk) for dk in dimension_keys]
+        if any(v is None for v in values):
+            priority.append(ticker)
+            continue
+        try:
+            if all(float(v) == 50 for v in values):
+                priority.append(ticker)
+        except (TypeError, ValueError):
+            priority.append(ticker)
+
+    return priority
+
+
 def _orchestrate_full_scoring(event: dict) -> dict:
     """Split the full stock universe into shards and invoke worker Lambdas.
 
@@ -1534,6 +1604,18 @@ def _orchestrate_full_scoring(event: dict) -> dict:
     shard_size = int(event.get("shard_size", 28))
     include_claude = event.get("include_claude", False)
     include_stress = event.get("include_stress", False)
+
+    # Priority pass: re-score tickers whose factor_percentiles never got real
+    # values (factor_data_available=False or all-50 defaults). Without this,
+    # those tickers stay stuck showing six placeholder bars on the feed card.
+    priority_tickers = _find_priority_rescore_tickers(all_tickers)
+    if priority_tickers:
+        logger.info(
+            f"[Orchestrator] Prioritizing {len(priority_tickers)} stocks with missing "
+            f"factor_percentiles: {priority_tickers[:10]}{'...' if len(priority_tickers) > 10 else ''}"
+        )
+        remaining = [t for t in all_tickers if t not in set(priority_tickers)]
+        all_tickers = priority_tickers + remaining
 
     # Split into shards
     shards = []

@@ -24,6 +24,31 @@ export interface FactorCategory {
   subFactors: SubFactor[];
 }
 
+export interface FinancialSnapshot {
+  pe_ratio: number | null;
+  forward_pe?: number | null;
+  market_cap: number | null;
+  fcf_yield: number | null;
+  revenue_growth_yoy: number | null;
+  eps_growth_yoy: number | null;
+  net_margin: number | null;
+  operating_margin?: number | null;
+  roe: number | null;
+  beta: number | null;
+  dividend_yield: number | null;
+  target_price_mean: number | null;
+  short_pct_float: number | null;
+  earnings_date?: string | null;
+}
+
+export interface ScoreDriver {
+  factor?: string;
+  direction?: 'positive' | 'negative' | 'neutral';
+  description?: string;
+  score?: number;
+  magnitude?: number;
+}
+
 export interface FeedItem {
   id: string;
   type?: FeedItemType;
@@ -35,6 +60,14 @@ export interface FeedItem {
   insight: string;          // Claude-generated one-liner
   topFactors: FactorScore[];
   updatedAt: string;        // ISO timestamp
+  // ─── Optional enrichment from the compiled feed ───
+  sector?: string;
+  percentile_rank?: number;
+  sector_percentile?: number;
+  factor_percentiles?: Record<string, number> | null;
+  factor_data_available?: boolean;
+  score_drivers?: ScoreDriver[];
+  financial_snapshot?: FinancialSnapshot | null;
 }
 
 export interface EducationalCard {
