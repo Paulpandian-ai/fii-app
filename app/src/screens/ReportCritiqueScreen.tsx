@@ -15,7 +15,6 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
 import { postCritiqueReport, getScreener } from '../services/api';
@@ -118,9 +117,15 @@ export function ReportCritiqueScreen() {
   // PDF picker
   const handlePickPdf = useCallback(async () => {
     try {
+      console.log('[PDF] Opening document picker...');
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/pdf',
         copyToCacheDirectory: true,
+      });
+
+      console.log('[PDF] Picker result:', {
+        canceled: result.canceled,
+        assetCount: result.assets?.length || 0,
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) {
@@ -129,6 +134,13 @@ export function ReportCritiqueScreen() {
 
       const asset = result.assets[0];
       const fileSize = asset.size || 0;
+
+      console.log('[PDF] Asset:', {
+        name: asset.name,
+        size: fileSize,
+        uri: asset.uri?.slice(0, 80),
+        mimeType: asset.mimeType,
+      });
 
       if (fileSize > MAX_FILE_SIZE_BYTES) {
         Alert.alert(
@@ -141,14 +153,55 @@ export function ReportCritiqueScreen() {
       setPdfFile({ name: asset.name, size: fileSize, uri: asset.uri });
       setError('');
 
-      // Read file as base64
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: 'base64',
-      });
+      // Read file as base64 — try legacy FileSystem first, fall back to fetch/blob
+      let base64: string | null = null;
+
+      try {
+        console.log('[PDF] Attempting FileSystem.readAsStringAsync (legacy)...');
+        const FileSystem = await import('expo-file-system/legacy');
+        base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: 'base64' as any,
+        });
+        console.log('[PDF] FileSystem read OK. Base64 length:', base64?.length || 0);
+      } catch (fsErr: any) {
+        console.warn('[PDF] FileSystem legacy failed:', fsErr?.message || fsErr);
+
+        // Fallback: fetch the uri as a blob, then FileReader.readAsDataURL
+        try {
+          console.log('[PDF] Fallback: fetching URI as blob...');
+          const resp = await fetch(asset.uri);
+          const blob = await resp.blob();
+          console.log('[PDF] Blob fetched. Size:', blob.size);
+
+          base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = reader.result as string;
+              // Strip "data:application/pdf;base64," prefix
+              const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+              resolve(b64);
+            };
+            reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+            reader.readAsDataURL(blob);
+          });
+          console.log('[PDF] Fallback read OK. Base64 length:', base64?.length || 0);
+        } catch (fetchErr: any) {
+          console.error('[PDF] Fallback fetch/blob failed:', fetchErr?.message || fetchErr);
+          throw fetchErr;
+        }
+      }
+
+      if (!base64 || base64.length === 0) {
+        throw new Error('Empty base64 result');
+      }
+
       setPdfBase64(base64);
+      console.log('[PDF] Upload ready. Base64 chars:', base64.length);
     } catch (err: any) {
-      console.error('PDF pick error:', err);
-      setError('Failed to load PDF file');
+      console.error('[PDF] pick error:', err?.message || err);
+      setPdfFile(null);
+      setPdfBase64(null);
+      setError('Failed to load PDF file. Try paste text instead.');
     }
   }, []);
 
@@ -179,13 +232,28 @@ export function ReportCritiqueScreen() {
         params.report_text = reportText.trim();
       }
 
+      console.log('[Critique] POST params:', {
+        ticker: params.ticker,
+        source: params.source,
+        method: uploadMethod,
+        pdfBase64Chars: params.report_pdf_base64?.length || 0,
+        textChars: params.report_text?.length || 0,
+      });
+
       const data = await postCritiqueReport(params);
+      console.log('[Critique] Response:', {
+        hasError: !!data?.error,
+        hasCritique: !!data?.critique,
+        agreementScore: data?.critique?.agreement_score,
+      });
+
       if (data.error) {
         setError(data.error);
       } else {
         setResult(data);
       }
     } catch (e: any) {
+      console.error('[Critique] Request failed:', e?.message || e);
       setError(e?.response?.data?.error || e?.message || 'Failed to analyze report');
     } finally {
       setLoading(false);

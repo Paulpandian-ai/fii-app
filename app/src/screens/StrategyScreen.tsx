@@ -25,7 +25,6 @@ import {
   getScreener,
 } from '../services/api';
 import { Skeleton } from '../components/Skeleton';
-import { BacktestCard } from '../components/BacktestCard';
 
 const ACCENT = {
   holdings: '#00C9A7',
@@ -253,41 +252,144 @@ export const StrategyScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C9A7" />
         }
       >
-        {/* ═══ 1. MY HOLDINGS CARD ═══ */}
+        {/* ═══ 1. YOUR PORTFOLIO CARD (Holdings + Health combined) ═══ */}
         <AdvisorCard accent={ACCENT.holdings}>
           <View style={styles.cardHeader}>
-            <Ionicons name="bar-chart-outline" size={18} color={ACCENT.holdings} />
-            <Text style={styles.cardTitle}>My Holdings</Text>
+            <Ionicons name="pie-chart-outline" size={18} color={ACCENT.holdings} />
+            <Text style={styles.cardTitle}>Your Portfolio</Text>
           </View>
 
+          {/* Portfolio summary line */}
           {loadingHoldings ? (
-            <View style={{ gap: 8 }}>
-              <Skeleton width="60%" height={14} borderRadius={4} />
-              <Skeleton width="100%" height={40} borderRadius={6} />
-              <Skeleton width="100%" height={40} borderRadius={6} />
-            </View>
+            <Skeleton width="70%" height={16} borderRadius={4} />
           ) : (
-            <>
-              <Text style={styles.cardSubtitle}>
-                {holdingsList.length} stock{holdingsList.length !== 1 ? 's' : ''} · ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} · {totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(1)}%
+            <View style={styles.portfolioSummaryRow}>
+              <Text style={styles.portfolioSummaryValue}>
+                ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </Text>
+              <View style={[styles.portfolioPnlPill, {
+                backgroundColor: totalPnlPct >= 0 ? 'rgba(0,201,167,0.12)' : 'rgba(239,68,68,0.12)',
+              }]}>
+                <Ionicons
+                  name={totalPnlPct >= 0 ? 'trending-up' : 'trending-down'}
+                  size={12}
+                  color={totalPnlPct >= 0 ? '#00C9A7' : '#EF4444'}
+                />
+                <Text style={[styles.portfolioPnlText, {
+                  color: totalPnlPct >= 0 ? '#00C9A7' : '#EF4444',
+                }]}>
+                  {totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(1)}%
+                </Text>
+              </View>
+              <Text style={styles.portfolioCount}>
+                {holdingsList.length} stock{holdingsList.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
+          )}
 
-              {holdingsList.slice(0, 5).map((h: any) => (
-                <View key={h.ticker} style={styles.holdingRow}>
-                  <Text style={styles.holdingTicker}>{h.ticker}</Text>
-                  <Text style={styles.holdingPrice}>
-                    ${(h.current_price || h.current_value / (h.shares || 1) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  </Text>
-                  <ScoreBar score={h.fii_score || 5} />
-                  <Text style={[styles.holdingScore, {
-                    color: (h.fii_score || 5) >= 7 ? '#00C9A7' : (h.fii_score || 5) >= 5 ? '#FBBF24' : '#F59E0B',
-                  }]}>
-                    {h.fii_score || '--'} {h.signal || ''}
-                  </Text>
-                </View>
-              ))}
+          {/* Holdings sub-section */}
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Holdings</Text>
+            {loadingHoldings ? (
+              <View style={{ gap: 8 }}>
+                <Skeleton width="100%" height={32} borderRadius={6} />
+                <Skeleton width="100%" height={32} borderRadius={6} />
+                <Skeleton width="100%" height={32} borderRadius={6} />
+              </View>
+            ) : holdingsList.length > 0 ? (
+              holdingsList.slice(0, 5).map((h: any) => {
+                const price = h.current_price || (h.current_value && h.shares ? h.current_value / h.shares : 0);
+                const weight = totalValue > 0 ? ((h.current_value || 0) / totalValue) * 100 : 0;
+                const score = h.fii_score || 5;
+                const scoreColor = score >= 7 ? '#00C9A7' : score >= 5 ? '#FBBF24' : '#F59E0B';
+                return (
+                  <View key={h.ticker} style={styles.holdingRow}>
+                    <Text style={styles.holdingTicker}>{h.ticker}</Text>
+                    <Text style={styles.holdingWeight}>{weight.toFixed(0)}%</Text>
+                    <Text style={styles.holdingPrice}>
+                      ${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </Text>
+                    <ScoreBar score={score} />
+                    <Text style={[styles.holdingScore, { color: scoreColor }]}>
+                      {h.fii_score || '--'}
+                    </Text>
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.cardSubtitle}>No holdings to display</Text>
+            )}
+          </View>
 
-              {/* Insights */}
+          {/* Health Metrics sub-section */}
+          <View style={styles.subSection}>
+            <Text style={styles.subSectionTitle}>Health Metrics</Text>
+            {loadingAnalytics ? (
+              <View style={{ gap: 8 }}>
+                <Skeleton width="100%" height={16} borderRadius={4} />
+                <Skeleton width="100%" height={16} borderRadius={4} />
+                <Skeleton width="100%" height={16} borderRadius={4} />
+              </View>
+            ) : (
+              <View style={styles.healthGrid}>
+                {divScore != null && (
+                  <View style={styles.healthRow}>
+                    <Text style={styles.healthLabel}>Diversification</Text>
+                    <View style={styles.healthBarTrack}>
+                      <View
+                        style={[
+                          styles.healthBarFill,
+                          {
+                            width: `${Math.min(divScore, 100)}%`,
+                            backgroundColor: divScore >= 70 ? '#00C9A7' : divScore >= 40 ? '#FBBF24' : '#F59E0B',
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.healthValue}>{divScore}/100</Text>
+                    <Text style={styles.healthRating}>{divRating || ''}</Text>
+                  </View>
+                )}
+                {sharpe != null && (
+                  <View style={styles.healthRow}>
+                    <Text style={styles.healthLabel}>Sharpe Ratio</Text>
+                    <Text style={styles.healthValue}>
+                      {typeof sharpe === 'number' ? sharpe.toFixed(2) : sharpe}
+                    </Text>
+                    <Text style={styles.healthRating}>
+                      {(typeof sharpe === 'number' ? sharpe : 0) >= 1 ? 'Good' : (typeof sharpe === 'number' ? sharpe : 0) >= 0.5 ? 'Fair' : 'Low'}
+                    </Text>
+                  </View>
+                )}
+                {maxDrawdown != null && (
+                  <View style={styles.healthRow}>
+                    <Text style={styles.healthLabel}>Max Drawdown</Text>
+                    <Text style={styles.healthValue}>
+                      {typeof maxDrawdown === 'number' ? `${maxDrawdown.toFixed(1)}%` : maxDrawdown}
+                    </Text>
+                    <Text style={styles.healthRating}>
+                      {Math.abs(typeof maxDrawdown === 'number' ? maxDrawdown : 0) > 20 ? 'Significant' : 'Moderate'}
+                    </Text>
+                  </View>
+                )}
+                {beta != null && (
+                  <View style={styles.healthRow}>
+                    <Text style={styles.healthLabel}>Beta</Text>
+                    <Text style={styles.healthValue}>
+                      {typeof beta === 'number' ? beta.toFixed(2) : beta}
+                    </Text>
+                    <Text style={styles.healthRating}>
+                      {(typeof beta === 'number' ? beta : 1) < 0.8 ? 'Defensive' : (typeof beta === 'number' ? beta : 1) > 1.2 ? 'Aggressive' : 'Balanced'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Key insights */}
+          {!loadingHoldings && (holdingsSummary?.biggest_risk || holdingsSummary?.biggest_opportunity) && (
+            <View style={styles.insightsBlock}>
               {holdingsSummary?.biggest_risk && (
                 <View style={styles.insightRow}>
                   <Ionicons name="warning-outline" size={14} color="#F59E0B" />
@@ -300,18 +402,19 @@ export const StrategyScreen: React.FC = () => {
                   <Text style={styles.insightText}>{holdingsSummary.biggest_opportunity}</Text>
                 </View>
               )}
-
-              <TouchableOpacity
-                style={styles.askAiButton}
-                onPress={() => openCoachMode('holdings', 'Analyze my current holdings')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="chatbubble-ellipses-outline" size={16} color="#60A5FA" />
-                <Text style={styles.askAiText}>Ask AI about my holdings</Text>
-                <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.3)" />
-              </TouchableOpacity>
-            </>
+            </View>
           )}
+
+          {/* Single Ask AI button */}
+          <TouchableOpacity
+            style={styles.askAiButton}
+            onPress={() => openCoachMode('holdings', 'Give me a full analysis of my portfolio — holdings, diversification, risk, and opportunities')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#60A5FA" />
+            <Text style={styles.askAiText}>Ask AI about my portfolio</Text>
+            <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
         </AdvisorCard>
 
         {/* ═══ 2. INVESTMENT IDEAS CARD ═══ */}
@@ -450,9 +553,6 @@ export const StrategyScreen: React.FC = () => {
           </TouchableOpacity>
         </AdvisorCard>
 
-        {/* ═══ 4.5. BACKTEST CARD ═══ */}
-        <BacktestCard />
-
         {/* ═══ 5. EVENTS TO WATCH CARD ═══ */}
         <AdvisorCard accent={ACCENT.events}>
           <View style={styles.cardHeader}>
@@ -499,76 +599,6 @@ export const StrategyScreen: React.FC = () => {
             </>
           ) : (
             <Text style={styles.cardSubtitle}>No upcoming events in the next 30 days</Text>
-          )}
-        </AdvisorCard>
-
-        {/* ═══ 6. PORTFOLIO HEALTH CARD ═══ */}
-        <AdvisorCard accent="rgba(255,255,255,0.15)">
-          <View style={styles.cardHeader}>
-            <Ionicons name="fitness-outline" size={18} color="rgba(255,255,255,0.6)" />
-            <Text style={styles.cardTitle}>Portfolio Health</Text>
-          </View>
-
-          {loadingAnalytics ? (
-            <View style={{ gap: 8 }}>
-              <Skeleton width="100%" height={16} borderRadius={4} />
-              <Skeleton width="100%" height={16} borderRadius={4} />
-              <Skeleton width="100%" height={16} borderRadius={4} />
-            </View>
-          ) : (
-            <View style={styles.healthGrid}>
-              {divScore != null && (
-                <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Diversification</Text>
-                  <View style={styles.healthBarTrack}>
-                    <View
-                      style={[
-                        styles.healthBarFill,
-                        {
-                          width: `${Math.min(divScore, 100)}%`,
-                          backgroundColor: divScore >= 70 ? '#00C9A7' : divScore >= 40 ? '#FBBF24' : '#F59E0B',
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.healthValue}>{divScore}/100</Text>
-                  <Text style={styles.healthRating}>{divRating || ''}</Text>
-                </View>
-              )}
-              {sharpe != null && (
-                <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Sharpe Ratio</Text>
-                  <Text style={styles.healthValue}>
-                    {typeof sharpe === 'number' ? sharpe.toFixed(2) : sharpe}
-                  </Text>
-                  <Text style={styles.healthRating}>
-                    {(typeof sharpe === 'number' ? sharpe : 0) >= 1 ? 'Good' : (typeof sharpe === 'number' ? sharpe : 0) >= 0.5 ? 'Fair' : 'Low'}
-                  </Text>
-                </View>
-              )}
-              {maxDrawdown != null && (
-                <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Max Drawdown</Text>
-                  <Text style={styles.healthValue}>
-                    {typeof maxDrawdown === 'number' ? `${maxDrawdown.toFixed(1)}%` : maxDrawdown}
-                  </Text>
-                  <Text style={styles.healthRating}>
-                    {Math.abs(typeof maxDrawdown === 'number' ? maxDrawdown : 0) > 20 ? 'Significant' : 'Moderate'}
-                  </Text>
-                </View>
-              )}
-              {beta != null && (
-                <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Beta</Text>
-                  <Text style={styles.healthValue}>
-                    {typeof beta === 'number' ? beta.toFixed(2) : beta}
-                  </Text>
-                  <Text style={styles.healthRating}>
-                    {(typeof beta === 'number' ? beta : 1) < 0.8 ? 'Defensive' : (typeof beta === 'number' ? beta : 1) > 1.2 ? 'Aggressive' : 'Balanced'}
-                  </Text>
-                </View>
-              )}
-            </View>
           )}
         </AdvisorCard>
 
@@ -655,6 +685,59 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
+  // ─── Portfolio summary row ───
+  portfolioSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  portfolioSummaryValue: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  portfolioPnlPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  portfolioPnlText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  portfolioCount: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    marginLeft: 'auto',
+  },
+
+  // ─── Sub-sections ───
+  subSection: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  subSectionTitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  insightsBlock: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    gap: 4,
+  },
+
   // ─── Holdings rows ───
   holdingRow: {
     flexDirection: 'row',
@@ -668,16 +751,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     width: 44,
   },
+  holdingWeight: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 11,
+    fontWeight: '600',
+    width: 34,
+    textAlign: 'right',
+  },
   holdingPrice: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 12,
-    width: 64,
+    width: 56,
     textAlign: 'right',
   },
   holdingScore: {
-    fontSize: 11,
-    fontWeight: '600',
-    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    width: 28,
     textAlign: 'right',
   },
 
