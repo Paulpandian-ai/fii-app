@@ -338,8 +338,8 @@ def _precompute_financial_metrics() -> dict:
                 if not item:
                     needs_update.append(ticker)
                     continue
-                # Check staleness
-                updated_at = item.get("lastUpdated", "")
+                # Check staleness (store_metrics writes "computed_at", not "lastUpdated")
+                updated_at = item.get("computed_at", "") or item.get("lastUpdated", "")
                 if updated_at:
                     try:
                         ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00")).timestamp()

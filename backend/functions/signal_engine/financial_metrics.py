@@ -1538,10 +1538,45 @@ def batch_compute_all(tickers: Optional[list[str]] = None) -> dict:
     }
 
 
+def _count_finnhub_sources(categories: dict) -> int:
+    """Count metrics with source='finnhub' in a categories dict."""
+    count = 0
+    for cat_data in categories.values():
+        if not isinstance(cat_data, dict):
+            continue
+        for metric_info in cat_data.values():
+            if isinstance(metric_info, dict) and metric_info.get("source") == "finnhub":
+                count += 1
+    return count
+
+
 def _compute_and_store_single(ticker: str, sector_stats: dict) -> bool:
-    """Compute and store metrics for a single ticker. Returns True on success."""
+    """Compute and store metrics for a single ticker. Returns True on success.
+
+    Guard: if an existing FINANCIALS# record has Finnhub-sourced metrics and
+    the new computation has fewer Finnhub metrics (e.g. due to rate limiting
+    during batch runs), the write is skipped to avoid clobbering rich data.
+    """
+    import json as _json
+    import db as _db
+
     try:
         metrics = compute_all_metrics(ticker, sector_stats=sector_stats)
+        new_finnhub = _count_finnhub_sources(metrics.get("categories", {}))
+
+        existing = _db.get_item(f"FINANCIALS#{ticker}", "LATEST")
+        if existing:
+            existing_cats = existing.get("categories")
+            if isinstance(existing_cats, str):
+                existing_cats = _json.loads(existing_cats)
+            existing_finnhub = _count_finnhub_sources(existing_cats or {})
+            if existing_finnhub > 0 and new_finnhub < existing_finnhub:
+                logger.info(
+                    f"[FinancialMetrics] Skipping FINANCIALS write for {ticker} — "
+                    f"existing has {existing_finnhub} Finnhub metrics vs {new_finnhub} new"
+                )
+                return True
+
         store_metrics(ticker, metrics)
         return True
     except Exception as e:
