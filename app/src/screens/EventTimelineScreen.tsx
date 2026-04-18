@@ -37,7 +37,7 @@ const IMPACT_COLORS: Record<string, string> = {
 };
 
 const DIRECTION_COLORS: Record<string, string> = {
-  positive: '#34D399',
+  positive: '#14B8A6',
   negative: '#F5A623',
   neutral: '#9CA3AF',
 };

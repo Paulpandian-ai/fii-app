@@ -807,7 +807,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             const score = dimData?.score ?? 5;
             const direction = driverMatch?.direction || (score >= 6 ? 'positive' : score >= 4 ? 'neutral' : 'negative');
             const directionIcon = direction === 'positive' || direction === 'up' ? 'ellipse' : direction === 'neutral' ? 'ellipse' : 'ellipse';
-            const directionColor = direction === 'positive' || direction === 'up' ? '#00C9A7' : direction === 'neutral' ? '#F5A623' : '#FF6B6B';
+            const directionColor = direction === 'positive' || direction === 'up' ? '#00C9A7' : direction === 'neutral' ? '#F5A623' : '#F59E0B';
             const summary = dimData?.summary && dimData.summary !== 'pending'
               ? dimData.summary
               : driverMatch?.description
@@ -855,7 +855,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
         {(() => {
           const riskLevel = compositeScore >= 7 ? 'Low' : compositeScore >= 4 ? 'Moderate' : 'High';
           const riskPct = Math.max(10, Math.min(100, (10 - compositeScore) * 10 + 10));
-          const riskColor = riskLevel === 'Low' ? '#00C9A7' : riskLevel === 'Moderate' ? '#F5A623' : '#FF6B6B';
+          const riskColor = riskLevel === 'Low' ? '#00C9A7' : riskLevel === 'Moderate' ? '#F5A623' : '#F59E0B';
           return (
             <View style={styles.riskThermometerRow}>
               <Text style={styles.riskThermometerLabel}>Overall Resilience:</Text>
@@ -1008,7 +1008,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
 
       {/* SECTION 5: EDUCATIONAL DISCLAIMER */}
       <Text style={styles.eduDisclaimer}>
-        Scores reflect factor analysis of publicly available data. For educational purposes only. Not investment advice.
+        Scores reflect factor analysis of publicly available data. For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
       </Text>
     </ScrollView>
   );
@@ -1072,7 +1072,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
             const parentScore = dimData?.score ?? 5;
             const isExpanded = expandedCategory === cat.id;
             const hasSummary = dimData && dimData.summary && dimData.summary !== 'pending';
-            const parentScoreColor = parentScore >= 6 ? '#00C9A7' : parentScore >= 4 ? '#F5A623' : '#FF6B6B';
+            const parentScoreColor = parentScore >= 6 ? '#00C9A7' : parentScore >= 4 ? '#F5A623' : '#F59E0B';
             const parentLabel = dimData?.score_label || (parentScore >= 7 ? 'Strong' : parentScore >= 5 ? 'Moderate' : 'Weak');
 
             return (
@@ -1106,7 +1106,7 @@ export const SignalDetailScreen: React.FC<SignalDetailScreenProps> = ({ route, n
                       const sfVal = safeNum(sf.score);
                       const hasSubScore = sf.score !== 0 || (analysis?.factorDetails?.[sf.id]?.score != null);
                       const barPct = Math.max(0, Math.min(100, ((sfVal + 2) / 4) * 100));
-                      const sfColor = sfVal > 0.5 ? '#00C9A7' : sfVal >= -0.5 ? '#F5A623' : '#FF6B6B';
+                      const sfColor = sfVal > 0.5 ? '#00C9A7' : sfVal >= -0.5 ? '#F5A623' : '#F59E0B';
                       const confLabel = Math.abs(sfVal) > 1 ? 'High' : Math.abs(sfVal) > 0.3 ? 'Med' : 'Low';
                       const dirLabel = sfVal > 0.5 ? 'Positive' : sfVal >= -0.5 ? 'Neutral' : 'Negative';
 

@@ -39,18 +39,18 @@ export const TermsOfServiceScreen: React.FC = () => {
           the updated terms.
         </Text>
 
-        {/* Section: Not Investment Advice */}
-        <Text style={styles.sectionTitle}>Not Investment Advice</Text>
+        {/* Section: Not Financial Advice */}
+        <Text style={styles.sectionTitle}>Not Financial Advice</Text>
         <View style={styles.warningCard}>
           <Ionicons name="warning-outline" size={20} color="#FBBF24" />
           <Text style={styles.warningText}>
-            Factor Impact Intelligence does not provide investment advice. All signals,
-            scores, and recommendations are for educational purposes only.
+            Factor Impact Intelligence does not provide financial advice. All signals,
+            scores, and analyses are for educational purposes only.
           </Text>
         </View>
         <Text style={styles.body}>
           FII is an educational and informational tool. Nothing in this app constitutes
-          investment advice, financial advice, trading advice, or tax advice. The AI-generated
+          financial advice, trading advice, or tax advice. The AI-generated
           signals, composite scores, factor analyses, scenario projections, Monte Carlo
           simulations, and all other outputs are model-based estimates derived from publicly
           available data. They do not reflect actual market conditions and should not be

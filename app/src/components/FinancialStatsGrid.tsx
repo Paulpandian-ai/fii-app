@@ -69,7 +69,7 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   // Analyst Estimates
   target_price: 'Average analyst price target. The price Wall Street expects the stock to reach.',
   target_upside: 'How much upside (or downside) to the average price target from current price.',
-  analyst_rating: 'Consensus recommendation from analysts covering this stock.',
+  analyst_rating: 'Consensus rating from analysts covering this stock.',
   num_analysts: 'Number of professional analysts providing estimates. More coverage means better data.',
   eps_estimate_current: 'Expected earnings per share for the current quarter.',
   eps_estimate_next: 'Expected earnings per share for next quarter.',
@@ -122,7 +122,7 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   target_price_low: 'Lowest analyst price target. The bearish end of the Wall Street range.',
   target_price_mean: 'Average of analyst price targets. The consensus view on fair value.',
   target_price_high: 'Highest analyst price target. The bullish end of the Wall Street range.',
-  recommendation_score: 'Consensus analyst rating on a 1 (Strong Sell) to 5 (Strong Buy) scale.',
+  recommendation_score: 'Consensus analyst rating on a 1 (Strong Caution) to 5 (Strong Favorable) scale.',
   current_q_eps_estimate: 'Expected earnings per share for the current quarter.',
   current_y_eps_estimate: 'Expected earnings per share for the current fiscal year.',
   eps_revision_trend: 'Net direction of analyst EPS revisions. Positive means estimates are being raised.',

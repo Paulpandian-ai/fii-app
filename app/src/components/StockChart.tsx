@@ -176,8 +176,8 @@ function buildChartHTML(data: ChartData): string {
       white-space: nowrap;
     }
     #tooltip .label { color: rgba(255,255,255,0.5); }
-    #tooltip .up { color: #26a69a; }
-    #tooltip .down { color: #ef5350; }
+    #tooltip .up { color: #14B8A6; }
+    #tooltip .down { color: #F59E0B; }
   </style>
 </head>
 <body>
@@ -243,12 +243,12 @@ function buildChartHTML(data: ChartData): string {
     });
 
     const candleSeries = mainChart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
-      borderUpColor: '#26a69a',
-      borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      upColor: '#14B8A6',
+      downColor: '#F59E0B',
+      borderUpColor: '#14B8A6',
+      borderDownColor: '#F59E0B',
+      wickUpColor: '#14B8A6',
+      wickDownColor: '#F59E0B',
     });
     candleSeries.setData(${candleData});
 
@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     backgroundColor: 'rgba(38,166,154,0.15)',
-    borderColor: '#26a69a',
+    borderColor: '#14B8A6',
   },
   chipText: {
     color: 'rgba(255,255,255,0.5)',
@@ -761,7 +761,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   chipTextActive: {
-    color: '#26a69a',
+    color: '#14B8A6',
   },
   chipSkeleton: {
     marginHorizontal: 2,

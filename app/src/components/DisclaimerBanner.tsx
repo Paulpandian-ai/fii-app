@@ -9,10 +9,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-export const DISCLAIMER_SHORT = 'For educational purposes only. Not investment advice.';
+export const DISCLAIMER_SHORT = 'For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.';
 
 export const DISCLAIMER_FULL =
-  'Factor Impact Intelligence (FII) is for educational and informational purposes only and does not constitute investment advice, financial advice, or tax advice. ' +
+  'Factor Impact Intelligence (FII) is for educational and informational purposes only and does not constitute financial advice, trading advice, or tax advice. ' +
   'Factor scores are AI-generated model estimates based on publicly available data and may not reflect actual market conditions. ' +
   'Past performance does not guarantee future results. ' +
   'Sharpe ratios, Monte Carlo projections, and scenario analyses use historical data and statistical models that do not predict future returns. ' +

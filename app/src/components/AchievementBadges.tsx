@@ -35,7 +35,7 @@ const BADGE_COLORS: Record<string, string> = {
   school: '#F59E0B',
   bonfire: '#F5A623',
   shield: '#3B82F6',
-  globe: '#34D399',
+  globe: '#14B8A6',
   trophy: '#FFD700',
   star: '#F472B6',
 };

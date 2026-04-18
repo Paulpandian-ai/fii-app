@@ -229,8 +229,8 @@ export const BacktestCard: React.FC = () => {
 
   const active = results[activeStrategy];
 
-  const totalReturnColor = (active?.total_return_pct ?? 0) >= 0 ? TEAL : '#EF4444';
-  const alphaColor = (active?.alpha ?? 0) >= 0 ? TEAL : '#EF4444';
+  const totalReturnColor = (active?.total_return_pct ?? 0) >= 0 ? TEAL : '#F59E0B';
+  const alphaColor = (active?.alpha ?? 0) >= 0 ? TEAL : '#F59E0B';
 
   return (
     <View style={styles.card}>
@@ -319,7 +319,7 @@ export const BacktestCard: React.FC = () => {
               </View>
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Max Drawdown</Text>
-                <Text style={[styles.metricValue, { color: '#EF4444' }]}>{active.max_drawdown}%</Text>
+                <Text style={[styles.metricValue, { color: '#F59E0B' }]}>{active.max_drawdown}%</Text>
               </View>
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Win Rate</Text>

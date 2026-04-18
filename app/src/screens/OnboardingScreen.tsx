@@ -154,7 +154,7 @@ export const OnboardingScreen: React.FC<Props> = ({ onComplete }) => {
             </TouchableOpacity>
 
             <Text style={styles.disclaimer}>
-              For educational purposes only. Not investment advice.
+              For educational purposes only. Not financial advice.
             </Text>
           </View>
         </View>

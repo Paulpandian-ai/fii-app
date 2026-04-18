@@ -79,7 +79,7 @@ const SECTOR_COLORS: Record<string, string> = {
   'Consumer Staples': '#EC4899',
   Energy: '#F59E0B',
   'Communication Services': '#F5A623',
-  Industrials: '#34D399',
+  Industrials: '#14B8A6',
   'Real Estate': '#6366F1',
   Materials: '#8B5CF6',
   Utilities: '#14B8A6',
@@ -88,7 +88,7 @@ const SECTOR_COLORS: Record<string, string> = {
 
 const GRADE_COLORS: Record<string, string> = {
   A: '#00C9A7',
-  B: '#34D399',
+  B: '#14B8A6',
   C: '#F59E0B',
   D: '#F97316',
   F: '#F5A623',
@@ -1206,7 +1206,7 @@ export const PortfolioScreen: React.FC = () => {
                 </View>
               ))}
               <Text style={styles.insightDisclaimer}>
-                Factor analysis is for educational purposes only. Past factor performance does not guarantee future results. This is not investment advice.
+                Factor analysis is for educational purposes only. Past factor performance does not guarantee future results. Not financial advice.
               </Text>
             </View>
           </View>

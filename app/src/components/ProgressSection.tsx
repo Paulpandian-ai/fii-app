@@ -52,7 +52,7 @@ const BADGE_ICONS: Record<string, { icon: keyof typeof Ionicons.glyphMap; color:
   school: { icon: 'school', color: '#F59E0B' },
   bonfire: { icon: 'bonfire', color: '#F5A623' },
   shield: { icon: 'shield', color: '#3B82F6' },
-  globe: { icon: 'globe', color: '#34D399' },
+  globe: { icon: 'globe', color: '#14B8A6' },
   trophy: { icon: 'trophy', color: '#FFD700' },
   star: { icon: 'star', color: '#F472B6' },
 };

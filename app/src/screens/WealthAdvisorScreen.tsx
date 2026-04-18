@@ -296,7 +296,7 @@ export const WealthAdvisorScreen: React.FC = () => {
               )}
 
               <Text style={styles.aiDisclaimer}>
-                For educational purposes only. Not investment advice.
+                For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
               </Text>
             </View>
           ) : null}
@@ -341,7 +341,7 @@ export const WealthAdvisorScreen: React.FC = () => {
                 </TouchableOpacity>
               ))}
               <Text style={styles.aiDisclaimer}>
-                For educational purposes only. Not investment advice.
+                For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
               </Text>
             </View>
           ) : (
@@ -375,7 +375,7 @@ export const WealthAdvisorScreen: React.FC = () => {
                 </View>
               ))}
               <Text style={styles.aiDisclaimer}>
-                For educational purposes only. Not investment advice.
+                For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
               </Text>
             </View>
           </View>
@@ -416,7 +416,7 @@ export const WealthAdvisorScreen: React.FC = () => {
               ))}
             </ScrollView>
             <Text style={styles.aiDisclaimer}>
-              For educational purposes only. Not investment advice.
+              For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
             </Text>
           </View>
         )}

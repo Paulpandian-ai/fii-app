@@ -34,10 +34,10 @@ const ACCENT = {
 };
 
 const PRIORITY_DOT: Record<string, string> = {
-  high: '#EF4444',
-  critical: '#EF4444',
+  high: '#F59E0B',
+  critical: '#F59E0B',
   medium: '#FBBF24',
-  low: '#34D399',
+  low: '#14B8A6',
 };
 
 const RECENT_RESEARCH_KEY = '@fii_recent_research';
@@ -273,10 +273,10 @@ export const StrategyScreen: React.FC = () => {
                 <Ionicons
                   name={totalPnlPct >= 0 ? 'trending-up' : 'trending-down'}
                   size={12}
-                  color={totalPnlPct >= 0 ? '#00C9A7' : '#EF4444'}
+                  color={totalPnlPct >= 0 ? '#00C9A7' : '#F59E0B'}
                 />
                 <Text style={[styles.portfolioPnlText, {
-                  color: totalPnlPct >= 0 ? '#00C9A7' : '#EF4444',
+                  color: totalPnlPct >= 0 ? '#00C9A7' : '#F59E0B',
                 }]}>
                   {totalPnlPct >= 0 ? '+' : ''}{totalPnlPct.toFixed(1)}%
                 </Text>
@@ -606,7 +606,7 @@ export const StrategyScreen: React.FC = () => {
         <View style={styles.disclaimerFooter}>
           <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.2)" />
           <Text style={styles.disclaimerText}>
-            Educational analysis only. Not investment advice.
+            For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
           </Text>
         </View>
       </ScrollView>

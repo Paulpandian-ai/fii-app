@@ -3,7 +3,7 @@ import { Text, StyleSheet } from 'react-native';
 
 export const DisclaimerFooter: React.FC = () => (
   <Text style={styles.footer}>
-    For educational purposes only {'\u00B7'} Not investment advice
+    For educational purposes only {'\u00B7'} Not financial advice
   </Text>
 );
 

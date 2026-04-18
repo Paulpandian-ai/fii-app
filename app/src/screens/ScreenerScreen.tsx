@@ -84,11 +84,11 @@ type SortOption = (typeof SORT_OPTIONS)[number];
 const SIGNAL_COLORS = SCORE_COLORS;
 
 const GRADE_COLORS: Record<Grade, string> = {
-  A: '#26a69a',
-  B: '#66bb6a',
+  A: '#14B8A6',
+  B: '#14B8A6',
   C: '#ffa726',
   D: '#ff7043',
-  F: '#ef5350',
+  F: '#F59E0B',
 };
 
 // ─── Part A: Factor Filter Chip Definitions ───
@@ -250,7 +250,7 @@ const ResultRowInner: React.FC<ResultRowProps> = ({
   isStarred,
   showSectorPercentile,
 }) => {
-  const changeColor = (item.changePercent ?? 0) >= 0 ? '#26a69a' : '#ef5350';
+  const changeColor = (item.changePercent ?? 0) >= 0 ? '#14B8A6' : '#F59E0B';
   const changeSign = (item.changePercent ?? 0) >= 0 ? '+' : '';
   const hasScoreLabel = item.scoreLabel != null;
   const signalColor = hasScoreLabel ? SIGNAL_COLORS[item.scoreLabel!] : '#8b949e';
@@ -922,7 +922,7 @@ export const ScreenerScreen: React.FC = () => {
       key={label}
       style={[
         styles.filterChip,
-        isActive && { backgroundColor: (color || '#26a69a') + '20', borderColor: color || '#26a69a' },
+        isActive && { backgroundColor: (color || '#14B8A6') + '20', borderColor: color || '#14B8A6' },
       ]}
       onPress={onPress}
       activeOpacity={0.7}
@@ -932,7 +932,7 @@ export const ScreenerScreen: React.FC = () => {
       <Text
         style={[
           styles.filterChipText,
-          isActive && { color: color || '#26a69a' },
+          isActive && { color: color || '#14B8A6' },
         ]}
       >
         {label}
@@ -1174,8 +1174,8 @@ export const ScreenerScreen: React.FC = () => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#26a69a"
-              colors={['#26a69a']}
+              tintColor="#14B8A6"
+              colors={['#14B8A6']}
             />
           }
         />
@@ -1199,8 +1199,8 @@ export const ScreenerScreen: React.FC = () => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#26a69a"
-              colors={['#26a69a']}
+              tintColor="#14B8A6"
+              colors={['#14B8A6']}
             />
           }
         />
@@ -1247,9 +1247,9 @@ export const ScreenerScreen: React.FC = () => {
                           aiScoreMin: Math.min(val, prev.aiScoreMax),
                         }))
                       }
-                      minimumTrackTintColor="#26a69a"
+                      minimumTrackTintColor="#14B8A6"
                       maximumTrackTintColor="#30363d"
-                      thumbTintColor="#26a69a"
+                      thumbTintColor="#14B8A6"
                     />
                   </View>
                   <Text style={styles.sliderValueLabel}>{pendingFilters.aiScoreMin}</Text>
@@ -1269,9 +1269,9 @@ export const ScreenerScreen: React.FC = () => {
                           aiScoreMax: Math.max(val, prev.aiScoreMin),
                         }))
                       }
-                      minimumTrackTintColor="#26a69a"
+                      minimumTrackTintColor="#14B8A6"
                       maximumTrackTintColor="#30363d"
-                      thumbTintColor="#26a69a"
+                      thumbTintColor="#14B8A6"
                     />
                   </View>
                   <Text style={styles.sliderValueLabel}>{pendingFilters.aiScoreMax}</Text>
@@ -1327,9 +1327,9 @@ export const ScreenerScreen: React.FC = () => {
                           techScoreMin: Math.min(val, prev.techScoreMax),
                         }))
                       }
-                      minimumTrackTintColor="#26a69a"
+                      minimumTrackTintColor="#14B8A6"
                       maximumTrackTintColor="#30363d"
-                      thumbTintColor="#26a69a"
+                      thumbTintColor="#14B8A6"
                     />
                   </View>
                   <Text style={styles.sliderValueLabel}>{pendingFilters.techScoreMin}</Text>
@@ -1349,9 +1349,9 @@ export const ScreenerScreen: React.FC = () => {
                           techScoreMax: Math.max(val, prev.techScoreMin),
                         }))
                       }
-                      minimumTrackTintColor="#26a69a"
+                      minimumTrackTintColor="#14B8A6"
                       maximumTrackTintColor="#30363d"
-                      thumbTintColor="#26a69a"
+                      thumbTintColor="#14B8A6"
                     />
                   </View>
                   <Text style={styles.sliderValueLabel}>{pendingFilters.techScoreMax}</Text>
@@ -1485,7 +1485,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   filterCountBadge: {
-    backgroundColor: '#26a69a',
+    backgroundColor: '#14B8A6',
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -1551,8 +1551,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   templateChipActive: {
-    backgroundColor: '#26a69a20',
-    borderColor: '#26a69a',
+    backgroundColor: '#14B8A620',
+    borderColor: '#14B8A6',
   },
   templateChipText: {
     color: '#8b949e',
@@ -1560,7 +1560,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   templateChipTextActive: {
-    color: '#26a69a',
+    color: '#14B8A6',
   },
 
   // Part A: Factor Filter Chips
@@ -1855,7 +1855,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 24,
     paddingVertical: 10,
-    backgroundColor: '#26a69a',
+    backgroundColor: '#14B8A6',
     borderRadius: 20,
   },
   resetButtonText: {
@@ -1984,7 +1984,7 @@ const styles = StyleSheet.create({
     height: 40,
   },
   sliderValueLabel: {
-    color: '#26a69a',
+    color: '#14B8A6',
     fontSize: 14,
     fontWeight: '800',
     width: 24,
@@ -2008,7 +2008,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   applyButton: {
-    backgroundColor: '#26a69a',
+    backgroundColor: '#14B8A6',
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 24,

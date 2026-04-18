@@ -199,7 +199,7 @@ export const AIChatScreen: React.FC = () => {
         <View style={styles.disclaimer}>
           <Ionicons name="information-circle-outline" size={12} color="rgba(255,255,255,0.2)" />
           <Text style={styles.disclaimerText}>
-            AI responses are educational only, not investment advice.
+            AI responses are educational only, not financial advice. AI-generated analysis for informational purposes only.
           </Text>
         </View>
       </KeyboardAvoidingView>

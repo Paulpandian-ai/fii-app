@@ -29,7 +29,7 @@ const MODE_CONFIG: Record<string, { label: string; icon: string; color: string }
   holdings: { label: 'Holdings', icon: 'bar-chart-outline', color: '#00C9A7' },
   invest: { label: 'Invest', icon: 'compass-outline', color: '#FBBF24' },
   research: { label: 'Research', icon: 'flask-outline', color: '#60A5FA' },
-  tax: { label: 'Tax', icon: 'cash-outline', color: '#34D399' },
+  tax: { label: 'Tax', icon: 'cash-outline', color: '#14B8A6' },
   events: { label: 'Events', icon: 'calendar-outline', color: '#F59E0B' },
 };
 
@@ -371,7 +371,7 @@ export const AICoachScreen: React.FC = () => {
         <View style={styles.chatDisclaimer}>
           <Ionicons name="information-circle-outline" size={12} color="rgba(255,255,255,0.2)" />
           <Text style={styles.chatDisclaimerText}>
-            For educational purposes only. Not investment advice.
+            For educational purposes only. Not financial advice. AI-generated analysis for informational purposes only.
           </Text>
         </View>
       </KeyboardAvoidingView>

@@ -53,15 +53,15 @@ const SECTOR_ABBREVIATIONS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 const getColorForChange = (changePercent: number): string => {
-  if (changePercent <= -3) return '#b71c1c';
-  if (changePercent <= -2) return '#e53935';
-  if (changePercent <= -1) return '#ef5350';
-  if (changePercent <= -0.5) return 'rgba(198,40,40,0.6)';
+  if (changePercent <= -3) return '#92400E';
+  if (changePercent <= -2) return '#B45309';
+  if (changePercent <= -1) return '#F59E0B';
+  if (changePercent <= -0.5) return 'rgba(217,119,6,0.6)';
   if (changePercent < 0.5) return '#424242';
-  if (changePercent < 1) return 'rgba(46,125,50,0.6)';
-  if (changePercent < 2) return '#66bb6a';
-  if (changePercent < 3) return '#43a047';
-  return '#1b5e20';
+  if (changePercent < 1) return 'rgba(20,184,166,0.6)';
+  if (changePercent < 2) return '#14B8A6';
+  if (changePercent < 3) return '#0D9488';
+  return '#0F766E';
 };
 
 const abbreviateSector = (sector: string): string =>

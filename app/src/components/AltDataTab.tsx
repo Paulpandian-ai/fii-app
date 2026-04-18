@@ -52,7 +52,7 @@ function formatPct(n: number | null | undefined, withSign = true): string {
 
 function sentimentColor(label?: string): string {
   if (label === 'positive') return '#00C9A7';
-  if (label === 'negative') return '#FF6B6B';
+  if (label === 'negative') return '#F59E0B';
   return 'rgba(255,255,255,0.55)';
 }
 
@@ -200,7 +200,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
               <Metric
                 label="YoY change"
                 value={formatPct(patents.yoy_change_pct)}
-                color={patents.yoy_change_pct >= 0 ? '#00C9A7' : '#FF6B6B'}
+                color={patents.yoy_change_pct >= 0 ? '#00C9A7' : '#F59E0B'}
               />
               {patents.top_areas && patents.top_areas.length > 0 && (
                 <Metric label="Top areas" value={patents.top_areas.slice(0, 3).join(', ')} />
@@ -248,7 +248,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
                   value={formatPct(
                     ((contracts.total_value - contracts.prior_value) / contracts.prior_value) * 100,
                   )}
-                  color={contracts.total_value >= contracts.prior_value ? '#00C9A7' : '#FF6B6B'}
+                  color={contracts.total_value >= contracts.prior_value ? '#00C9A7' : '#F59E0B'}
                 />
               )}
             </>
@@ -296,7 +296,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
           ) : (
             <>
               <Metric label="Buys (90d)" value={formatNum(insider_activity.buys_90d)} color="#00C9A7" />
-              <Metric label="Sells (90d)" value={formatNum(insider_activity.sells_90d)} color="#FF6B6B" />
+              <Metric label="Sells (90d)" value={formatNum(insider_activity.sells_90d)} color="#F59E0B" />
               <Metric
                 label="Net sentiment"
                 value={(insider_activity.net_sentiment || 'neutral').toUpperCase()}
@@ -322,7 +322,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
       <SectionCard
         title="Institutional Flows"
         icon="briefcase-outline"
-        iconColor="#34D399"
+        iconColor="#14B8A6"
         source="SEC 13F"
         empty={!institutional}
         emptyText="No institutional data"
@@ -335,7 +335,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
               <Metric
                 label="Net change (QoQ)"
                 value={formatPct(institutional.net_change_qoq)}
-                color={institutional.net_change_qoq >= 0 ? '#00C9A7' : '#FF6B6B'}
+                color={institutional.net_change_qoq >= 0 ? '#00C9A7' : '#F59E0B'}
               />
               {institutional.top_holders && institutional.top_holders.length > 0 && (
                 <Metric
@@ -429,7 +429,7 @@ export const AltDataTab: React.FC<Props> = ({ ticker, data, loading }) => {
       <View style={styles.disclaimerRow}>
         <Text style={styles.disclaimerIcon}>{'\u24D8'}</Text>
         <Text style={styles.disclaimerText}>
-          {data.disclaimer || 'Alternative data is educational. Not investment advice.'}
+          {data.disclaimer || 'Alternative data is educational. Not financial advice.'}
         </Text>
       </View>
 

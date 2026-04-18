@@ -476,7 +476,7 @@ export function ReportCritiqueScreen() {
             <Ionicons name="information-circle-outline" size={14} color="rgba(255,255,255,0.35)" />
             <Text style={styles.disclaimerText}>
               {result.disclaimer ||
-                'Educational analysis comparing third-party reports against FII factor data. Not investment advice.'}
+                'Educational analysis comparing third-party reports against FII factor data. Not financial advice. AI-generated analysis for informational purposes only.'}
             </Text>
           </View>
         </ScrollView>

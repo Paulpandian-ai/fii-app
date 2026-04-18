@@ -26,7 +26,7 @@ export const DisclaimerModal: React.FC = () => {
           <Text style={styles.title}>Important Information</Text>
           <ScrollView style={styles.scrollBody}>
             <Text style={styles.body}>
-              Factor Impact Intelligence provides educational analysis of publicly available market data. All scores, analysis, and content are for informational purposes only and do not constitute investment advice. Past performance does not guarantee future results. Consult a qualified financial advisor before making investment decisions.
+              Factor Impact Intelligence provides educational analysis of publicly available market data. All scores, analysis, and content are for informational purposes only and do not constitute financial advice. Past performance does not guarantee future results. Consult a qualified financial advisor before making financial decisions.
             </Text>
           </ScrollView>
           <TouchableOpacity style={styles.button} onPress={handleAccept} activeOpacity={0.8}>

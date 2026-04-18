@@ -237,7 +237,7 @@ export const PaywallScreen: React.FC = () => {
                   size={18}
                   color={
                     feature.included
-                      ? tier.glowColor ?? '#34D399'
+                      ? tier.glowColor ?? '#14B8A6'
                       : 'rgba(255,255,255,0.2)'
                   }
                 />
@@ -311,7 +311,7 @@ export const PaywallScreen: React.FC = () => {
 
       {/* Money-back guarantee */}
       <View style={styles.guaranteeRow}>
-        <Ionicons name="shield-checkmark" size={20} color="#34D399" />
+        <Ionicons name="shield-checkmark" size={20} color="#14B8A6" />
         <Text style={styles.guaranteeText}>
           7-day free trial, cancel anytime
         </Text>
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   saveBadgeText: {
-    color: '#34D399',
+    color: '#14B8A6',
     fontSize: 11,
     fontWeight: '700',
   },

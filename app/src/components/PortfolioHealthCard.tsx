@@ -183,7 +183,7 @@ export const PortfolioHealthCard: React.FC<Props> = ({ onLoaded }) => {
               </View>
 
               <Text style={styles.sheetDisclaimer}>
-                For educational purposes only. Not investment advice.
+                For educational purposes only. Not financial advice.
               </Text>
             </ScrollView>
           </View>

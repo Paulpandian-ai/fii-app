@@ -726,7 +726,7 @@ export const SettingsScreen: React.FC = () => {
         {/* Community */}
         <Text style={styles.sectionHeader}>Community</Text>
         <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('TrackRecord')} activeOpacity={0.7}>
-          <Ionicons name="trophy-outline" size={20} color="#34D399" />
+          <Ionicons name="trophy-outline" size={20} color="#14B8A6" />
           <Text style={styles.actionText}>Our Track Record</Text>
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
         </TouchableOpacity>
