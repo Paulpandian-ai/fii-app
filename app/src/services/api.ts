@@ -541,7 +541,11 @@ export const postCritiqueReport = async (params: {
   report_pdf_base64?: string;
   source?: string;
 }) => {
-  const { data } = await api.post('/advisor/critique-report', params);
+  // Claude needs 30-90s to read a PDF and produce a structured critique, so
+  // the default 30s axios timeout cuts it off. Override per-request to 120s.
+  const { data } = await api.post('/advisor/critique-report', params, {
+    timeout: 120000,
+  });
   return data;
 };
 

@@ -317,3 +317,82 @@ def get_basic_financials(ticker):
         "bookValuePerShare": m.get("bookValuePerShareQuarterly"),
         "marketCapitalization": m.get("marketCapitalization"),
     }
+
+
+# ─── Alt-data endpoints (premium on free tier — degrade gracefully on 403) ───
+
+
+def get_insider_transactions(ticker, limit=25):
+    """Recent Form 4 insider transactions. Returns [] if endpoint is gated.
+
+    Finnhub endpoint: /stock/insider-transactions
+    Premium on free tier — on 403 or any failure we return [] so the caller
+    can fall back to a pending state instead of surfacing an error.
+    """
+    try:
+        data = _request("stock/insider-transactions", {"symbol": ticker})
+    except Exception as e:
+        logger.warning(f"[Finnhub] insider-transactions failed for {ticker}: {e}")
+        return []
+    if not data or not isinstance(data, dict):
+        return []
+    rows = data.get("data") or []
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for t in rows[:limit]:
+        try:
+            change = int(t.get("change") or 0)
+        except (TypeError, ValueError):
+            change = 0
+        out.append({
+            "name": t.get("name", "") or "",
+            "share": int(t.get("share") or 0),
+            "change": change,
+            "filingDate": t.get("filingDate", "") or "",
+            "transactionDate": t.get("transactionDate", "") or "",
+            "transactionPrice": float(t.get("transactionPrice") or 0),
+            "transactionCode": t.get("transactionCode", "") or "",
+        })
+    return out
+
+
+def get_institutional_ownership(ticker, limit=10):
+    """Top institutional holders. Returns [] when endpoint is gated (403)."""
+    try:
+        data = _request("stock/ownership", {"symbol": ticker, "limit": limit})
+    except Exception as e:
+        logger.warning(f"[Finnhub] stock/ownership failed for {ticker}: {e}")
+        return []
+    if not data or not isinstance(data, dict):
+        return []
+    rows = data.get("ownership") or []
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for h in rows[:limit]:
+        try:
+            share = int(h.get("share") or 0)
+            change = int(h.get("change") or 0)
+        except (TypeError, ValueError):
+            share, change = 0, 0
+        out.append({
+            "name": h.get("name", "") or "",
+            "share": share,
+            "change": change,
+            "filingDate": h.get("filingDate", "") or "",
+            "percentage": float(h.get("percentage") or 0),
+        })
+    return out
+
+
+def get_social_sentiment(ticker):
+    """Reddit + Twitter aggregate sentiment. Returns {} when gated."""
+    try:
+        data = _request("stock/social-sentiment", {"symbol": ticker})
+    except Exception as e:
+        logger.warning(f"[Finnhub] social-sentiment failed for {ticker}: {e}")
+        return {}
+    if not data or not isinstance(data, dict):
+        return {}
+    return data

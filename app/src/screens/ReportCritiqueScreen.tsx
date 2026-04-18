@@ -672,7 +672,9 @@ export function ReportCritiqueScreen() {
               <View style={styles.loadingRow}>
                 <ActivityIndicator color="#fff" size="small" />
                 <Text style={styles.analyzeButtonText}>
-                  Analyzing... This takes ~10 seconds
+                  {uploadMethod === 'pdf'
+                    ? 'Analyzing PDF with AI... 1–2 min for large documents'
+                    : 'Analyzing with AI... ~30 seconds'}
                 </Text>
               </View>
             ) : (

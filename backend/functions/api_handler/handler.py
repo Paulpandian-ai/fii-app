@@ -2044,34 +2044,127 @@ def _score_news_sentiment(headlines: list) -> dict:
 
 
 def _gather_insider_activity(ticker: str) -> dict:
-    """Insider Form 4 activity — stubbed until SEC EDGAR Form 4 ingestion is live.
+    """Insider Form 4 activity from Finnhub /stock/insider-transactions.
 
-    The schema is still returned so the client renders the section with a
-    "Data pending" state rather than hiding it. Once we wire a Form 4 fetcher
-    (SEC EDGAR EFTS search for form=4&company=ticker), populate `notable` from
-    the filings.
+    Returns real 90-day buy/sell counts + the most recent transactions when
+    the Finnhub endpoint is available. Falls back to a "pending" stub if the
+    endpoint is gated on free tier (403) or returns no rows.
     """
+    try:
+        txns = finnhub_client.get_insider_transactions(ticker, limit=50) or []
+    except Exception as e:
+        logger.warning(f"[AltData] insider-transactions failed for {ticker}: {e}")
+        txns = []
+
+    if not txns:
+        return {
+            "buys_90d": 0,
+            "sells_90d": 0,
+            "net_sentiment": "unknown",
+            "notable": [],
+            "data_source": "Finnhub Insider Transactions",
+            "status": "pending",
+            "pending_reason": "Finnhub insider-transactions not available on this tier",
+        }
+
+    buys = sum(1 for t in txns if (t.get("change") or 0) > 0)
+    sells = sum(1 for t in txns if (t.get("change") or 0) < 0)
+    if buys > sells:
+        sentiment = "positive"
+    elif sells > buys:
+        sentiment = "negative"
+    else:
+        sentiment = "neutral"
+
+    notable = []
+    for t in txns[:5]:
+        change = t.get("change") or 0
+        notable.append({
+            "insider": t.get("name", "Insider"),
+            "name": t.get("name", "Insider"),
+            "action": "buy" if change > 0 else "sell" if change < 0 else "other",
+            "type": "buy" if change > 0 else "sell" if change < 0 else "other",
+            "shares": change,
+            "price": t.get("transactionPrice", 0),
+            "date": t.get("transactionDate") or t.get("filingDate", ""),
+        })
+
     return {
-        "buys_90d": 0,
-        "sells_90d": 0,
-        "net_sentiment": "unknown",
-        "notable": [],
-        "data_source": "SEC Form 4",
-        "status": "pending",
-        "pending_reason": "SEC EDGAR Form 4 ingestion in progress",
+        "buys_90d": buys,
+        "sells_90d": sells,
+        "net_sentiment": sentiment,
+        "notable": notable,
+        "recent_transactions": notable,
+        "data_source": "Finnhub Insider Transactions",
+        "status": "ok",
     }
 
 
 def _gather_institutional(ticker: str) -> dict:
-    """13F institutional holdings — stubbed until 13F parsing is live."""
+    """Top 13F holders from Finnhub /stock/ownership.
+
+    Falls back to the pending stub when the endpoint is gated.
+    """
+    try:
+        holders = finnhub_client.get_institutional_ownership(ticker, limit=10) or []
+    except Exception as e:
+        logger.warning(f"[AltData] institutional ownership failed for {ticker}: {e}")
+        holders = []
+
+    if not holders:
+        return {
+            "top_holders": [],
+            "net_change_qoq": 0.0,
+            "notable_new_positions": [],
+            "notable_exits": [],
+            "data_source": "Finnhub Institutional Ownership",
+            "status": "pending",
+            "pending_reason": "Finnhub ownership not available on this tier",
+        }
+
+    top_holders = [{
+        "name": h.get("name", "Unknown"),
+        "share": h.get("share", 0),
+        "shares": h.get("share", 0),
+        "change": h.get("change", 0),
+        "percentage": h.get("percentage", 0),
+        "pct": h.get("percentage", 0),
+    } for h in holders]
+
+    new_positions = [h for h in top_holders if (h.get("change") or 0) > 0 and h.get("share") == h.get("change")]
+    exits = [h for h in top_holders if (h.get("change") or 0) < 0 and abs(h.get("change") or 0) >= (h.get("share") or 0)]
+
+    total_share = sum(h.get("share") or 0 for h in top_holders) or 1
+    total_change = sum(h.get("change") or 0 for h in top_holders)
+    net_change_qoq = round((total_change / total_share) * 100, 2)
+
     return {
-        "top_holders": [],
-        "net_change_qoq": 0.0,
-        "notable_new_positions": [],
-        "notable_exits": [],
-        "data_source": "SEC 13F",
-        "status": "pending",
-        "pending_reason": "SEC 13F parsing in progress",
+        "top_holders": top_holders,
+        "net_change_qoq": net_change_qoq,
+        "notable_new_positions": new_positions[:3],
+        "notable_exits": exits[:3],
+        "data_source": "Finnhub Institutional Ownership",
+        "status": "ok",
+    }
+
+
+def _gather_brand_signals(ticker: str) -> dict | None:
+    """Aggregate Reddit + Twitter social mentions. Returns None when gated."""
+    try:
+        sentiment = finnhub_client.get_social_sentiment(ticker) or {}
+    except Exception as e:
+        logger.warning(f"[AltData] social-sentiment failed for {ticker}: {e}")
+        return None
+    reddit = sentiment.get("reddit") or []
+    twitter = sentiment.get("twitter") or []
+    if not reddit and not twitter:
+        return None
+    return {
+        "reddit_mentions": sum((s.get("mention") or 0) for s in reddit),
+        "reddit_sentiment": sum((s.get("score") or 0) for s in reddit),
+        "twitter_mentions": sum((s.get("mention") or 0) for s in twitter),
+        "twitter_sentiment": sum((s.get("score") or 0) for s in twitter),
+        "data_source": "Finnhub Social Sentiment",
     }
 
 
@@ -2283,6 +2376,7 @@ def _handle_alt_data_full(method, ticker):
     insider_block = _gather_insider_activity(ticker)
     institutional_block = _gather_institutional(ticker)
     news_block = _gather_news_sentiment(ticker)
+    brand_block = _gather_brand_signals(ticker)
     sector_specific = _build_sector_specific(sector, raw)
 
     available = []
@@ -2294,6 +2388,12 @@ def _handle_alt_data_full(method, ticker):
         available.append("fda")
     if news_block and news_block.get("recent_headlines"):
         available.append("news")
+    if insider_block and insider_block.get("status") == "ok":
+        available.append("insider")
+    if institutional_block and institutional_block.get("status") == "ok":
+        available.append("institutional")
+    if brand_block:
+        available.append("brand")
 
     payload = {
         "ticker": ticker,
@@ -2305,6 +2405,7 @@ def _handle_alt_data_full(method, ticker):
         "insider_activity": insider_block,
         "institutional": institutional_block,
         "news_sentiment": news_block,
+        "brand_signals": brand_block,
         "sector_specific": sector_specific,
         "disclaimer": "Alternative data is educational. Not investment advice.",
         "generated_at": datetime.now(timezone.utc).isoformat(),
