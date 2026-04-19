@@ -16,73 +16,24 @@ logger = logging.getLogger(__name__)
 
 CRITIQUE_CACHE_TTL = 86400  # 24 hours
 
-CRITIQUE_SYSTEM_PROMPT = """You are an investment research analyst critique engine. You compare \
-third-party analyst reports against FII's proprietary multi-factor \
-analysis to provide an independent second opinion.
+CRITIQUE_SYSTEM_PROMPT = """You compare analyst reports against FII's multi-factor analysis data. Respond in JSON.
 
-Your job is to:
-1. SUMMARIZE the analyst's key claims and recommendations
-2. VALIDATE claims that FII data supports (with specific data points)
-3. CHALLENGE claims that FII data contradicts (with specific data points)
-4. IDENTIFY BLIND SPOTS — important factors the analyst missed entirely
-5. Provide an overall AGREEMENT SCORE (0-100) showing how much \
-   FII data aligns with the analyst's thesis
+Tasks:
+1. Summarize the analyst's key claims
+2. Validate claims FII data supports (cite specific numbers)
+3. Challenge claims FII data contradicts (cite specific numbers)
+4. Identify blind spots the analyst missed
+5. Score agreement 0-100
 
-RULES:
-- Always cite specific FII data (scores, metrics, percentages)
-- Be balanced — acknowledge what the analyst got right
-- Focus on factual data points, not opinions
-- Highlight supply chain, geopolitical, and macro risks that \
-  traditional analysts often underweight
-- Use educational framing: "FII data indicates..." not "you should..."
-- End with educational disclaimer
+Rules: Cite FII data points. Be balanced. Use "FII data indicates..." framing. Educational only.
 
-OUTPUT FORMAT (respond in JSON):
+JSON format:
 {
-  "analyst_summary": {
-    "source": "detected source name or Unknown",
-    "rating": "detected rating (Buy/Hold/Sell/Overweight/etc)",
-    "price_target": "detected target or null",
-    "key_thesis": "2-3 sentence summary of analyst's main argument",
-    "key_claims": ["claim 1", "claim 2", "claim 3"]
-  },
-  "critique": {
-    "agreement_score": 72,
-    "agreements": [
-      {
-        "analyst_claim": "Strong revenue growth driven by AI demand",
-        "fii_data": "Revenue growth 44.7% YoY confirmed by SEC EDGAR data",
-        "verdict": "CONFIRMED",
-        "confidence": "High"
-      }
-    ],
-    "contradictions": [
-      {
-        "analyst_claim": "Limited geopolitical risk exposure",
-        "fii_data": "FII Geopolitical score: 4/10. Trade Barriers impact -2.0, 25% China revenue exposure per 10-K",
-        "verdict": "CONTRADICTED",
-        "confidence": "High",
-        "risk_level": "Material"
-      }
-    ],
-    "blind_spots": [
-      {
-        "factor": "Supply Chain Concentration",
-        "fii_finding": "Top 3 suppliers account for 65% of critical components (FII upstream score: 6/10)",
-        "risk_level": "Moderate",
-        "why_it_matters": "A single supplier disruption could impact 20%+ of production capacity"
-      }
-    ]
-  },
-  "fii_vs_analyst": {
-    "fii_score": 5.5,
-    "fii_label": "Neutral",
-    "analyst_rating": "Buy",
-    "alignment": "FII is more cautious than the analyst",
-    "key_difference": "Analyst underweights geopolitical and supply chain risks that FII identifies as material"
-  },
-  "executive_summary": "2-3 paragraph synthesis of the critique",
-  "disclaimer": "This critique compares third-party analysis against FII's factor data for educational purposes. It is not investment advice and should not be used as the sole basis for investment decisions."
+  "analyst_summary": {"source":"str","rating":"str","price_target":"str|null","key_thesis":"str","key_claims":["str"]},
+  "critique": {"agreement_score":72,"agreements":[{"analyst_claim":"str","fii_data":"str","verdict":"CONFIRMED","confidence":"High"}],"contradictions":[{"analyst_claim":"str","fii_data":"str","verdict":"CONTRADICTED","confidence":"High","risk_level":"Material"}],"blind_spots":[{"factor":"str","fii_finding":"str","risk_level":"str","why_it_matters":"str"}]},
+  "fii_vs_analyst": {"fii_score":5.5,"fii_label":"str","analyst_rating":"str","alignment":"str","key_difference":"str"},
+  "executive_summary": "2-3 paragraph synthesis",
+  "disclaimer": "Educational comparison only. Not financial advice."
 }"""
 
 
@@ -147,14 +98,17 @@ def _gather_fii_data(ticker: str) -> dict:
     }
 
 
-def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
-    """Assemble the user message with analyst report + FII data."""
+MAX_REPORT_CHARS = 3000
+
+
+def _extract_fii_context(ticker: str, fii_data: dict) -> str:
+    """Build a compact FII context string (~500 tokens)."""
     signal = fii_data.get("signal", {})
     factor_summary = fii_data.get("factor_summary", {})
     financials = fii_data.get("financials", {})
     stress = fii_data.get("stress", {})
 
-    # ── SIGNAL ──
+    # Signal
     score = _safe_float(signal.get("score"), 0)
     label = _safe_str(signal.get("score_label", signal.get("scoreLabel")), "N/A")
     drivers_raw = signal.get("score_drivers", "[]")
@@ -167,29 +121,18 @@ def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
         drivers = drivers_raw
     else:
         drivers = []
-    drivers_preview = json.dumps(drivers[:5], default=str) if drivers else "None"
+    top_drivers = ", ".join(str(d) for d in drivers[:3]) if drivers else "None"
 
-    # ── FACTOR_SUMMARY: nested under "dimensions" ──
+    # Factor scores (compact: just score per dimension)
     dims = factor_summary.get("dimensions", {}) or {}
-    dimensions = [
-        ("Supply Chain Upstream", "upstream"),
-        ("Supply Chain Downstream", "downstream"),
-        ("Geopolitical", "geopolitical"),
-        ("Monetary", "monetary"),
-        ("Correlations", "correlations"),
-        ("Risk & Performance", "risk_performance"),
-    ]
-    factor_lines = []
-    for dim_name, dim_key in dimensions:
+    dim_scores = []
+    for dim_key in ["upstream", "downstream", "geopolitical", "monetary", "correlations", "risk_performance"]:
         dim_data = dims.get(dim_key, {}) or {}
-        if not isinstance(dim_data, dict):
-            continue
-        dim_score = _safe_float(dim_data.get("score"), 0)
-        dim_summary = _safe_str(dim_data.get("summary"), "No data")
-        factor_lines.append(f"  {dim_name}: {dim_score}/10 - {dim_summary}")
-    factor_block = "\n".join(factor_lines) if factor_lines else "  (no factor data available)"
+        if isinstance(dim_data, dict) and dim_data.get("score") is not None:
+            dim_scores.append(f"{dim_key}: {_safe_float(dim_data['score'], 0)}/10")
+    factors_line = ", ".join(dim_scores) if dim_scores else "N/A"
 
-    # ── FINANCIALS: categories is a JSON-encoded string, nested {category}.{key}.value ──
+    # Financials (compact extraction from nested categories)
     categories = financials.get("categories")
     if isinstance(categories, str):
         try:
@@ -198,75 +141,54 @@ def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
             categories = {}
     categories = categories or {}
 
-    def _cat_val(category: str, key: str):
+    def _cv(cat: str, key: str):
         try:
-            cat = categories.get(category, {}) or {}
-            entry = cat.get(key, {}) or {}
-            if isinstance(entry, dict):
-                return entry.get("value")
-            return entry
+            entry = (categories.get(cat) or {}).get(key, {})
+            return entry.get("value") if isinstance(entry, dict) else entry
         except Exception:
             return None
 
-    pe = _safe_str(_cat_val("valuation", "trailing_pe"), "N/A")
-    fwd_pe = _safe_str(_cat_val("valuation", "forward_pe"), "N/A")
-    market_cap = _safe_str(_cat_val("valuation", "market_cap"), "N/A")
-    rev_growth = _safe_str(_cat_val("growth", "revenue_growth_yoy"), "N/A")
-    eps_growth = _safe_str(_cat_val("growth", "eps_growth_yoy"), "N/A")
-    margin = _safe_str(_cat_val("profitability", "net_margin"), "N/A")
-    roe = _safe_str(_cat_val("profitability", "roe"), "N/A")
-    de = _safe_str(_cat_val("health", "debt_to_equity"), "N/A")
-    beta = _safe_str(_cat_val("momentum", "beta"), "N/A")
-    sector = _safe_str(financials.get("sector"), "N/A")
+    pe = _safe_str(_cv("valuation", "trailing_pe"), "N/A")
+    rev_growth = _safe_str(_cv("growth", "revenue_growth_yoy"), "N/A")
+    margin = _safe_str(_cv("profitability", "net_margin"), "N/A")
+    roe = _safe_str(_cv("profitability", "roe"), "N/A")
+    beta = _safe_str(_cv("momentum", "beta"), "N/A")
+    de = _safe_str(_cv("health", "debt_to_equity"), "N/A")
 
-    # ── STRESS: scenarios is a LIST, key by scenario id ──
+    # Stress (compact: just pullback + recession from scenarios list)
     scenarios = stress.get("scenarios", []) or []
     stress_by_id = {}
     if isinstance(scenarios, list):
         for sc in scenarios:
-            if not isinstance(sc, dict):
-                continue
-            sid = sc.get("id") or sc.get("scenarioKey")
-            if sid:
-                stress_by_id[sid] = sc
+            if isinstance(sc, dict):
+                sid = sc.get("id") or sc.get("scenarioKey")
+                if sid:
+                    stress_by_id[sid] = sc
+    pullback_sc = stress_by_id.get("moderate", {})
+    recession_sc = stress_by_id.get("recession", {})
+    pullback = _safe_str(pullback_sc.get("estimated_impact", pullback_sc.get("priceImpact")), "N/A")
+    recession = _safe_str(recession_sc.get("estimated_impact", recession_sc.get("priceImpact")), "N/A")
 
-    def _stress_impact(sid: str):
-        s = stress_by_id.get(sid, {})
-        return _safe_str(s.get("estimated_impact", s.get("priceImpact")), "N/A")
+    return f"""FII Analysis for {ticker}:
+- Score: {score}/10 ({label})
+- P/E: {pe}, Rev Growth: {rev_growth}%, Net Margin: {margin}%
+- ROE: {roe}%, Debt/Equity: {de}, Beta: {beta}
+- Factors: {factors_line}
+- Stress: Pullback {pullback}%, Recession {recession}%
+- Top drivers: {top_drivers}"""
 
-    moderate = _stress_impact("moderate")
-    recession = _stress_impact("recession")
-    severe = _stress_impact("severe")
-    sector_shock = _stress_impact("sector_shock")
-    overall_risk = _safe_str(stress.get("overall_risk_rating"), "N/A")
 
-    # Clean up report text (strip excess whitespace)
-    cleaned_report = " ".join(report_text.split())
-
+def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
+    """Assemble the user message with analyst report + compact FII data."""
+    fii_context = _extract_fii_context(ticker, fii_data)
+    cleaned_report = " ".join(report_text.split())[:MAX_REPORT_CHARS]
     return f"""[ANALYST REPORT]
 {cleaned_report}
 
-[FII DATA FOR {ticker}]
-FII Composite Score: {score}/10 ({label})
-Sector: {sector}
-Top Score Drivers: {drivers_preview}
+[FII DATA]
+{fii_context}
 
-Factor Scores (6 dimensions):
-{factor_block}
-
-Key Financial Metrics:
-  P/E (trailing): {pe}, P/E (forward): {fwd_pe}, Market Cap: {market_cap}
-  Revenue Growth YoY: {rev_growth}%, EPS Growth YoY: {eps_growth}%
-  Net Margin: {margin}%, ROE: {roe}%, Debt/Equity: {de}, Beta: {beta}
-
-Stress Test Scenarios (% price impact):
-  Moderate Pullback: {moderate}%
-  Recession: {recession}%
-  Severe Crisis: {severe}%
-  Sector Shock: {sector_shock}%
-  Overall Risk Rating: {overall_risk}
-
-Please critique this analyst report against the FII data above."""
+Critique this analyst report against FII data above."""
 
 
 def _parse_critique_response(text: str) -> dict:
@@ -380,13 +302,11 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
     # Step 1: Gather FII data
     fii_data = _gather_fii_data(ticker)
 
-    # Step 2: Build the user message with FII data context
+    # Step 2: Build the user message with compact FII data context
+    fii_context = _extract_fii_context(ticker, fii_data)
+    source_hint = f"[Source: {source}] " if source else ""
+
     if report_pdf_base64:
-        # For PDF mode, build FII data context without the report text
-        fii_context = _build_user_message("(see attached PDF)", ticker, fii_data)
-        if source:
-            fii_context = f"[SOURCE HINT: This report is from {source}]\n\n{fii_context}"
-        # Use Claude's native PDF document support
         user_content = [
             {
                 "type": "document",
@@ -398,20 +318,20 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
             },
             {
                 "type": "text",
-                "text": fii_context,
+                "text": f"{source_hint}[FII DATA]\n{fii_context}\n\nCritique this analyst report against FII data above.",
             },
         ]
     else:
         user_message = _build_user_message(report_text, ticker, fii_data)
         if source:
-            user_message = f"[SOURCE HINT: This report is from {source}]\n\n{user_message}"
+            user_message = f"{source_hint}\n{user_message}"
         user_content = user_message
 
-    # Step 3: Call Claude Sonnet for high-quality critique
+    # Step 3: Call Claude Haiku for fast critique (under 30s API Gateway limit)
     client = cc._get_client()
     message = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=4096,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1500,
         system=CRITIQUE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
     )
