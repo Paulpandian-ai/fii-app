@@ -153,42 +153,29 @@ export function ReportCritiqueScreen() {
       setPdfFile({ name: asset.name, size: fileSize, uri: asset.uri });
       setError('');
 
-      // Read file as base64 — try legacy FileSystem first, fall back to fetch/blob
+      // Read file as base64 via fetch/blob
       let base64: string | null = null;
 
       try {
-        console.log('[PDF] Attempting FileSystem.readAsStringAsync (legacy)...');
-        const FileSystem = await import('expo-file-system/legacy');
-        base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: 'base64' as any,
+        console.log('[PDF] Fetching URI as blob...');
+        const resp = await fetch(asset.uri);
+        const blob = await resp.blob();
+        console.log('[PDF] Blob fetched. Size:', blob.size);
+
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+            resolve(b64);
+          };
+          reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+          reader.readAsDataURL(blob);
         });
-        console.log('[PDF] FileSystem read OK. Base64 length:', base64?.length || 0);
-      } catch (fsErr: any) {
-        console.warn('[PDF] FileSystem legacy failed:', fsErr?.message || fsErr);
-
-        // Fallback: fetch the uri as a blob, then FileReader.readAsDataURL
-        try {
-          console.log('[PDF] Fallback: fetching URI as blob...');
-          const resp = await fetch(asset.uri);
-          const blob = await resp.blob();
-          console.log('[PDF] Blob fetched. Size:', blob.size);
-
-          base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              // Strip "data:application/pdf;base64," prefix
-              const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-              resolve(b64);
-            };
-            reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
-            reader.readAsDataURL(blob);
-          });
-          console.log('[PDF] Fallback read OK. Base64 length:', base64?.length || 0);
-        } catch (fetchErr: any) {
-          console.error('[PDF] Fallback fetch/blob failed:', fetchErr?.message || fetchErr);
-          throw fetchErr;
-        }
+        console.log('[PDF] Read OK. Base64 length:', base64?.length || 0);
+      } catch (fetchErr: any) {
+        console.error('[PDF] fetch/blob failed:', fetchErr?.message || fetchErr);
+        throw fetchErr;
       }
 
       if (!base64 || base64.length === 0) {
