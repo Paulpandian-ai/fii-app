@@ -125,17 +125,19 @@ def _gather_fii_data(ticker: str) -> dict:
     """Gather all FII data for a stock from DynamoDB."""
     db = _get_db()
 
-    # Fetch signal data
+    logger.info(f"[ReportCritic] Fetching FII data for {ticker}")
+
     signal = db.get_item(f"SIGNAL#{ticker}", "LATEST") or {}
+    logger.info(f"[ReportCritic] Signal: {'found' if signal else 'MISSING'}")
 
-    # Fetch factor summary
     factor_summary = db.get_item(f"FACTOR_SUMMARY#{ticker}", "LATEST") or {}
+    logger.info(f"[ReportCritic] FactorSummary: {'found' if factor_summary else 'MISSING'}")
 
-    # Fetch financial metrics
     financials = db.get_item(f"FINANCIALS#{ticker}", "LATEST") or {}
+    logger.info(f"[ReportCritic] Financials: {'found' if financials else 'MISSING'}")
 
-    # Fetch stress test
     stress = db.get_item(f"STRESS#{ticker}", "LATEST") or {}
+    logger.info(f"[ReportCritic] Stress: {'found' if stress else 'MISSING'}")
 
     return {
         "signal": signal,
@@ -148,44 +150,95 @@ def _gather_fii_data(ticker: str) -> dict:
 def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
     """Assemble the user message with analyst report + FII data."""
     signal = fii_data.get("signal", {})
-    factors = fii_data.get("factor_summary", {})
+    factor_summary = fii_data.get("factor_summary", {})
     financials = fii_data.get("financials", {})
     stress = fii_data.get("stress", {})
 
+    # ── SIGNAL ──
     score = _safe_float(signal.get("score"), 0)
     label = _safe_str(signal.get("score_label", signal.get("scoreLabel")), "N/A")
+    drivers_raw = signal.get("score_drivers", "[]")
+    if isinstance(drivers_raw, str):
+        try:
+            drivers = json.loads(drivers_raw)
+        except Exception:
+            drivers = []
+    elif isinstance(drivers_raw, list):
+        drivers = drivers_raw
+    else:
+        drivers = []
+    drivers_preview = json.dumps(drivers[:5], default=str) if drivers else "None"
 
-    # Factor dimension scores and summaries
+    # ── FACTOR_SUMMARY: nested under "dimensions" ──
+    dims = factor_summary.get("dimensions", {}) or {}
     dimensions = [
-        ("Supply Chain Upstream", "upstream_score", "upstream_summary"),
-        ("Supply Chain Downstream", "downstream_score", "downstream_summary"),
-        ("Geopolitical", "geopolitical_score", "geopolitical_summary"),
-        ("Monetary", "monetary_score", "monetary_summary"),
-        ("Correlations", "correlations_score", "correlations_summary"),
-        ("Risk & Performance", "risk_performance_score", "risk_performance_summary"),
+        ("Supply Chain Upstream", "upstream"),
+        ("Supply Chain Downstream", "downstream"),
+        ("Geopolitical", "geopolitical"),
+        ("Monetary", "monetary"),
+        ("Correlations", "correlations"),
+        ("Risk & Performance", "risk_performance"),
     ]
-
     factor_lines = []
-    for dim_name, score_key, summary_key in dimensions:
-        dim_score = _safe_float(factors.get(score_key), 0)
-        dim_summary = _safe_str(factors.get(summary_key), "No data")
+    for dim_name, dim_key in dimensions:
+        dim_data = dims.get(dim_key, {}) or {}
+        if not isinstance(dim_data, dict):
+            continue
+        dim_score = _safe_float(dim_data.get("score"), 0)
+        dim_summary = _safe_str(dim_data.get("summary"), "No data")
         factor_lines.append(f"  {dim_name}: {dim_score}/10 - {dim_summary}")
+    factor_block = "\n".join(factor_lines) if factor_lines else "  (no factor data available)"
 
-    factor_block = "\n".join(factor_lines)
+    # ── FINANCIALS: categories is a JSON-encoded string, nested {category}.{key}.value ──
+    categories = financials.get("categories")
+    if isinstance(categories, str):
+        try:
+            categories = json.loads(categories)
+        except Exception:
+            categories = {}
+    categories = categories or {}
 
-    # Financial metrics
-    pe = _safe_str(financials.get("pe_ratio", financials.get("peRatio")), "N/A")
-    rev_growth = _safe_str(financials.get("revenue_growth", financials.get("revenueGrowth")), "N/A")
-    margin = _safe_str(financials.get("net_margin", financials.get("netMargin")), "N/A")
-    roe = _safe_str(financials.get("roe", financials.get("returnOnEquity")), "N/A")
-    de = _safe_str(financials.get("debt_to_equity", financials.get("debtToEquity")), "N/A")
-    beta = _safe_str(financials.get("beta"), "N/A")
+    def _cat_val(category: str, key: str):
+        try:
+            cat = categories.get(category, {}) or {}
+            entry = cat.get(key, {}) or {}
+            if isinstance(entry, dict):
+                return entry.get("value")
+            return entry
+        except Exception:
+            return None
 
-    # Stress test scenarios
-    moderate = _safe_str(stress.get("moderate", stress.get("market_pullback")), "N/A")
-    recession = _safe_str(stress.get("recession"), "N/A")
-    severe = _safe_str(stress.get("severe", stress.get("severe_crisis")), "N/A")
-    sector = _safe_str(stress.get("sector", stress.get("sector_shock")), "N/A")
+    pe = _safe_str(_cat_val("valuation", "trailing_pe"), "N/A")
+    fwd_pe = _safe_str(_cat_val("valuation", "forward_pe"), "N/A")
+    market_cap = _safe_str(_cat_val("valuation", "market_cap"), "N/A")
+    rev_growth = _safe_str(_cat_val("growth", "revenue_growth_yoy"), "N/A")
+    eps_growth = _safe_str(_cat_val("growth", "eps_growth_yoy"), "N/A")
+    margin = _safe_str(_cat_val("profitability", "net_margin"), "N/A")
+    roe = _safe_str(_cat_val("profitability", "roe"), "N/A")
+    de = _safe_str(_cat_val("health", "debt_to_equity"), "N/A")
+    beta = _safe_str(_cat_val("momentum", "beta"), "N/A")
+    sector = _safe_str(financials.get("sector"), "N/A")
+
+    # ── STRESS: scenarios is a LIST, key by scenario id ──
+    scenarios = stress.get("scenarios", []) or []
+    stress_by_id = {}
+    if isinstance(scenarios, list):
+        for sc in scenarios:
+            if not isinstance(sc, dict):
+                continue
+            sid = sc.get("id") or sc.get("scenarioKey")
+            if sid:
+                stress_by_id[sid] = sc
+
+    def _stress_impact(sid: str):
+        s = stress_by_id.get(sid, {})
+        return _safe_str(s.get("estimated_impact", s.get("priceImpact")), "N/A")
+
+    moderate = _stress_impact("moderate")
+    recession = _stress_impact("recession")
+    severe = _stress_impact("severe")
+    sector_shock = _stress_impact("sector_shock")
+    overall_risk = _safe_str(stress.get("overall_risk_rating"), "N/A")
 
     # Clean up report text (strip excess whitespace)
     cleaned_report = " ".join(report_text.split())
@@ -194,19 +247,24 @@ def _build_user_message(report_text: str, ticker: str, fii_data: dict) -> str:
 {cleaned_report}
 
 [FII DATA FOR {ticker}]
-FII Score: {score}/10 ({label})
-Factor Scores:
+FII Composite Score: {score}/10 ({label})
+Sector: {sector}
+Top Score Drivers: {drivers_preview}
+
+Factor Scores (6 dimensions):
 {factor_block}
 
 Key Financial Metrics:
-  P/E: {pe}, Revenue Growth: {rev_growth}%, Net Margin: {margin}%
-  ROE: {roe}%, Debt/Equity: {de}, Beta: {beta}
+  P/E (trailing): {pe}, P/E (forward): {fwd_pe}, Market Cap: {market_cap}
+  Revenue Growth YoY: {rev_growth}%, EPS Growth YoY: {eps_growth}%
+  Net Margin: {margin}%, ROE: {roe}%, Debt/Equity: {de}, Beta: {beta}
 
-Stress Test:
-  Market Pullback: {moderate}%
+Stress Test Scenarios (% price impact):
+  Moderate Pullback: {moderate}%
   Recession: {recession}%
   Severe Crisis: {severe}%
-  Sector Shock: {sector}%
+  Sector Shock: {sector_shock}%
+  Overall Risk Rating: {overall_risk}
 
 Please critique this analyst report against the FII data above."""
 
