@@ -4727,13 +4727,18 @@ def _handle_advisor(method, path, body, user_id, query_params):
             report_text = (body or {}).get("report_text", "")
             report_pdf_base64 = (body or {}).get("report_pdf_base64", "")
             source = (body or {}).get("source")
+            fii_context = (body or {}).get("fii_context")
             if not ticker or (not report_text and not report_pdf_base64):
                 return _response(400, {"error": "ticker and report_text or report_pdf_base64 required"})
             if report_text and len(report_text) > 15000:
                 return _response(400, {"error": "Report text too long (max 15000 chars)"})
             if report_pdf_base64 and len(report_pdf_base64) > 14_000_000:
                 return _response(400, {"error": "PDF too large (max ~10MB)"})
-            result = critique_analyst_report(report_text, ticker, source, report_pdf_base64=report_pdf_base64 or None)
+            result = critique_analyst_report(
+                report_text, ticker, source,
+                report_pdf_base64=report_pdf_base64 or None,
+                fii_context=fii_context or None,
+            )
             return _response(200, result)
 
         elif "/backtest/precomputed" in path and method == "GET":

@@ -540,6 +540,7 @@ export const postCritiqueReport = async (params: {
   report_text?: string;
   report_pdf_base64?: string;
   source?: string;
+  fii_context?: string;
 }) => {
   // Claude needs 30-90s to read a PDF and produce a structured critique, so
   // the default 30s axios timeout cuts it off. Override per-request to 120s.

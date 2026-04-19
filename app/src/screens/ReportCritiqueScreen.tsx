@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../types';
-import { postCritiqueReport, getScreener } from '../services/api';
+import { postCritiqueReport, getScreener, getSignalDetail, getStockFinancials, getFactors, getStressTestAll } from '../services/api';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -101,6 +101,31 @@ export function ReportCritiqueScreen() {
       .catch((err) => console.error('Failed to load stocks:', err));
   }, []);
 
+  // FII data for selected stock
+  const [stockData, setStockData] = useState<any>(null);
+
+  useEffect(() => {
+    if (!selectedStock) {
+      setStockData(null);
+      return;
+    }
+    const t = selectedStock.ticker;
+    Promise.all([
+      getSignalDetail(t).catch(() => null),
+      getStockFinancials(t).catch(() => null),
+      getFactors(t).catch(() => null),
+      getStressTestAll(t).catch(() => null),
+    ]).then(([signal, financials, factors, stress]) => {
+      setStockData({ signal, financials, factors, stress });
+      console.log('[Critique] FII data loaded for', t, {
+        hasSignal: !!signal,
+        hasFinancials: !!financials?.categories,
+        hasFactors: !!factors,
+        hasStress: !!stress,
+      });
+    });
+  }, [selectedStock]);
+
   // Local search filter
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 1) return [];
@@ -113,6 +138,99 @@ export function ReportCritiqueScreen() {
       )
       .slice(0, 10);
   }, [searchQuery, allStocks]);
+
+  // Build comprehensive FII summary for the critique prompt
+  const buildFiiSummary = useCallback((signal: any, financials: any, factors: any, stress: any) => {
+    const cats = financials?.categories || {};
+    const val = cats.valuation || {};
+    const prof = cats.profitability || {};
+    const growth = cats.growth || {};
+    const health = cats.financial_health || {};
+    const tech = cats.momentum_technicals || {};
+    const div = cats.dividends || {};
+    const own = cats.ownership || {};
+    const analystCat = cats.analyst_estimates || {};
+
+    const v = (obj: any, key: string) => {
+      const x = obj?.[key]?.value;
+      return x !== null && x !== undefined ? x : 'N/A';
+    };
+
+    const drivers = (signal?.score_drivers || [])
+      .slice(0, 5)
+      .map((d: any) => `- ${d.factor || d.name}: ${d.direction || ''} (magnitude: ${d.magnitude || 'N/A'}): ${d.description || ''}`)
+      .join('\n');
+
+    const fp = signal?.factor_percentiles || {};
+    const dims = signal?.dimensions || factors?.dimensions || {};
+
+    const buildFactorSection = (dimKey: string, label: string) => {
+      const dim = dims[dimKey] || {};
+      const percentile = fp[dimKey] || 'N/A';
+      const score = dim.score ?? dim.raw_score ?? 'N/A';
+      const summary = dim.summary || dim.description || '';
+      const findings = (dim.findings || dim.key_findings || [])
+        .slice(0, 3)
+        .map((f: any) => typeof f === 'string' ? f : f.text || f.finding || JSON.stringify(f))
+        .join('; ');
+      const confidence = dim.confidence || 'N/A';
+      const subFactors = (dim.sub_factors || dim.subFactors || [])
+        .map((sf: any) => `  * ${sf.name || sf.factor}: ${sf.score ?? 'N/A'} (${sf.direction || ''})`)
+        .join('\n');
+      return `${label}:
+  Score: ${score}/10 | Percentile: ${percentile}th | Confidence: ${confidence}
+  Summary: ${summary || 'No summary available'}
+  Key findings: ${findings || 'None available'}
+${subFactors ? '  Sub-factors:\n' + subFactors : ''}`;
+    };
+
+    const buildStressSection = (stressData: any) => {
+      if (!stressData) return 'Stress test data: Not available';
+      const scenarios = stressData.scenarios || stressData.stress_scenarios || [];
+      if (Array.isArray(scenarios) && scenarios.length > 0) {
+        return scenarios.map((s: any) =>
+          `- ${s.label || s.name || s.scenario || s.id}: ${s.estimated_impact ?? s.priceImpact ?? s.impact_pct ?? 'N/A'}% impact`
+        ).join('\n');
+      }
+      return 'No stress scenarios';
+    };
+
+    return `FII MULTI-FACTOR ANALYSIS DATA FOR ${signal?.ticker || 'UNKNOWN'}
+
+COMPOSITE SCORE: ${signal?.score ?? signal?.aiScore ?? 'N/A'}/10
+Signal: ${signal?.score_label ?? signal?.signal ?? 'N/A'}
+Confidence: ${signal?.confidence ?? 'N/A'}
+
+FACTOR SCORING — 6 DIMENSIONS
+
+1. ${buildFactorSection('supply_chain_upstream', 'SUPPLY CHAIN UPSTREAM')}
+
+2. ${buildFactorSection('supply_chain_downstream', 'SUPPLY CHAIN DOWNSTREAM')}
+
+3. ${buildFactorSection('geopolitical', 'GEOPOLITICAL RISK')}
+
+4. ${buildFactorSection('monetary', 'MONETARY POLICY')}
+
+5. ${buildFactorSection('correlations', 'CORRELATIONS')}
+
+6. ${buildFactorSection('risk_performance', 'RISK & PERFORMANCE')}
+
+KEY SCORE DRIVERS
+${drivers || 'No score drivers available'}
+
+FINANCIAL METRICS
+VALUATION: P/E: ${v(val,'trailing_pe')} | Fwd P/E: ${v(val,'forward_pe')} | PEG: ${v(val,'peg_ratio')} | P/S: ${v(val,'price_to_sales')} | P/B: ${v(val,'price_to_book')} | EV/EBITDA: ${v(val,'ev_to_ebitda')} | Mkt Cap: ${v(val,'market_cap')} | FCF Yield: ${v(val,'fcf_yield')}%
+PROFITABILITY: Gross: ${v(prof,'gross_margin')}% | Op: ${v(prof,'operating_margin')}% | Net: ${v(prof,'net_margin')}% | ROE: ${v(prof,'roe')}% | ROA: ${v(prof,'roa')}% | ROIC: ${v(prof,'roic')}% | EPS: ${v(prof,'eps_ttm')}
+GROWTH: Rev YoY: ${v(growth,'revenue_growth_yoy')}% | Rev 3Y CAGR: ${v(growth,'revenue_growth_3y_cagr')}% | EPS YoY: ${v(growth,'eps_growth_yoy')}% | EPS 3Y CAGR: ${v(growth,'eps_growth_3y_cagr')}%
+HEALTH: D/E: ${v(health,'debt_to_equity')} | Current: ${v(health,'current_ratio')} | Quick: ${v(health,'quick_ratio')} | Interest Cov: ${v(health,'interest_coverage')}
+DIVIDENDS: Yield: ${v(div,'dividend_yield')}% | Payout: ${v(div,'payout_ratio')}% | Growth 5Y: ${v(div,'dividend_growth_5y')}%
+ANALYST: Target: ${v(analystCat,'target_price_mean')} | Low/High: ${v(analystCat,'target_price_low')}-${v(analystCat,'target_price_high')} | Rating: ${v(analystCat,'recommendation_score')}
+TECHNICALS: Beta: ${v(tech,'beta')} | RSI: ${v(tech,'rsi_14')} | 1M: ${v(tech,'price_change_1m')}% | 3M: ${v(tech,'price_change_3m')}% | 1Y: ${v(tech,'price_change_1y')}%
+OWNERSHIP: Inst: ${v(own,'institutional_pct')}% | Insider: ${v(own,'insider_pct')}% | Short: ${v(own,'short_pct_float')}%
+
+STRESS TEST SCENARIOS
+${buildStressSection(stress)}`;
+  }, []);
 
   // PDF picker
   const handlePickPdf = useCallback(async () => {
@@ -208,9 +326,14 @@ export function ReportCritiqueScreen() {
     setError('');
     setResult(null);
     try {
+      const fiiSummary = stockData
+        ? buildFiiSummary(stockData.signal, stockData.financials, stockData.factors, stockData.stress)
+        : '';
+
       const params: any = {
         ticker: selectedStock.ticker,
         source: source.trim() || undefined,
+        fii_context: fiiSummary || undefined,
       };
 
       if (uploadMethod === 'pdf' && pdfBase64) {
@@ -223,6 +346,7 @@ export function ReportCritiqueScreen() {
         ticker: params.ticker,
         source: params.source,
         method: uploadMethod,
+        fiiContextChars: fiiSummary?.length || 0,
         pdfBase64Chars: params.report_pdf_base64?.length || 0,
         textChars: params.report_text?.length || 0,
       });
@@ -232,6 +356,7 @@ export function ReportCritiqueScreen() {
         hasError: !!data?.error,
         hasCritique: !!data?.critique,
         agreementScore: data?.critique?.agreement_score,
+        contradictions: data?.critique?.contradictions?.length,
       });
 
       if (data.error) {
@@ -245,7 +370,7 @@ export function ReportCritiqueScreen() {
     } finally {
       setLoading(false);
     }
-  }, [selectedStock, reportText, source, uploadMethod, pdfBase64]);
+  }, [selectedStock, reportText, source, uploadMethod, pdfBase64, stockData, buildFiiSummary]);
 
   const handleAskCoach = useCallback(() => {
     if (!result || !selectedStock) return;

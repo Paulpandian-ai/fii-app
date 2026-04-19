@@ -271,7 +271,9 @@ def _validate_critique(result: dict) -> dict:
     return result
 
 
-def critique_analyst_report(report_text: str, ticker: str, source: Optional[str] = None, report_pdf_base64: Optional[str] = None) -> dict:
+def critique_analyst_report(report_text: str, ticker: str, source: Optional[str] = None,
+                            report_pdf_base64: Optional[str] = None,
+                            fii_context: Optional[str] = None) -> dict:
     """Critique an analyst report against FII's multi-factor data.
 
     Args:
@@ -279,6 +281,8 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
         ticker: Stock ticker symbol (e.g. "LLY").
         source: Optional source name (e.g. "Morgan Stanley").
         report_pdf_base64: Optional base64-encoded PDF of the analyst report.
+        fii_context: Optional pre-built FII data context from the frontend.
+                     When provided, skips DynamoDB fetch and cache lookup.
 
     Returns:
         Dict with analyst_summary, critique, fii_vs_analyst, executive_summary, disclaimer.
@@ -287,23 +291,29 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
     cc = _get_claude_client()
     ticker = ticker.upper().strip()
 
-    # Check cache first
+    # Check cache only when frontend didn't send fresh FII context
     cache_text = report_pdf_base64[:100] if report_pdf_base64 else report_text
     cache_sk = _cache_key(ticker, cache_text)
-    try:
-        cached = db.get_item("CRITIQUE_CACHE", cache_sk)
-        if cached and cached.get("expires_at", 0) > int(time.time()):
-            logger.info(f"[ReportCritic] Cache hit for {ticker}")
-            result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
-            return result
-    except Exception as e:
-        logger.warning(f"[ReportCritic] Cache lookup failed: {e}")
+    if not fii_context:
+        try:
+            cached = db.get_item("CRITIQUE_CACHE", cache_sk)
+            if cached and cached.get("expires_at", 0) > int(time.time()):
+                logger.info(f"[ReportCritic] Cache hit for {ticker}")
+                result = json.loads(cached["result"]) if isinstance(cached["result"], str) else cached["result"]
+                return result
+        except Exception as e:
+            logger.warning(f"[ReportCritic] Cache lookup failed: {e}")
 
-    # Step 1: Gather FII data
-    fii_data = _gather_fii_data(ticker)
+    # Step 1: Build FII context — use frontend-provided or fetch from DynamoDB
+    if fii_context:
+        logger.info(f"[ReportCritic] Using frontend-provided FII context ({len(fii_context)} chars)")
+        fii_context_str = fii_context
+    else:
+        logger.info(f"[ReportCritic] Fetching FII data from DynamoDB for {ticker}")
+        fii_data = _gather_fii_data(ticker)
+        fii_context_str = _extract_fii_context(ticker, fii_data)
 
-    # Step 2: Build the user message with compact FII data context
-    fii_context = _extract_fii_context(ticker, fii_data)
+    # Step 2: Build the user message
     source_hint = f"[Source: {source}] " if source else ""
 
     if report_pdf_base64:
@@ -318,14 +328,18 @@ def critique_analyst_report(report_text: str, ticker: str, source: Optional[str]
             },
             {
                 "type": "text",
-                "text": f"{source_hint}[FII DATA]\n{fii_context}\n\nCritique this analyst report against FII data above.",
+                "text": f"{source_hint}[FII DATA]\n{fii_context_str}\n\nCritique this analyst report against FII data above.",
             },
         ]
     else:
-        user_message = _build_user_message(report_text, ticker, fii_data)
-        if source:
-            user_message = f"{source_hint}\n{user_message}"
-        user_content = user_message
+        cleaned_report = " ".join(report_text.split())[:MAX_REPORT_CHARS]
+        user_content = f"""{source_hint}[ANALYST REPORT]
+{cleaned_report}
+
+[FII DATA]
+{fii_context_str}
+
+Critique this analyst report against FII data above."""
 
     # Step 3: Call Claude Haiku for fast critique (under 30s API Gateway limit)
     client = cc._get_client()
