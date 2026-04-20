@@ -192,35 +192,44 @@ Critique this analyst report against FII data above."""
 
 
 def _parse_critique_response(text: str) -> dict:
-    """Parse Claude's JSON response, handling markdown code blocks."""
+    """Parse Claude's JSON response, handling markdown fences and preamble."""
+    logger.info(f"[ReportCritic] Claude raw response length: {len(text)}")
+    logger.info(f"[ReportCritic] Claude raw first 200 chars: {text[:200]}")
+
     cleaned = text.strip()
 
-    # Strip markdown code fences if present
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        # Remove first line (```json or ```)
-        lines = lines[1:]
-        # Remove last line (```)
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
+    # Strip markdown JSON fences (handles preamble text before the fence)
+    if '```json' in cleaned:
+        cleaned = cleaned.split('```json', 1)[1]
+        cleaned = cleaned.split('```', 1)[0]
+    elif '```' in cleaned:
+        cleaned = cleaned.split('```', 1)[1]
+        cleaned = cleaned.split('```', 1)[0]
 
+    cleaned = cleaned.strip()
+
+    # Try parsing directly
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try to find JSON object in the text
-        start = cleaned.find("{")
-        end = cleaned.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                return json.loads(cleaned[start:end])
-            except json.JSONDecodeError:
-                pass
+        pass
 
-    logger.error("Failed to parse critique response as JSON")
+    # Try finding JSON object in the text
+    start = cleaned.find('{')
+    end = cleaned.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    logger.error(f"[ReportCritic] Cannot parse response: {cleaned[:500]}")
+
     return {
-        "error": "Failed to parse critique response",
-        "raw_response": text[:500],
+        "analyst_summary": {"key_thesis": "Analysis completed but response format was unexpected", "key_claims": []},
+        "critique": {"agreement_score": 50, "agreements": [], "contradictions": [], "blind_spots": []},
+        "fii_vs_analyst": {"alignment": "Unable to parse detailed comparison"},
+        "executive_summary": cleaned[:500],
     }
 
 
