@@ -223,7 +223,7 @@ def _parse_critique_response(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    logger.error(f"[ReportCritic] Cannot parse response: {cleaned[:500]}")
+    logger.error(f"[ReportCritic] Cannot parse response ({len(cleaned)} chars): {cleaned[:1000]}")
 
     return {
         "analyst_summary": {"key_thesis": "Analysis completed but response format was unexpected", "key_claims": []},
@@ -354,12 +354,16 @@ Critique this analyst report against FII data above."""
     client = cc._get_client()
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
+        max_tokens=4000,
         system=CRITIQUE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
     )
 
+    stop_reason = message.stop_reason
     response_text = message.content[0].text
+    logger.info(f"[ReportCritic] Claude stop_reason: {stop_reason}, response length: {len(response_text)}")
+    if stop_reason == "max_tokens":
+        logger.warning("[ReportCritic] Claude hit max_tokens — response truncated!")
 
     # Step 4: Parse and validate
     result = _parse_critique_response(response_text)
