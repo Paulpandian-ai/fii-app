@@ -101,31 +101,6 @@ export function ReportCritiqueScreen() {
       .catch((err) => console.error('Failed to load stocks:', err));
   }, []);
 
-  // FII data for selected stock
-  const [stockData, setStockData] = useState<any>(null);
-
-  useEffect(() => {
-    if (!selectedStock) {
-      setStockData(null);
-      return;
-    }
-    const t = selectedStock.ticker;
-    Promise.all([
-      getSignalDetail(t).catch(() => null),
-      getStockFinancials(t).catch(() => null),
-      getFactors(t).catch(() => null),
-      getStressTestAll(t).catch(() => null),
-    ]).then(([signal, financials, factors, stress]) => {
-      setStockData({ signal, financials, factors, stress });
-      console.log('[Critique] FII data loaded for', t, {
-        hasSignal: !!signal,
-        hasFinancials: !!financials?.categories,
-        hasFactors: !!factors,
-        hasStress: !!stress,
-      });
-    });
-  }, [selectedStock]);
-
   // Local search filter
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 1) return [];
@@ -326,12 +301,27 @@ ${buildStressSection(stress)}`;
     setError('');
     setResult(null);
     try {
-      const fiiSummary = stockData
-        ? buildFiiSummary(stockData.signal, stockData.financials, stockData.factors, stockData.stress)
-        : '';
+      // Fetch FII data inline — don't rely on async state
+      const t = selectedStock.ticker;
+      console.log('[Critique] Fetching FII data for', t);
+      const [signal, financials, factors, stress] = await Promise.all([
+        getSignalDetail(t).catch(() => null),
+        getStockFinancials(t).catch(() => null),
+        getFactors(t).catch(() => null),
+        getStressTestAll(t).catch(() => null),
+      ]);
+      console.log('[Critique] FII data fetched:', {
+        hasSignal: !!signal,
+        hasFinancials: !!financials?.categories,
+        hasFactors: !!factors,
+        hasStress: !!stress,
+      });
+
+      const fiiSummary = buildFiiSummary(signal, financials, factors, stress);
+      console.log('[Critique] FII context length:', fiiSummary.length, 'chars');
 
       const params: any = {
-        ticker: selectedStock.ticker,
+        ticker: t,
         source: source.trim() || undefined,
         fii_context: fiiSummary || undefined,
       };
@@ -370,7 +360,7 @@ ${buildStressSection(stress)}`;
     } finally {
       setLoading(false);
     }
-  }, [selectedStock, reportText, source, uploadMethod, pdfBase64, stockData, buildFiiSummary]);
+  }, [selectedStock, reportText, source, uploadMethod, pdfBase64, buildFiiSummary]);
 
   const handleAskCoach = useCallback(() => {
     if (!result || !selectedStock) return;
