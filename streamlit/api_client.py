@@ -4,7 +4,7 @@ import os
 import requests
 import streamlit as st
 
-API_BASE = os.environ.get("FII_API_URL", "https://fii-api.paulpandian.com")
+API_BASE = os.environ.get("FII_API_URL", "https://ix1rrsln51.execute-api.us-east-1.amazonaws.com/dev")
 
 
 def _get(path: str, params: dict | None = None, timeout: int = 30) -> dict:
